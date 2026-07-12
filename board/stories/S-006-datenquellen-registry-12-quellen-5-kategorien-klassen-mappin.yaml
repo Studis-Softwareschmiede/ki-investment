@@ -1,7 +1,7 @@
 id: S-006
 parent: F-003
 title: 'Datenquellen-Registry: 12 Quellen/5 Kategorien, Klassen-Mapping, MVP nur Freiquellen'
-status: To Do
+status: In Review
 priority: P0
 spec: docs/specs/dateneingang.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Seed data_source + data_source_asset_class inkl. retail_driven-Re
   Cold-Start ohne Baseline.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-006-datenquellen-registry
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:08:49Z'
-updated_at: '2026-07-12T10:08:49Z'
+updated_at: '2026-07-12T13:32:42Z'
 done_at: null
