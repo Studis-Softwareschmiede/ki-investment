@@ -9,3 +9,9 @@
 - Fill-Idempotenz (ADR-011): `client_order_id` ist universelles Pflichtfeld + Dedup-Schlüssel (Tabelle `depot_fill_dedup`, Migration 385adb3a764b) — Folge-Storys dürfen denselben Fill nie doppelt verbuchen.
 - Mode-Isolation (BR-113/BR-130): `offene_positionen`/`aktuelle_menge` filtern nach `mode`; Lost-Update-Schutz via `with_for_update()` + `UnzureichenderBestandFehler`.
 - Hinweis: Story lag nach PR-#24-Merge mit verlorenem Board-Flip liegen; dieser Lauf hat nur re-verifiziert (271 Tests, Migrations-Kette, Security-Smoke grün) und Done nachgezogen — kein neuer Code.
+
+## S-053 (PR #32, gelandet 2026-07-12, Done-Flip nachgezogen 2026-07-13)
+- Gebaut: FX-Attribution (depot AC6) — `app/domain/portfolio/fx_attribution.py` (Split realisiert/unrealisiert, Summe = Gesamt-G/V CHF), Ø-Einstands-FX-Kurs-Fortschreibung mit Rundung an der Schreibgrenze (`position_booking.py`), Migration f065be116c72 (nullable FX-Spalten an `position`).
+- Für Folge-Storys: `FillInput.fx_rate` ist Pflicht bei Fremdwährung (BR-129); bei `waehrung == CHF` sind alle vier FX-Attributionswerte `None` — Konsumenten müssen den None-Fall behandeln.
+- FIFO: jeder Lot trägt seinen eigenen FX-Kurs; Multi-Lot-Verkäufe aggregieren den FX-Split über die Lots.
+- Dieser Lauf: nur Re-Verifikation (364 Tests, ruff, Migrations-Kette Head f065be116c72, pip-audit, gitleaks — grün) + Done-Flip; kein neuer Code. Story lag nach Merge mit verlorenem Board-Flip (Drain-Reset 64b962e).
