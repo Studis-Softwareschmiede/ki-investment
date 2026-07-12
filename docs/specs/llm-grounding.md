@@ -65,7 +65,7 @@ Querschnitts-Sicherung, die verhindert, dass LLM-Halluzinationen (erfundene Fakt
 **Cross-Check-Modul (deterministisch):**
 Input `{ output_fakten, originalquellen, toleranz_config: je Kennzahl-Typ }` → Output `{ status: geerdet | verworfen, abweichungen: [ { kennzahl_typ, wert_output, wert_quelle, abweichung, toleranz } ], protokoll_eintrag }`.
 
-**Halluzinations-KPI:** `quote = verworfene_analysen / geprüfte_analysen` über ein Zeitfenster; `alarm = quote > schwellwert (Default 2 %)`.
+**Halluzinations-KPI:** `quote = verworfene_analysen / geprüfte_analysen` über ein Zeitfenster; `alarm = quote > schwellwert (Default 2 %)`. Ohne explizit übergebenes Zeitfenster misst die Quote kumulativ seit dem letzten Reset (Systemstart oder manuelle Reaktivierung). Ein einmal ausgelöster Alarm/Kill bleibt bestehen (Latch), bis manuell reaktiviert — unabhängig davon, ob nachfolgend registrierte Analysen die Quote rechnerisch wieder unter den Schwellwert drücken würden; die manuelle Reaktivierung startet zugleich ein frisches Beobachtungsfenster.
 
 **Order-Pfad-Invariante (AC7):** Die Menge der Module {Buy-Signal, Position-Sizing, Exit-Sizing, Risiko-Gate, Order-Ausführung} enthält keinen LLM-Aufruf.
 

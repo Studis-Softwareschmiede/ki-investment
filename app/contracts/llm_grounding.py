@@ -46,10 +46,21 @@ Neu aus S-014 (AC6) — Vertrag der No-Evidence-No-Trade-Prüfung:
   [[analyse-framework]]); der Übersprung wird protokolliert (AC10, neuer
   `ProtokollGrund`-Wert `keine_evidenz`).
 
+Neu aus S-027 (AC8, AC9, BR-006) — Vertrag der Halluzinations-KPI & des Kills:
+
+- `LlmKettenStatus` — Betriebszustand der LLM-Kette (`aktiv`/`deaktiviert`,
+  architecture.md §6 "LLM-Kette (BR-006)").
+- `HalluzinationsKpiErgebnis` — strukturiertes Ergebnis von
+  `app.core.hallucination_kpi.berechne_kpi`: laufend berechnete Quote
+  „Analysen mit Faktenabweichung" aus dem Cross-Check (AC8) plus
+  Alarm-/Kill-Zustand (AC9). Neuer `ProtokollGrund`-Wert
+  `halluzinations_kpi_alarm` protokolliert den Übergang `aktiv` →
+  `deaktiviert` (AC10-Geist).
+
 Nicht Teil dieser Story (Nicht-Ziele der Spec `llm-grounding`): kein
 Feld-für-Feld-Schema über die hier genannten Verträge hinaus, keine
 Score-Berechnungslogik, kein Mapping, welches Finanz-Plugin welche Kategorie
-erdet, kein Halluzinations-KPI (AC8/AC9, spätere Story).
+erdet.
 """
 
 from __future__ import annotations
@@ -188,9 +199,10 @@ class Abweichung(BaseModel):
 #: die S-012-Ablehnungspfade des Grounding-Gates (`schema_verletzung`,
 #: `input_fremde_zahl`) als auch die S-013-Cross-Check-Ablehnungsgründe
 #: (`cross_check_abweichung`, `quelle_nicht_verfuegbar`,
-#: `toleranz_nicht_konfiguriert`, Edge-Cases der Spec) und den S-014-
-#: No-Evidence-No-Trade-Übersprung (`keine_evidenz`, AC6) unter einem
-#: gemeinsamen Vokabular ab.
+#: `toleranz_nicht_konfiguriert`, Edge-Cases der Spec), den S-014-
+#: No-Evidence-No-Trade-Übersprung (`keine_evidenz`, AC6) und den S-027-
+#: Halluzinations-KPI-Alarm/Kill (`halluzinations_kpi_alarm`, AC9) unter
+#: einem gemeinsamen Vokabular ab.
 ProtokollGrund = Literal[
     "schema_verletzung",
     "input_fremde_zahl",
@@ -198,6 +210,7 @@ ProtokollGrund = Literal[
     "quelle_nicht_verfuegbar",
     "toleranz_nicht_konfiguriert",
     "keine_evidenz",
+    "halluzinations_kpi_alarm",
 ]
 
 
@@ -245,3 +258,30 @@ class EvidenzErgebnis(BaseModel):
     status: Literal["vollstaendig", "uebersprungen"]
     fehlende_kategorien: tuple[str, ...] = Field(default=())
     protokoll_eintrag: ProtokollEintrag | None = None
+
+
+#: Betriebszustand der LLM-Kette (Verträge, Spec `llm-grounding`, BR-006,
+#: architecture.md §6): `aktiv` erlaubt LLM-basierte Analysen in der
+#: Entscheidungskette, `deaktiviert` markiert einen ausgelösten
+#: Halluzinations-KPI-Alarm (AC9) — bleibt so bis zum manuellen Reset.
+LlmKettenStatus = Literal["aktiv", "deaktiviert"]
+
+
+class HalluzinationsKpiErgebnis(BaseModel):
+    """Ergebnis der laufenden Halluzinations-KPI-Berechnung (AC8, S-027,
+    `app.core.hallucination_kpi.berechne_kpi`) — Quote „Analysen mit
+    Faktenabweichung" über die im Beobachtungsfenster registrierten
+    Cross-Check-Ergebnisse (AC4) plus den daraus resultierenden
+    Alarm-/Kill-Zustand (AC9): `alarm` ist nur bei einer Quote STRIKT über
+    `schwellwert` `True` (Edge-Case „genau am Schwellwert → kein Alarm");
+    `llm_status` spiegelt den aktuellen (ggf. bereits zuvor ausgelösten)
+    Zustand der LLM-Kette (BR-006)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    geprueft: int = Field(ge=0)
+    verworfen: int = Field(ge=0)
+    quote: float = Field(ge=0)
+    schwellwert: float = Field(ge=0)
+    alarm: bool
+    llm_status: LlmKettenStatus
