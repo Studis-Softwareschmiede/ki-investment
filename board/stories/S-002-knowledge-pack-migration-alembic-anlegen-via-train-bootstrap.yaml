@@ -4,7 +4,8 @@ title: Knowledge-Pack migration/alembic anlegen (via /train --bootstrap migratio
 status: To Do
 priority: P1
 spec: docs/specs/projekt-setup.md
-implements: AC2
+implements:
+- AC2
 depends: null
 labels:
 - db
