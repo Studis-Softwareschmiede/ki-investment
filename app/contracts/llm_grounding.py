@@ -37,6 +37,15 @@ Neu aus S-013 (AC4, AC5, AC10) — Verträge des "Cross-Check-Moduls":
 - `CrossCheckErgebnis` — strukturiertes Ergebnis des deterministischen
   Zahlen-Cross-Checks (`app.adapters.llm.cross_check.pruefe_cross_check`).
 
+Neu aus S-014 (AC6) — Vertrag der No-Evidence-No-Trade-Prüfung:
+
+- `EvidenzErgebnis` — strukturiertes Ergebnis von
+  `app.domain.no_evidence_no_trade.pruefe_evidenzlage`: fehlt einer
+  `AnalyseScores`-Kategorie der Score (`"fehlt"`), wird der Titel komplett
+  übersprungen statt geschätzt (AC6, geteilte Regel mit
+  [[analyse-framework]]); der Übersprung wird protokolliert (AC10, neuer
+  `ProtokollGrund`-Wert `keine_evidenz`).
+
 Nicht Teil dieser Story (Nicht-Ziele der Spec `llm-grounding`): kein
 Feld-für-Feld-Schema über die hier genannten Verträge hinaus, keine
 Score-Berechnungslogik, kein Mapping, welches Finanz-Plugin welche Kategorie
@@ -51,9 +60,9 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 #: Score je Analysekategorie: 0–10 oder der Platzhalter "fehlt" (Verträge,
-#: Spec `llm-grounding` — der Umgang mit "fehlt", No-Evidence-No-Trade, ist
-#: AC6/[[analyse-framework]] und NICHT Teil dieser Story; hier nur als
-#: zulässiger Schema-Wert).
+#: Spec `llm-grounding` — der Umgang mit "fehlt" (No-Evidence-No-Trade) ist
+#: AC6/S-014, siehe `app.domain.no_evidence_no_trade.pruefe_evidenzlage`;
+#: hier nur als zulässiger Schema-Wert der AC3-Validierung).
 _Score = Annotated[float, Field(ge=0, le=10)]
 
 
@@ -179,7 +188,8 @@ class Abweichung(BaseModel):
 #: die S-012-Ablehnungspfade des Grounding-Gates (`schema_verletzung`,
 #: `input_fremde_zahl`) als auch die S-013-Cross-Check-Ablehnungsgründe
 #: (`cross_check_abweichung`, `quelle_nicht_verfuegbar`,
-#: `toleranz_nicht_konfiguriert`, Edge-Cases der Spec) unter einem
+#: `toleranz_nicht_konfiguriert`, Edge-Cases der Spec) und den S-014-
+#: No-Evidence-No-Trade-Übersprung (`keine_evidenz`, AC6) unter einem
 #: gemeinsamen Vokabular ab.
 ProtokollGrund = Literal[
     "schema_verletzung",
@@ -187,6 +197,7 @@ ProtokollGrund = Literal[
     "cross_check_abweichung",
     "quelle_nicht_verfuegbar",
     "toleranz_nicht_konfiguriert",
+    "keine_evidenz",
 ]
 
 
@@ -217,4 +228,20 @@ class CrossCheckErgebnis(BaseModel):
 
     status: Literal["geerdet", "verworfen"]
     abweichungen: tuple[Abweichung, ...] = Field(default=())
+    protokoll_eintrag: ProtokollEintrag | None = None
+
+
+class EvidenzErgebnis(BaseModel):
+    """Ergebnis der No-Evidence-No-Trade-Prüfung (AC6, S-014,
+    `app.domain.no_evidence_no_trade.pruefe_evidenzlage`) — geteilte Regel
+    mit [[analyse-framework]] (dort AC8): fehlt einer der 5
+    Analysekategorien die Datengrundlage (Score `"fehlt"`), wird der Titel
+    komplett übersprungen (`status == "uebersprungen"`), statt den
+    fehlenden Score durch eine LLM-Schätzung zu ersetzen. Nur bei
+    `status == "uebersprungen"` ist `protokoll_eintrag` gesetzt (AC10)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: Literal["vollstaendig", "uebersprungen"]
+    fehlende_kategorien: tuple[str, ...] = Field(default=())
     protokoll_eintrag: ProtokollEintrag | None = None

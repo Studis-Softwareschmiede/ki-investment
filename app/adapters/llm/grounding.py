@@ -25,9 +25,11 @@ bekannt).
 
 NICHT Teil dieser Story (Nicht-Ziele der Spec, spätere Stories): der
 deterministische Zahlen-Cross-Check gegen Originalquellen liegt in
-`app.adapters.llm.cross_check` (AC4/AC5, S-013), No-Evidence-No-Trade
-(AC6, [[analyse-framework]]) und der Halluzinations-KPI (AC8/AC9) —
-`GroundingErgebnis` liefert dafür lediglich die strukturierte Grundlage.
+`app.adapters.llm.cross_check` (AC4/AC5, S-013); No-Evidence-No-Trade
+(AC6, geteilte Regel mit [[analyse-framework]]) liegt in
+`app.domain.no_evidence_no_trade` (S-014); der Halluzinations-KPI (AC8/AC9)
+folgt in einer späteren Story — `GroundingErgebnis` liefert dafür lediglich
+die strukturierte Grundlage.
 """
 
 from __future__ import annotations
