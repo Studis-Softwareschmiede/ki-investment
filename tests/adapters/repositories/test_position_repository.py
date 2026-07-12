@@ -1,7 +1,7 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
 DBA-Zweit-Review).
 
-Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7
+Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9
 
 Deckt die Bestandsermittlung, auf der `app.domain.portfolio.fill_booking
 .pruefe_fill` die AC10-Prüfung "keine resultierende negative Menge"
@@ -32,6 +32,11 @@ S-035 (AC4/AC7) ergänzt `schreibe_transaktion` (append-only Insert in die
 `transaction`-Historie inkl. Arrival-Price/Slippage) und
 `historie_je_titel` (chronologisch sortierte, Mode-isolierte Lesesicht,
 Grundlage der TCA je Trade + aggregiert).
+
+S-036 (AC8/AC9) ergänzt `alle_offenen_positionen` (depotweite,
+mode-isolierte Sicht über ALLE Titel hinweg, inkl. Anlageklasse,
+GICS-Branche, Strategie-Name und Exit-Regeln — Basis für
+`app.domain.portfolio.portfolio_aggregate`).
 """
 
 from __future__ import annotations
@@ -41,13 +46,21 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from app.adapters.repositories.position_repository import SqlAlchemyPositionRepository
 from app.contracts.depot import ExitRegeln, FillInput
 from app.db.base import Base
-from app.db.models import AssetClass, DepotFillDedup, Instrument, Position, Strategy, TimeHorizon
+from app.db.models import (
+    AssetClass,
+    DepotFillDedup,
+    ExitRule,
+    Instrument,
+    Position,
+    Strategy,
+    TimeHorizon,
+)
 
 
 def _make_engine():
@@ -580,3 +593,181 @@ def test_historie_je_titel_filtert_nach_modus() -> None:
         assert len(simuliert_historie) == 1
         assert echt_historie[0].zeitstempel == _naiv(echt_fill.zeitstempel)
         assert simuliert_historie[0].zeitstempel == _naiv(simuliert_fill.zeitstempel)
+
+
+# --- S-036: depotweite Positions-Sicht (AC8/AC9) ---------------------------
+
+
+def _seed_instrument(
+    session: Session, *, asset_class_id: int, gics_sector: str | None, symbol: str
+) -> uuid.UUID:
+    instrument = Instrument(
+        id=uuid.uuid4(),
+        symbol=symbol,
+        name=f"{symbol} Inc",
+        asset_class_id=asset_class_id,
+        gics_sector=gics_sector,
+        currency="CHF",
+    )
+    session.add(instrument)
+    session.commit()
+    return instrument.id
+
+
+def test_alle_offenen_positionen_ist_leer_ohne_bestand() -> None:
+    """@trace depot#AC8,AC9 — kein offener Lot in keinem Titel ergibt eine
+    leere Liste, keinen Fehler."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.alle_offenen_positionen(mode="simuliert") == []
+
+
+def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
+    """@trace depot#AC8 — die depotweite Sicht liefert Anlageklasse,
+    GICS-Branche, Menge, Einstandspreis und Strategie über MEHRERE Titel
+    hinweg (nicht nur einen wie `offene_positionen`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        _seed_stammdaten(session)
+        strategy_id = session.scalars(select(Strategy.id)).first()
+        instrument_a = _seed_instrument(
+            session, asset_class_id=1, gics_sector="Technology", symbol="TECH"
+        )
+        instrument_b = _seed_instrument(
+            session, asset_class_id=1, gics_sector="Healthcare", symbol="PHARMA"
+        )
+        session.add(_make_position(instrument_a, strategy_id, menge=Decimal("10"), status="offen"))
+        session.add(_make_position(instrument_b, strategy_id, menge=Decimal("4"), status="offen"))
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        bestand = repository.alle_offenen_positionen(mode="simuliert")
+
+        titel_ids = {p.titel_id for p in bestand}
+        assert titel_ids == {str(instrument_a), str(instrument_b)}
+        eintrag_a = next(p for p in bestand if p.titel_id == str(instrument_a))
+        assert eintrag_a.asset_class_id == 1
+        assert eintrag_a.gics_branche == "Technology"
+        assert eintrag_a.menge == Decimal("10")
+        assert eintrag_a.einstand_preis == Decimal("100")
+        assert eintrag_a.strategie == "Index"
+        eintrag_b = next(p for p in bestand if p.titel_id == str(instrument_b))
+        assert eintrag_b.gics_branche == "Healthcare"
+
+
+def test_alle_offenen_positionen_ignoriert_geschlossene_positionen() -> None:
+    """@trace depot#AC8 — eine geschlossene Position fliesst nicht in die
+    depotweite Sicht ein."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        session.add(
+            _make_position(instrument_id, strategy_id, menge=Decimal("0"), status="geschlossen")
+        )
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.alle_offenen_positionen(mode="simuliert") == []
+
+
+def test_alle_offenen_positionen_filtert_nach_modus() -> None:
+    """@trace depot#AC8,AC9 — Mode-Isolation (BR-113/BR-130): ein "echt"-
+    Lot erscheint nicht in der "simuliert"-Sicht (und umgekehrt)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        session.add(
+            _make_position(
+                instrument_id, strategy_id, menge=Decimal("10"), status="offen", mode="echt"
+            )
+        )
+        session.add(
+            _make_position(
+                instrument_id, strategy_id, menge=Decimal("5"), status="offen", mode="simuliert"
+            )
+        )
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        echt_bestand = repository.alle_offenen_positionen(mode="echt")
+        simuliert_bestand = repository.alle_offenen_positionen(mode="simuliert")
+
+        assert [p.menge for p in echt_bestand] == [Decimal("10")]
+        assert [p.menge for p in simuliert_bestand] == [Decimal("5")]
+
+
+def test_alle_offenen_positionen_liefert_none_exit_regeln_ohne_exit_rule_zeile() -> None:
+    """@trace depot#AC9 — solange keine `exit_rule`-Zeile existiert (kein
+    Aufrufer legt bislang eine an, S-037/S-038), sind alle Exit-Regel-Felder
+    `None` statt eines Fehlers/einer Fiktion."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        session.add(_make_position(instrument_id, strategy_id, menge=Decimal("10"), status="offen"))
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        eintrag = repository.alle_offenen_positionen(mode="simuliert")[0]
+
+        assert eintrag.exit_regeln.stop_loss_pct is None
+        assert eintrag.exit_regeln.take_profit_pct is None
+        assert eintrag.exit_regeln.stop_typ is None
+        assert eintrag.exit_regeln.atr_multiplikator is None
+        assert eintrag.exit_regeln.thesis_invalidation is None
+        assert eintrag.exit_regeln.time_box is None
+
+
+def test_alle_offenen_positionen_liefert_gesetzte_exit_regeln() -> None:
+    """@trace depot#AC9 — existiert eine `exit_rule`-Zeile für den Lot,
+    liefert die depotweite Sicht die beim Kauf fixierten Werte (die beim
+    Kauf fixierten Werte, unverändert über die Haltedauer)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        position = _make_position(instrument_id, strategy_id, menge=Decimal("10"), status="offen")
+        session.add(position)
+        session.commit()
+        session.add(
+            ExitRule(
+                position_id=position.id,
+                stop_loss_pct=Decimal("-15"),
+                take_profit_pct=Decimal("30"),
+                stop_typ="fix_pct",
+                atr_multiplikator=None,
+                thesis_invalidation="Marktanteil < 10%",
+                time_box=None,
+            )
+        )
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        eintrag = repository.alle_offenen_positionen(mode="simuliert")[0]
+
+        assert eintrag.exit_regeln.stop_loss_pct == Decimal("-15")
+        assert eintrag.exit_regeln.take_profit_pct == Decimal("30")
+        assert eintrag.exit_regeln.stop_typ == "fix_pct"
+        assert eintrag.exit_regeln.thesis_invalidation == "Marktanteil < 10%"
+
+
+def test_alle_offenen_positionen_sortiert_nach_titel_und_opened_at() -> None:
+    """@trace depot#AC9 — aufsteigend nach `instrument_id`, `opened_at`
+    sortiert: bei mehreren Lots desselben Titels (FIFO) steht der älteste
+    zuerst — Voraussetzung für die Titel-Dedup-Logik in
+    `app.domain.portfolio.portfolio_aggregate
+    .ermittle_titel_strategie_exit_regeln`."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        aelterer = _make_position(instrument_id, strategy_id, menge=Decimal("10"), status="offen")
+        aelterer.opened_at = datetime(2026, 1, 1, tzinfo=UTC)
+        juengerer = _make_position(instrument_id, strategy_id, menge=Decimal("5"), status="offen")
+        juengerer.opened_at = datetime(2026, 6, 1, tzinfo=UTC)
+        session.add(juengerer)
+        session.add(aelterer)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        bestand = repository.alle_offenen_positionen(mode="simuliert")
+        assert [p.position_id for p in bestand] == [str(aelterer.id), str(juengerer.id)]
