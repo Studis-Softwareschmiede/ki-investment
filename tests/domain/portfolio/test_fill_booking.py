@@ -12,6 +12,16 @@ entscheidet "gebucht" vs. "abgelehnt". Diese Tests decken:
   abgelehnt, protokolliert),
 - den Erfolgsfall (vollständiger Fill → gebucht, korrekte resultierende
   Menge, kein Protokolleintrag).
+
+DBA-Zweit-Review von S-016 (ADR-011/P8) ergänzt `client_order_id` als
+neues universelles Pflichtfeld in den Rohdaten-Factories sowie in der
+AC10-Pflichtfeld-Parametrisierung (`test_lehnt_fill_mit_fehlendem_...`).
+
+DBA-Re-Review S-016 (Iteration 3, Important — Mode-Isolation, BR-113/
+BR-130) zieht denselben Fix hier nach: `_FakeRepository.aktuelle_menge`
+nimmt jetzt `mode` entgegen (Protokoll-Kompatibilität mit
+`app.domain.portfolio.ports.PositionRepository.aktuelle_menge`), auf das
+`pruefe_fill` mit `fill.mode` aufruft.
 """
 
 from __future__ import annotations
@@ -35,7 +45,7 @@ class _FakeRepository:
     def __init__(self, bestand: Decimal = Decimal("0")) -> None:
         self._bestand = bestand
 
-    def aktuelle_menge(self, titel_id: str) -> Decimal:
+    def aktuelle_menge(self, titel_id: str, *, mode: str) -> Decimal:
         return self._bestand
 
 
@@ -48,6 +58,7 @@ def _reset_audit_log() -> None:
 
 def _kauf_rohdaten(**overrides: object) -> dict:
     rohdaten = {
+        "client_order_id": "order-kauf-1",
         "titel_id": _TITEL_ID,
         "anlageklasse": 1,
         "gics_branche": "Technology",
@@ -58,6 +69,7 @@ def _kauf_rohdaten(**overrides: object) -> dict:
         "arrival_price": Decimal("100.00"),
         "waehrung": "CHF",
         "zeitstempel": _ZEITSTEMPEL,
+        "mode": "simuliert",
         "strategie": "Index",
         "zeithorizont": 8,
         "exit_regeln": {"stop_typ": "atr_trailing", "stop_parameter": 2.5},
@@ -69,6 +81,7 @@ def _kauf_rohdaten(**overrides: object) -> dict:
 
 def _verkauf_rohdaten(**overrides: object) -> dict:
     rohdaten = {
+        "client_order_id": "order-verkauf-1",
         "titel_id": _TITEL_ID,
         "anlageklasse": 1,
         "gics_branche": "Technology",
@@ -79,6 +92,7 @@ def _verkauf_rohdaten(**overrides: object) -> dict:
         "arrival_price": Decimal("109.50"),
         "waehrung": "CHF",
         "zeitstempel": _ZEITSTEMPEL,
+        "mode": "simuliert",
     }
     rohdaten.update(overrides)
     return rohdaten
@@ -108,7 +122,7 @@ def test_bucht_verkauf_der_bestand_exakt_auf_null_reduziert() -> None:
 
 @pytest.mark.parametrize(
     "missing_field",
-    ["titel_id", "menge", "fill_preis", "kosten", "zeitstempel"],
+    ["client_order_id", "titel_id", "menge", "fill_preis", "kosten", "zeitstempel", "mode"],
 )
 def test_lehnt_fill_mit_fehlendem_pflichtfeld_ab_und_protokolliert(missing_field: str) -> None:
     """@trace depot#AC10 — fehlt ein universelles Pflichtfeld (deckt E1:

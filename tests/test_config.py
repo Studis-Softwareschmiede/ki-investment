@@ -1,6 +1,8 @@
-"""Tests für die Toleranz-Konfiguration des Cross-Checks (Story S-013).
+"""Tests für die Toleranz-Konfiguration des Cross-Checks (Story S-013) und
+die Einstand-Methode-Default-Konfiguration (Story S-016).
 
 Covers (llm-grounding): AC5
+Covers (depot): AC5
 
 `app.config.Settings.toleranz_config` trägt die konfigurierbaren
 Toleranzschwellen je Kennzahl-Typ (absolut/relativ) — provisorische
@@ -8,6 +10,11 @@ Defaults ohne jede Env-Variable, aber per Env-Variable (`TOLERANZ_CONFIG`,
 JSON-codiert) **ohne Codeänderung** überschreibbar. `get_settings()` ist
 die Dependency-Factory (fastapi/A06); `cache_clear()` erlaubt Tests,
 zwischen unterschiedlichen Env-Zuständen neu zu laden.
+
+`app.config.Settings.einstand_methode_default` (S-016, AC5, BR-112) trägt
+die systemweite Default-Einstand-Methode für den allerersten Kauf eines
+Titels — Default `gleitender_durchschnitt` (CH-Kontext), per
+`EINSTAND_METHODE_DEFAULT` ohne Codeänderung auf `fifo` umstellbar.
 """
 
 from __future__ import annotations
@@ -59,3 +66,23 @@ def test_get_settings_ist_gecachter_singleton() -> None:
     zweite = get_settings()
 
     assert erste is zweite
+
+
+def test_settings_liefert_gleitenden_durchschnitt_als_einstand_methode_default() -> None:
+    """@trace depot#AC5 — ohne Env-Override ist `gleitender_durchschnitt`
+    die Default-Einstand-Methode (BR-112, CH-Kontext)."""
+    settings = Settings(_env_file=None)
+
+    assert settings.einstand_methode_default == "gleitender_durchschnitt"
+
+
+def test_settings_ueberschreibt_einstand_methode_default_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace depot#AC5 — `EINSTAND_METHODE_DEFAULT=fifo` schaltet die
+    Default-Einstand-Methode ohne Codeänderung um."""
+    monkeypatch.setenv("EINSTAND_METHODE_DEFAULT", "fifo")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.einstand_methode_default == "fifo"

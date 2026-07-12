@@ -60,7 +60,7 @@ Das Depotmodul ist die **Wahrheit über den Bestand**: es führt je Position all
 
 ## Verträge
 
-- **Input (Ausführungsergebnis, vom Kauf-/Verkaufsmodul):** `{ titel_id, anlageklasse (1–11), gics_branche, richtung (kauf|verkauf), menge, fill_preis, kosten (gebuehren), arrival_price, waehrung, zeitstempel }`; bei Kauf zusätzlich `{ strategie, zeithorizont, exit_regeln, these }`.
+- **Input (Ausführungsergebnis, vom Kauf-/Verkaufsmodul):** `{ client_order_id, titel_id, anlageklasse (1–11), gics_branche, richtung (kauf|verkauf), menge, fill_preis, kosten (gebuehren), arrival_price, waehrung, zeitstempel, mode (echt|simuliert) }`; bei Kauf zusätzlich `{ strategie, zeithorizont, exit_regeln, these }`. (`mode` präzisiert in S-016: jede transaktionale Entität trägt den Modus, → BR-130; er stammt aus der Order-Ausführung selbst, nicht aus einer Depot-internen Konfiguration.) (`client_order_id` präzisiert in S-016: universelles Pflichtfeld und eindeutiger Dedup-Schlüssel je Fill — die Redis-Queue liefert Fills at-least-once (P8), das Depotmodul verbucht denselben `client_order_id`-Wert nie ein zweites Mal gegen den Bestand, → ADR-011.)
 - **Position (interner Zustand):** `{ titel_id, anlageklasse, gics_branche, menge, ø_einstand, aktuelle_bewertung, strategie, zeithorizont, exit_regeln, these, realisierter_gv, unrealisierter_gv, fx_kapital_gv, fx_waehrungs_gv }`.
 - **Transaktionshistorie (append-only):** Liste von `{ trade_id, titel_id, richtung, menge, fill_preis, arrival_price, slippage, kosten, waehrung, zeitstempel }`.
 - **Output an Risikomanagement (Depot-Stand + Aggregate):** `{ positionen[], branchen_gewichtung{gics→anteil}, klassen_gewichtung{1..11→anteil}, cash_quote }`.
@@ -73,6 +73,7 @@ Das Depotmodul ist die **Wahrheit über den Bestand**: es führt je Position all
 - Vollverkauf schliesst die Position (Menge 0), ihre Transaktionshistorie bleibt vollständig erhalten.
 - Fehlt für eine offene Position ein aktueller Live-Kurs, wird der unrealisierte G/V als „nicht bewertbar" markiert statt mit einem veralteten Wert ausgewiesen.
 - Gebühren-Netting muss sowohl in der Kostenbasis (Kauf) als auch im Erlös (Verkauf) greifen, damit die realisierte Slippage/Gebühr sauber erfasst ist.
+- Ein Fill, dessen `client_order_id` bereits verbucht wurde (doppelte Zustellung, at-least-once, → ADR-011), wird kein zweites Mal gegen den Bestand fortgeschrieben; der bereits gebuchte Zustand bleibt unverändert (S-016, präzisiert).
 
 ## NFRs
 

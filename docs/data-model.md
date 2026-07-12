@@ -61,6 +61,7 @@ erDiagram
     position ||--o{ transaction : "bucht"
     position ||--o{ risk_check_log : "geprüft durch"
     order ||--o{ trade_fill : "gefüllt durch"
+    instrument ||--o{ depot_fill_dedup : "dedupliziert Fills für"
     market_data_bronze ||--o{ market_data_silver : "normalisiert zu"
 
     portfolio_snapshot ||--o{ portfolio_weight : "gewichtet"
@@ -394,6 +395,15 @@ erDiagram
 | booked_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
 | — | — | **append-only** — kein UPDATE/DELETE (Steuer-Auditpfad, → BR-115) |
 
+### `depot_fill_dedup` — Idempotenz-Ledger für Fill-Zustellung (ADR-011, P8; nachgezogen S-016 DBA-Zweit-Review)
+| Feld | Typ | Constraint |
+|---|---|---|
+| client_order_id | TEXT | PK (Dedup-Schlüssel aus der Order-Ausführung, ADR-011) |
+| instrument_id | UUID | FK → instrument.id, NOT NULL |
+| richtung | TEXT | CHECK ∈ {kauf, verkauf}, NOT NULL |
+| verbucht_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| — | — | **Nur Dedup-Marker** — KEIN Ersatz für die volle append-only Transaktionshistorie (`transaction`, AC4/AC7 → S-035); S-035 kann bei Bedarf einen eigenen UNIQUE-Constraint direkt auf `transaction.client_order_id` einführen und diese Tabelle ablösen, das entscheidet die jeweilige Story |
+
 ### `risk_check_log` — Risikomanagement-Entscheid beim Kauf (C-015)
 | Feld | Typ | Constraint |
 |---|---|---|
@@ -528,6 +538,7 @@ erDiagram
 | trade_fill | (order_id), (executed_at) | Fills je Order |
 | transaction | (position_id), (instrument_id), (booked_at), (mode) | Steuer-/Dashboard-Historie |
 | risk_check_log | (position_id), (created_at) | Risiko-Audit |
+| depot_fill_dedup | PK (client_order_id), (instrument_id) | Idempotenz-Lookup (ADR-011/BR-132) + Fills je Titel |
 | portfolio_weight | (snapshot_id) | Gewichtungen je Snapshot |
 | trial_registry | (hypothesis_id), UNIQUE (hypothesis_id, variant_hash) | DSR-Zählung |
 | gate_result | (trial_id), (ampel) | Gate-Auswertung |
@@ -591,6 +602,7 @@ erDiagram
 | BR-129 | transaction | Bei currency ≠ CHF: kapital_gv_chf und waehrungs_gv_chf getrennt ausgewiesen (FX-Attribution) | App |
 | BR-130 | mode (alle transaktionalen Entitäten) | echt- und simuliert-Daten in Aggregaten/Snapshots nie vermischt | App + Filter |
 | BR-131 | market_data_silver.z_score | Robuster z-Score gekappt auf ±3 | DB-CHECK + App |
+| BR-132 | depot_fill_dedup.client_order_id | Idempotenz: PK/UNIQUE auf `client_order_id` — ein Fill wird nie zweimal gegen den Bestand verbucht (ADR-011, P8, at-least-once) | DB-UNIQUE + App |
 
 ---
 
@@ -603,7 +615,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `instrument_signal_bundle`.
 5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`.
-6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`.
+6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`.
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.
