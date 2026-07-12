@@ -1,0 +1,15 @@
+id: F-009
+title: Kandidatensuche — profilbasierte Suchkriteria je Anlageklasse
+goal: Profilbasierte Suchkriteria je aktiver Anlageklasse, die Filterkriterien an
+  die geteilte Datenquellen-Abfrage liefert.
+status: Backlog
+priority: P1
+spec: docs/specs/kandidatensuche.md
+definition_of_done: null
+labels: null
+depends: null
+owner: null
+stories: null
+progress: null
+created_at: '2026-07-12T10:08:44Z'
+updated_at: '2026-07-12T10:08:44Z'

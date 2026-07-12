@@ -1,0 +1,31 @@
+id: S-025
+parent: F-005
+title: 'Automatische Trigger: Drawdown-Überwachung & Heartbeat je Modul'
+status: To Do
+priority: P1
+spec: docs/specs/betriebssicherung.md
+implements:
+- AC2
+- AC4
+- AC5
+depends:
+- S-007
+labels:
+- ops
+- scheduler
+- mvp
+size_est: L
+dispo_est: '5'
+dispo_act: null
+dispo_forecast: null
+estimate_note: Laufende Drawdown-Überwachung (Alert- und Kill-Schwelle getrennt konfigurierbar)
+  und Heartbeat-Ausfallerkennung je Modul mit Kill-Trigger; braucht Depot-Equity-Kurve
+  (externe Abhängigkeit), Cold-Start ohne Baseline.
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:09:15Z'
+updated_at: '2026-07-12T10:09:15Z'
+done_at: null

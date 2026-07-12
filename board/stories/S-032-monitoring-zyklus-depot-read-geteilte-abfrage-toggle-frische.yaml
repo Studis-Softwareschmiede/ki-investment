@@ -1,0 +1,38 @@
+id: S-032
+parent: F-010
+title: 'Monitoring-Zyklus: Depot-Read, geteilte Abfrage & Toggle-/Frische-Regeln'
+status: To Do
+priority: P1
+spec: docs/specs/depot-ueberwachung.md
+implements:
+- AC1
+- AC2
+- AC3
+- AC8
+- AC9
+depends:
+- S-005
+- S-006
+- S-020
+- S-021
+labels:
+- config
+- mvp
+size_est: M
+dispo_est: '3'
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start: liest je Titel Identität/Klasse/Strategie/Exit-Regeln,
+  protokolliert Unvollständige (AC1); genau eine geteilte Datenquellen-Abfrage je
+  Titel, keine eigene Anbindung (AC2, DRY); klassenabhängige überwachte Grössen inkl.
+  Krypto-On-Chain (AC3); Überwachung bleibt bei deaktivierter Klasse aktiv (AC8);
+  fehlendes/veraltetes Bündel → nicht bewertbar, kein Ereignis (AC9). Braucht dateneingang
+  (gesamtes Feature).'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:09:28Z'
+updated_at: '2026-07-12T10:09:30Z'
+done_at: null

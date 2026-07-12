@@ -1,0 +1,15 @@
+id: F-012
+title: Strategie, Zeithorizont & Exit-Regeln beim Kauf
+goal: Fixiert beim Kauf je Position Strategie, Zeithorizont, Exit-Regeln und These
+  unveränderlich und reicht die annotierte Order ans Risikomanagement weiter.
+status: Backlog
+priority: P1
+spec: docs/specs/strategie-exit-regeln.md
+definition_of_done: null
+labels: null
+depends: null
+owner: null
+stories: null
+progress: null
+created_at: '2026-07-12T10:08:44Z'
+updated_at: '2026-07-12T10:08:44Z'

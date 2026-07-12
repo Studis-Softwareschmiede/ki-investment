@@ -1,0 +1,31 @@
+id: S-006
+parent: F-003
+title: 'Datenquellen-Registry: 12 Quellen/5 Kategorien, Klassen-Mapping, MVP nur Freiquellen'
+status: To Do
+priority: P0
+spec: docs/specs/dateneingang.md
+implements:
+- AC5
+- AC6
+- AC13
+depends:
+- S-003
+labels:
+- db
+- config
+- mvp
+size_est: M
+dispo_est: '3'
+dispo_act: null
+dispo_forecast: null
+estimate_note: Seed data_source + data_source_asset_class inkl. retail_driven-Regel
+  (Reddit nur Klassen 1/7) und aktiv-Flag (nur Freiquellen); überwiegend Konfigurationsdaten,
+  Cold-Start ohne Baseline.
+confidence: medium
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:08:49Z'
+updated_at: '2026-07-12T10:08:49Z'
+done_at: null

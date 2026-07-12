@@ -1,0 +1,15 @@
+id: F-014
+title: Depotstrategie & Risikomanagement-Gate
+goal: Prüft jeden geplanten Kauf gegen Depotstrategie-Grenzwerte und Depot-Stand und
+  entscheidet durchwinken/deckeln/blockieren; Verkäufe umgehen das Gate.
+status: Backlog
+priority: P1
+spec: docs/specs/risikomanagement.md
+definition_of_done: null
+labels: null
+depends: null
+owner: null
+stories: null
+progress: null
+created_at: '2026-07-12T10:08:45Z'
+updated_at: '2026-07-12T10:08:45Z'

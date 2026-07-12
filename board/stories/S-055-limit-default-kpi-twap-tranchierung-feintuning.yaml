@@ -1,0 +1,28 @@
+id: S-055
+parent: F-013
+title: Limit-Default-KPI, TWAP & Tranchierung (Feintuning)
+status: To Do
+priority: P2
+spec: docs/specs/sizing.md
+implements:
+- AC9
+- AC10
+- AC11
+depends:
+- S-042
+labels:
+- handel
+size_est: M
+dispo_est: '4'
+dispo_act: null
+dispo_forecast: null
+estimate_note: Cold-Start; TWAP/Tranchen-Feintuning + ≥95%-Limit-KPI, Ausbau nach
+  MVP-Pfad, Schwellen provisorisch.
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:10:41Z'
+updated_at: '2026-07-12T10:10:43Z'
+done_at: null

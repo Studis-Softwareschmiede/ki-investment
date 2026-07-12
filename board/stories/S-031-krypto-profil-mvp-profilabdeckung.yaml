@@ -1,0 +1,29 @@
+id: S-031
+parent: F-009
+title: Krypto-Profil & MVP-Profilabdeckung
+status: To Do
+priority: P1
+spec: docs/specs/kandidatensuche.md
+implements:
+- AC5
+- AC11
+depends:
+- S-029
+labels:
+- config
+- mvp
+size_est: S
+dispo_est: '2'
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start, aber eng: Krypto-Profil (Social-Volumen, On-Chain/Whale/Flows,
+  Funding-Rates, RVOL-Pflicht, AC5) plus Nachweis der MVP-Abdeckung Aktien/ETFs/Krypto
+  und optionale Erweiterbarkeit ohne Bruch bestehender Profile (AC11).'
+confidence: medium
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:09:25Z'
+updated_at: '2026-07-12T10:09:27Z'
+done_at: null
