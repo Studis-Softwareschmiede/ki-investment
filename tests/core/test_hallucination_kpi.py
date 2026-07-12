@@ -1,6 +1,8 @@
-"""Tests für die Halluzinations-KPI & den Kill der LLM-Kette (Story S-027).
+"""Tests für die Halluzinations-KPI & den Kill der LLM-Kette (Story S-027,
+S-026).
 
 Covers (llm-grounding): AC8, AC9
+Covers (betriebssicherung): AC8
 
 `app.core.hallucination_kpi` berechnet laufend die Quote „Analysen mit
 Faktenabweichung" (verworfene / geprüfte Analysen) aus registrierten
@@ -10,8 +12,11 @@ der Entscheidungskette, sobald die Quote den konfigurierten Schwellwert
 reine Quotenberechnung inkl. Zeitfenster (AC8), den Grenzfall „genau am
 Schwellwert → kein Alarm" (AC9-Edge-Case), den Kill-Latch (einmal
 ausgelöst, bleibt die Kette deaktiviert bis zum manuellen Reset), die
-Auditierung des Alarm-Übergangs (AC10-Geist) sowie die Konfigurierbarkeit
-des Schwellwerts ohne Codeänderung (AC9).
+Auditierung des Alarm-Übergangs (AC10-Geist), die Konfigurierbarkeit
+des Schwellwerts ohne Codeänderung (AC9) sowie (S-026) den
+`Alert(typ="halluzination")`, den der Alarm-Übergang zusätzlich über den
+Benachrichtigungskanal meldet (`betriebssicherung#AC8` — Betriebssicherung
+als Alarm-Konsument des Halluzinations-KPI).
 """
 
 from __future__ import annotations
@@ -22,21 +27,23 @@ import pytest
 
 from app.config import get_settings
 from app.contracts.llm_grounding import CrossCheckErgebnis
-from app.core import hallucination_kpi
+from app.core import alerts, hallucination_kpi
 from app.core.audit_log import alle_eintraege
 from app.core.audit_log import reset_fuer_tests as audit_log_reset_fuer_tests
 
 
 @pytest.fixture(autouse=True)
 def _zustand_isolieren():
-    """Isoliert Registrierungs-Historie, Kill-Status, Audit-Log und
-    Settings-Cache zwischen Testfällen."""
+    """Isoliert Registrierungs-Historie, Kill-Status, Audit-Log,
+    Alert-Historie und Settings-Cache zwischen Testfällen."""
     hallucination_kpi.reset_fuer_tests()
     audit_log_reset_fuer_tests()
+    alerts.reset_fuer_tests()
     get_settings.cache_clear()
     yield
     hallucination_kpi.reset_fuer_tests()
     audit_log_reset_fuer_tests()
+    alerts.reset_fuer_tests()
     get_settings.cache_clear()
 
 
@@ -196,3 +203,40 @@ def test_berechne_kpi_seit_parameter_filtert_aeltere_registrierungen() -> None:
     ergebnis_mit_fenster = hallucination_kpi.berechne_kpi(seit=fenster_start)
     assert ergebnis_mit_fenster.geprueft == 1
     assert ergebnis_mit_fenster.verworfen == 0
+
+
+def test_alarm_meldet_halluzinations_alert_ueber_den_benachrichtigungskanal() -> None:
+    """@trace betriebssicherung#AC8 — übersteigt die Faktenabweichung die
+    Schwelle (> 2 %), meldet Betriebssicherung als Alarm-Konsument einen
+    `Alert(typ="halluzination")` über `app.core.alerts.melde()` (Andockstelle
+    des Benachrichtigungskanals, AC7)."""
+    _registriere(geerdet=97, verworfen=3)
+
+    hallucination_kpi.berechne_kpi()
+
+    (alert,) = alerts.alle_alerts()
+    assert alert.typ == "halluzination"
+    assert alert.schwere == "critical"
+
+
+def test_kein_alarm_unterhalb_der_schwelle_meldet_keinen_alert() -> None:
+    """@trace betriebssicherung#AC8 — eine Quote unterhalb der Schwelle löst
+    keinen Alarm und folglich auch keinen `Alert` aus."""
+    _registriere(geerdet=198, verworfen=2)
+
+    hallucination_kpi.berechne_kpi()
+
+    assert alerts.alle_alerts() == ()
+
+
+def test_latch_meldet_bei_wiederholtem_aufruf_keinen_zweiten_alert() -> None:
+    """@trace betriebssicherung#AC8 — analog zum Audit-Eintrag (AC10-Geist)
+    entsteht der `Alert` genau einmal je Alarm-Übergang, nicht bei jedem
+    `berechne_kpi()`-Aufruf während die Kette bereits deaktiviert ist."""
+    _registriere(geerdet=97, verworfen=3)
+    hallucination_kpi.berechne_kpi()
+    assert len(alerts.alle_alerts()) == 1
+
+    hallucination_kpi.berechne_kpi()
+
+    assert len(alerts.alle_alerts()) == 1

@@ -1,7 +1,7 @@
 id: S-025
 parent: F-005
 title: 'Automatische Trigger: Drawdown-Überwachung & Heartbeat je Modul'
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/betriebssicherung.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Laufende Drawdown-Überwachung (Alert- und Kill-Schwelle getrennt
   (externe Abhängigkeit), Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-025-auto-trigger
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/29
 blocked_reason: null
 created_at: '2026-07-12T10:09:15Z'
-updated_at: '2026-07-12T10:09:15Z'
-done_at: null
+updated_at: '2026-07-12T20:38:52Z'
+done_at: '2026-07-12T20:38:52Z'

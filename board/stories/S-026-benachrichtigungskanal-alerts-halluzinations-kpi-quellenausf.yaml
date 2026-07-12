@@ -2,7 +2,7 @@ id: S-026
 parent: F-005
 title: 'Benachrichtigungskanal: Alerts, Halluzinations-KPI- & Quellenausfall-Konsum,
   persistente Zustellung'
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/betriebssicherung.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: Informativer Alarmkanal, Konsum des Halluzinations-KPI (>2%, exte
   Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-026-benachrichtigungskanal
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/31
 blocked_reason: null
 created_at: '2026-07-12T10:09:16Z'
-updated_at: '2026-07-12T10:09:18Z'
-done_at: null
+updated_at: '2026-07-12T23:24:44Z'
+done_at: '2026-07-12T23:24:43Z'

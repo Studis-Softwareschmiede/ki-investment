@@ -42,6 +42,15 @@ Jeder Alarm/Kill-Übergang (`aktiv` → `deaktiviert`) wird auditiert
 (AC10-Geist, `app.core.audit_log`, neuer `ProtokollGrund`-Wert
 `halluzinations_kpi_alarm`) — genau einmal je Übergang, nicht bei jedem
 `berechne_kpi()`-Aufruf während die Kette bereits deaktiviert ist.
+
+**Update S-026 (`docs/specs/betriebssicherung.md` AC8):** Betriebssicherung
+konsumiert diesen Halluzinations-KPI-Alarm — die KPI-Berechnung selbst
+bleibt unverändert Sache dieses Moduls (llm-grounding AC8/AC9, s.o.), aber
+derselbe Alarm-Übergang (`aktiv` → `deaktiviert`) meldet zusätzlich (genau
+einmal je Übergang, analog zum Audit-Eintrag) einen
+`Alert(typ="halluzination", schwere="critical")` über
+`app.core.alerts.melde()` — die Andockstelle des Benachrichtigungskanals
+(AC7).
 """
 
 from __future__ import annotations
@@ -50,12 +59,14 @@ import threading
 from datetime import UTC, datetime
 
 from app.config import get_settings
+from app.contracts.betriebssicherung import Alert
 from app.contracts.llm_grounding import (
     CrossCheckErgebnis,
     HalluzinationsKpiErgebnis,
     LlmKettenStatus,
     ProtokollEintrag,
 )
+from app.core.alerts import melde
 from app.core.audit_log import protokolliere
 
 _lock = threading.Lock()
@@ -88,8 +99,10 @@ def berechne_kpi(*, seit: datetime | None = None) -> HalluzinationsKpiErgebnis:
 
     Übersteigt die Quote den konfigurierten Schwellwert (Default 2 %, AC9)
     STRIKT, wechselt die LLM-Kette einmalig von `aktiv` auf `deaktiviert`
-    (Kill-Latch, s. Modul-Docstring) und der Alarm wird auditiert
-    (AC10-Geist). Eine Quote GENAU auf dem Schwellwert löst KEINEN Alarm aus
+    (Kill-Latch, s. Modul-Docstring), der Alarm wird auditiert (AC10-Geist)
+    und zusätzlich als `Alert(typ="halluzination")` über den
+    Benachrichtigungskanal gemeldet (`docs/specs/betriebssicherung.md`
+    AC8, S-026). Eine Quote GENAU auf dem Schwellwert löst KEINEN Alarm aus
     (Edge-Case der Spec)."""
     global _status
     schwellwert = get_settings().halluzinations_kpi_schwellwert
@@ -124,6 +137,18 @@ def berechne_kpi(*, seit: datetime | None = None) -> HalluzinationsKpiErgebnis:
             ),
         )
         protokolliere(eintrag)
+        melde(
+            Alert(
+                typ="halluzination",
+                schwere="critical",
+                nachricht=(
+                    f"Halluzinations-Quote {quote:.2%} überschreitet die Schwelle "
+                    f"{schwellwert:.2%} ({verworfen}/{geprueft} verworfene Analysen) — "
+                    "LLM aus der Entscheidungskette genommen (betriebssicherung#AC8)."
+                ),
+                zeitstempel=alarm_zeitpunkt,
+            )
+        )
 
     return HalluzinationsKpiErgebnis(
         geprueft=geprueft,

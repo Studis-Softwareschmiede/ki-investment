@@ -44,7 +44,7 @@ Die Betriebssicherung ist der Notaus- und Wächter-Layer des Systems: ein manuel
 ## Acceptance-Kriterien
 
 - **AC1** — Der Kill-Switch «flatten & halt» ist **manuell** auslösbar und stoppt sofort jede Erzeugung neuer Orders (halt) und leitet das Schliessen offener Positionen ein (flatten; im Paper-Modus simuliert).
-- **AC2** — Der Kill-Switch besitzt zusätzlich **automatische Trigger**; mindestens ein Überschreiten einer konfigurierbaren Gesamt-Drawdown-Schwelle löst ihn ohne manuelles Zutun aus. Der Schwellenwert ist konfigurierbar (konkreter Default provisorisch/offen — in der Umsetzung festzulegen). (Deckt A1.)
+- **AC2** — Der Kill-Switch besitzt zusätzlich **automatische Trigger**; mindestens ein Überschreiten einer konfigurierbaren Gesamt-Drawdown-Schwelle löst ihn ohne manuelles Zutun aus. Der Schwellenwert ist konfigurierbar (konkreter Default provisorisch/offen — in der Umsetzung festzulegen; S-025: provisorisch **20 %** Rückgang vom laufenden Höchststand, `app.config.Settings.drawdown_kill_schwelle`, ohne Codeänderung überschreibbar). (Deckt A1.)
 - **AC3** — Nach Auslösen bleibt das System im Zustand „angehalten"; die Rückkehr in den Normalbetrieb erfolgt ausschliesslich durch eine explizite manuelle Wieder-Freigabe, nie automatisch.
 - **AC4** — Jedes Pipeline-Modul wird per Heartbeat überwacht; bleibt der Heartbeat eines Moduls länger als das konfigurierte Intervall aus, wird dies als Ausfall erkannt, ein Alert erzeugt und je nach Kritikalität/Konfiguration der Kill-Switch ausgelöst (deckt A2).
 - **AC5** — Der portfolioweite Drawdown wird laufend überwacht; bei Überschreiten konfigurierbarer Schwellen wird ein Drawdown-Alert erzeugt (Alert-Schwelle unabhängig von der Kill-Switch-Schwelle konfigurierbar).

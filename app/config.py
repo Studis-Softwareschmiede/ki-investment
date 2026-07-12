@@ -18,6 +18,17 @@ Schwellwert (Default 2 %), ab dessen STRIKTER Überschreitung
 nimmt — ebenfalls ohne Codeänderung über die Umgebungsvariable
 `HALLUZINATIONS_KPI_SCHWELLWERT` überschreibbar (Muster von `TOLERANZ_CONFIG`
 folgend, hier aber ein einzelner Skalar statt eines Mappings).
+
+Aus S-025 (AC2, AC5, `docs/specs/betriebssicherung.md`) kommen
+`drawdown_alert_schwelle` + `drawdown_kill_schwelle` hinzu: die zwei
+UNABHÄNGIG konfigurierbaren Drawdown-Schwellen, die
+`app.core.drawdown_monitor.pruefe_drawdown()` gegen den laufend
+aktualisierten Portfolio-Drawdown vergleicht. Die Spec lässt den konkreten
+Default explizit offen ("konkreter Default provisorisch/offen — in der
+Umsetzung festzulegen", AC2) — provisorisch gewählt: **Alert bei 10 %,
+Kill bei 20 %** Rückgang vom laufenden Höchststand. Beide Werte sind ohne
+Codeänderung über `DRAWDOWN_ALERT_SCHWELLE`/`DRAWDOWN_KILL_SCHWELLE`
+überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
 """
 
 from __future__ import annotations
@@ -71,6 +82,23 @@ class Settings(BaseSettings):
     #: Entscheidungskette. Default 2 % (0.02), ohne Codeänderung über
     #: `HALLUZINATIONS_KPI_SCHWELLWERT` überschreibbar.
     halluzinations_kpi_schwellwert: float = Field(default=0.02, ge=0)
+
+    #: Drawdown-Alert-Schwelle (AC5): überschreitet der relative Rückgang
+    #: vom laufenden Höchststand (High-Water-Mark) diesen Wert STRIKT, gibt
+    #: `app.core.drawdown_monitor.pruefe_drawdown()` einen `warn`-Alert
+    #: aus. UNABHÄNGIG von `drawdown_kill_schwelle` konfigurierbar (AC5).
+    #: Provisorischer Default 10 % (AC2 — konkreter Wert offen, s.
+    #: Modul-Docstring), ohne Codeänderung über `DRAWDOWN_ALERT_SCHWELLE`
+    #: überschreibbar.
+    drawdown_alert_schwelle: float = Field(default=0.10, ge=0, le=1)
+
+    #: Drawdown-Kill-Schwelle (AC2): überschreitet der relative Rückgang
+    #: vom laufenden Höchststand diesen Wert STRIKT, löst
+    #: `app.core.drawdown_monitor.pruefe_drawdown()` automatisch den
+    #: bestehenden `app.core.kill_switch.ausloesen()` aus (Quelle
+    #: `"drawdown"`). Provisorischer Default 20 % (s. Modul-Docstring),
+    #: ohne Codeänderung über `DRAWDOWN_KILL_SCHWELLE` überschreibbar.
+    drawdown_kill_schwelle: float = Field(default=0.20, ge=0, le=1)
 
 
 @lru_cache
