@@ -1,14 +1,17 @@
-"""Tests für die Kill-Switch-Verträge (Story S-007).
+"""Tests für die Kill-Switch- + Secret-Store-Verträge (Story S-007, S-008).
 
-Covers (betriebssicherung): AC1, AC3, AC11
+Covers (betriebssicherung): AC1, AC3, AC6, AC11
 
 `app.contracts.betriebssicherung` bildet die Verträge aus
-`docs/specs/betriebssicherung.md` ab, soweit sie diese Story betreffen: den
-Kill-Switch-Auslöser-Input (`KillSwitchAusloeser`, AC1), den Betriebszustand
-(`Betriebszustand`/`KillSwitchStatus`, AC3) und den unveränderlichen
-Protokolleintrag (`KillSwitchEreignis`, AC11). Das tatsächliche
-Zustandsmaschinen-/Protokollierungs-Verhalten liegt in
-`tests/core/test_kill_switch.py`.
+`docs/specs/betriebssicherung.md` ab, soweit sie diese Stories betreffen:
+den Kill-Switch-Auslöser-Input (`KillSwitchAusloeser`, AC1), den
+Betriebszustand (`Betriebszustand`/`KillSwitchStatus`, AC3), den
+unveränderlichen Protokolleintrag (`KillSwitchEreignis`, AC11) sowie den
+Secret-Store-Vertrag (`Umgebung`/`SecretStoreZugang`, AC6 — Story S-008).
+Das tatsächliche Zustandsmaschinen-/Protokollierungs-Verhalten liegt in
+`tests/core/test_kill_switch.py`; die tatsächliche Secret-Store-Auflösung
+(strikte Paper/Live-Trennung) liegt in `tests/core/test_secret_store.py` —
+hier wird nur die Vertrags-/Struktur-Ebene geprüft.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from app.contracts.betriebssicherung import (
     KillSwitchAusloeser,
     KillSwitchEreignis,
     KillSwitchStatus,
+    SecretStoreZugang,
 )
 
 _ZEITSTEMPEL = datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
@@ -102,3 +106,56 @@ def test_kill_switch_ereignis_ist_unveraenderlich() -> None:
     )
     with pytest.raises(ValidationError):
         eintrag.grund = "geaendert"  # type: ignore[misc]
+
+
+def test_secret_store_zugang_akzeptiert_nur_paper_oder_live() -> None:
+    """@trace betriebssicherung#AC6 — `SecretStoreZugang.umgebung`
+    akzeptiert ausschließlich `paper`/`live`; ein dritter Wert (z. B. ein
+    gemeinsames "beide"/"sim") wird strukturell abgelehnt."""
+    paper = SecretStoreZugang(
+        dienst="ibkr", umgebung="paper", endpunkt="https://paper.example.test", api_key="k1"
+    )
+    live = SecretStoreZugang(
+        dienst="ibkr", umgebung="live", endpunkt="https://live.example.test", api_key="k2"
+    )
+    assert paper.umgebung == "paper"
+    assert live.umgebung == "live"
+
+    with pytest.raises(ValidationError):
+        SecretStoreZugang(dienst="ibkr", umgebung="sim", endpunkt="https://x", api_key="k")  # type: ignore[arg-type]
+
+
+def test_secret_store_zugang_ist_unveraenderlich() -> None:
+    """@trace betriebssicherung#AC6 — `SecretStoreZugang` ist `frozen`
+    (Vertrags-Ebene, analog `KillSwitchEreignis`)."""
+    zugang = SecretStoreZugang(
+        dienst="ibkr", umgebung="paper", endpunkt="https://paper.example.test", api_key="k1"
+    )
+    with pytest.raises(ValidationError):
+        zugang.umgebung = "live"  # type: ignore[misc]
+
+
+def test_secret_store_zugang_verweigert_leeren_api_key() -> None:
+    """@trace betriebssicherung#AC6 — ein leerer `api_key` wird strukturell
+    abgelehnt (Vertragsebene der Validierung aus
+    `app.core.secrets.resolve_secret_store_zugang`)."""
+    with pytest.raises(ValidationError):
+        SecretStoreZugang(
+            dienst="ibkr", umgebung="paper", endpunkt="https://paper.example.test", api_key=""
+        )
+
+
+def test_secret_store_zugang_api_key_erscheint_nicht_im_repr() -> None:
+    """@trace betriebssicherung#AC6 — `api_key`/`api_secret` sind
+    `repr=False` (NFR "keine Secrets im Klartext in Logs oder Alerts") und
+    erscheinen deshalb nicht in `repr()`/`str()` des Modells."""
+    zugang = SecretStoreZugang(
+        dienst="ibkr",
+        umgebung="live",
+        endpunkt="https://live.example.test",
+        api_key="dummy-fixture-secret-42",  # gitleaks:allow
+        api_secret="dummy-fixture-secret-99",  # gitleaks:allow
+    )
+    dargestellt = repr(zugang) + str(zugang)
+    assert "dummy-fixture-secret-42" not in dargestellt
+    assert "dummy-fixture-secret-99" not in dargestellt

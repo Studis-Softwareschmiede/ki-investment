@@ -1,9 +1,10 @@
-"""Modul-Verträge Kill-Switch «flatten & halt» (Story S-007, AC1/AC3/AC11).
+"""Modul-Verträge Kill-Switch «flatten & halt» + Secret-Store (Story S-007
+AC1/AC3/AC11, Story S-008 AC6, Spec `docs/specs/betriebssicherung.md`).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO in `app/contracts/`. Dieses Modul bildet die
 Verträge aus `docs/specs/betriebssicherung.md` ("Verträge") ab, soweit sie
-diese Story (AC1, AC3, AC11) betreffen:
+diese Stories betreffen:
 
 - `KillSwitchAusloeser` — der Auslöser-Input (`{quelle, zeitstempel, grund,
   kennwert?}`). `quelle` ist bereits das volle Vertrags-`Literal`
@@ -26,6 +27,17 @@ diese Story (AC1, AC3, AC11) betreffen:
   ProtokollEintrag` — dessen `ProtokollGrund`-Literal und Feldnamen
   (`kennzahl_typ`, `quellen_id`) sind an die llm-grounding-Spec gebunden und
   passen fachlich nicht zum Kill-Switch-Auslöser-Vertrag dieser Spec.
+- `Umgebung` + `SecretStoreZugang` (Story S-008, AC6) — der Secret-Store-
+  Vertrag ("Secrets-Zugriff: über den Secret-Store aufgelöst, getrennt nach
+  Umgebung `paper` / `live`; nie im Klartext im Code/Repo"). Ein
+  `SecretStoreZugang` bündelt die für EINEN Dienst in GENAU EINER Umgebung
+  aufgelösten Zugangsdaten; `app.core.secrets.resolve_secret_store_zugang`
+  ist die einzige Stelle, die ihn erzeugt (siehe dortiger Modul-Docstring
+  für die strikte Paper/Live-Trennung der zugrundeliegenden Env-Variablen).
+  Noch kein konkreter Dienst (z. B. ein Broker aus
+  `docs/specs/ausfuehrung-paper.md`) konsumiert diesen Vertrag in dieser
+  Story — der Broker-Adapter selbst ist Nicht-Ziel (Board-Item-Scope, siehe
+  dort: "Live-Betrieb ist Nicht-Ziel des MVP").
 
 Nicht Teil dieser Story (Board-Item-Scope): kein Alert-Output-Vertrag
 (`{typ, schwere, nachricht, zeitstempel}`, AC7 Benachrichtigungskanal — noch
@@ -97,3 +109,31 @@ class KillSwitchEreignis(BaseModel):
     grund: str = Field(min_length=1)
     kennwert: Decimal | None = None
     wirkung: Literal["ausgeloest", "idempotent_bereits_angehalten"]
+
+
+#: Umgebung eines Secret-Store-Zugangs (Verträge, AC6) — bewusst nur genau
+#: diese zwei Werte. Es gibt hier KEINE dritte Umgebung, die beide Namen
+#: teilt oder zwischen ihnen "fällt zurück auf" — jede Umgebung hat ihren
+#: eigenen, vollständig getrennten Namensraum (siehe
+#: `app.core.secrets.resolve_secret_store_zugang`).
+Umgebung = Literal["paper", "live"]
+
+
+class SecretStoreZugang(BaseModel):
+    """Vom Secret-Store aufgelöste Zugangsdaten EINES Dienstes (z. B. eines
+    künftigen Broker-Adapters) in GENAU EINER Umgebung (AC6: "Paper- und
+    Live-Zugänge sind strikt getrennt ... sodass eine Paper-Konfiguration
+    nie versehentlich gegen einen Live-Endpunkt läuft.").
+
+    `api_key`/`api_secret` sind bewusst `repr=False` (NFR "keine Secrets im
+    Klartext in Logs oder Alerts") — pydantic lässt Felder mit `repr=False`
+    aus `repr()`/`str()` dieses Modells weg, ein versehentliches `logger.info
+    (zugang)`/`print(zugang)` exponiert damit nie den Klartext-Wert."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    dienst: str = Field(min_length=1)
+    umgebung: Umgebung
+    endpunkt: str = Field(min_length=1)
+    api_key: str = Field(min_length=1, repr=False)
+    api_secret: str | None = Field(default=None, repr=False)
