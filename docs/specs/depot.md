@@ -2,7 +2,7 @@
 id: depot
 title: Depotmodul (Bestand, G/V, Transaktionshistorie)
 status: active
-version: 1
+version: 2
 spec_format: use-case-2.0
 area: depot
 ---
@@ -56,11 +56,14 @@ Das Depotmodul ist die **Wahrheit über den Bestand**: es führt je Position all
 - **AC10** — Ein unvollständiges oder inkonsistentes Ausführungsergebnis (fehlende Pflichtfelder oder resultierende negative Menge) wird nicht gebucht, sondern als fehlerhaft protokolliert; der bisherige Bestand bleibt unverändert (deckt E1).
 - **AC11** — Das Depot-Dashboard ist eine reine Anzeige-Schicht: es liest ausschliesslich aus dem Depotmodul (Depot live, je Titel Kauf-Historie und laufendes Plus/Minus) und aus dem Socket-Live-Kurs-Zugriff (Cross-Cutting); es hält keine eigene Preisanbindung und verändert weder Bestand noch Trading-Logik.
 
+- **AC12** — Die Fill→Position-Orchestrierung ist Sache dieses Moduls: es konsumiert das Ausführungsergebnis (inkl. Pflichtfeld `modus` und `order_id`) und schreibt Position + Transaktion im selben Modus; ein Fill ohne `modus` oder ohne auflösbare `strategie_id` (bei Kauf) wird nicht gebucht, sondern als fehlerhaft protokolliert (deckt E1). Simulierte Fills erzeugen ausschliesslich simulierte Positionen/Transaktionen.
+
 > **Traceability:** Jeder Test trägt das kanonische Trace-Tag `@trace depot#AC<n>`.
 
 ## Verträge
 
-- **Input (Ausführungsergebnis, vom Kauf-/Verkaufsmodul):** `{ titel_id, anlageklasse (1–11), gics_branche, richtung (kauf|verkauf), menge, fill_preis, kosten (gebuehren), arrival_price, waehrung, zeitstempel }`; bei Kauf zusätzlich `{ strategie, zeithorizont, exit_regeln, these }`.
+- **Input (Ausführungsergebnis, vom Kauf-/Verkaufsmodul):** `{ titel_id, anlageklasse (1–11), gics_branche, richtung (kauf|verkauf), modus (echt|simuliert), menge, fill_preis, kosten (gebuehren), arrival_price, waehrung, zeitstempel, order_id }`; bei Kauf zusätzlich das beim Kauf fixierte Attribut-Bündel `{ strategie_id (Katalog-ID aus [[strategie-exit-regeln]]), zeithorizont, exit_regeln, these }` — die Strategie wird ausschliesslich über ihre Katalog-ID referenziert (keine Namens-Zuordnung; Anzeige-Name kommt aus dem Strategie-Katalog).
+- **Mode-Isolation (← C-016, Datenmodell BR-113/BR-130):** `modus` ist Pflichtfeld; Positionen, Transaktionen und Aggregate werden strikt je Modus getrennt geführt. Ein simulierter Fill verändert nie einen Echt-Bestand (und umgekehrt); alle Ausgaben an Risikomanagement/Überwachung/Dashboard sind modus-gefiltert.
 - **Position (interner Zustand):** `{ titel_id, anlageklasse, gics_branche, menge, ø_einstand, aktuelle_bewertung, strategie, zeithorizont, exit_regeln, these, realisierter_gv, unrealisierter_gv, fx_kapital_gv, fx_waehrungs_gv }`.
 - **Transaktionshistorie (append-only):** Liste von `{ trade_id, titel_id, richtung, menge, fill_preis, arrival_price, slippage, kosten, waehrung, zeitstempel }`.
 - **Output an Risikomanagement (Depot-Stand + Aggregate):** `{ positionen[], branchen_gewichtung{gics→anteil}, klassen_gewichtung{1..11→anteil}, cash_quote }`.
