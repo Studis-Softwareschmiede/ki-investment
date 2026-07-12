@@ -1,14 +1,16 @@
-"""Tests für das LLM-Grounding-Gate (Story S-012).
+"""Tests für das LLM-Grounding-Gate (Story S-012 + S-013).
 
-Covers (llm-grounding): AC1, AC2, AC3
+Covers (llm-grounding): AC1, AC2, AC3, AC10
 
 `app.adapters.llm.grounding.pruefe_grounding` ist der tatsächliche
 Einstiegspunkt, der einen rohen (untrusted, dict-förmigen) Analyse-Output-
 Kandidaten prüft — nicht nur ein bereits vertrauenswürdiges DTO. Diese
 Tests decken den Gate-Aufruf End-to-End: AC1 (Grounding-Pflicht, hier über
 einen rohen Output-Kandidaten ohne Timestamp), AC2 (Input-Bindung — eine
-input-fremde Zahl wird abgelehnt) und AC3 (Schema-Verletzung, deckt E1) —
-inklusive des Happy-Path (`status="geerdet"`). Die reinen DTO-Grenzfälle
+input-fremde Zahl wird abgelehnt), AC3 (Schema-Verletzung, deckt E1) —
+inklusive des Happy-Path (`status="geerdet"`) — sowie AC10 (S-013): beide
+Ablehnungspfade schreiben zusätzlich einen `ProtokollEintrag` ins
+Audit-Protokoll (`app.core.audit_log`). Die reinen DTO-Grenzfälle
 (Feld-für-Feld) liegen in `tests/contracts/test_llm_grounding.py`.
 """
 
@@ -16,8 +18,11 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from app.adapters.llm.grounding import pruefe_grounding
 from app.contracts.llm_grounding import AnalyseFakt, AnalyseInput
+from app.core.audit_log import alle_eintraege, reset_fuer_tests
 
 FAKT_A = AnalyseFakt(
     kennzahl_typ="kgv",
@@ -25,6 +30,14 @@ FAKT_A = AnalyseFakt(
     quellen_id="sec-form4-123",
     timestamp=datetime(2026, 7, 1, tzinfo=UTC),
 )
+
+
+@pytest.fixture(autouse=True)
+def _audit_log_isolieren():
+    """Isoliert die in-memory Audit-Historie zwischen Testfällen (AC10)."""
+    reset_fuer_tests()
+    yield
+    reset_fuer_tests()
 
 
 def _eingabe(fakten: tuple[AnalyseFakt, ...] = (FAKT_A,)) -> AnalyseInput:
@@ -154,3 +167,51 @@ def test_pruefe_grounding_ist_deterministisch() -> None:
     zweites_ergebnis = pruefe_grounding(output_roh, eingabe)
 
     assert erstes_ergebnis == zweites_ergebnis
+
+
+def test_pruefe_grounding_protokolliert_schema_verletzung() -> None:
+    """@trace llm-grounding#AC10 — eine Schema-Verletzung (AC3) erzeugt
+    zusätzlich zum abgelehnten `GroundingErgebnis` einen Protokolleintrag
+    im Audit-Log (Grund `schema_verletzung`)."""
+    output_roh = _valid_output_roh()
+    output_roh["scores"]["fundamental"] = 15.0
+
+    pruefe_grounding(output_roh, _eingabe())
+
+    eintraege = alle_eintraege()
+    assert len(eintraege) == 1
+    assert eintraege[0].grund == "schema_verletzung"
+    assert eintraege[0].zeitpunkt is not None
+
+
+def test_pruefe_grounding_protokolliert_input_fremde_zahl() -> None:
+    """@trace llm-grounding#AC10 — eine input-fremde Zahl (AC2) erzeugt
+    einen Protokolleintrag mit der betroffenen Kennzahl/Quelle (Grund
+    `input_fremde_zahl`)."""
+    output_roh = _valid_output_roh(
+        fakten=[
+            {
+                "kennzahl_typ": "kgv",
+                "wert": 999.9,
+                "quellen_id": "sec-form4-123",
+                "timestamp": "2026-07-01T00:00:00Z",
+            }
+        ]
+    )
+
+    pruefe_grounding(output_roh, _eingabe())
+
+    eintraege = alle_eintraege()
+    assert len(eintraege) == 1
+    assert eintraege[0].grund == "input_fremde_zahl"
+    assert eintraege[0].kennzahl_typ == "kgv"
+    assert eintraege[0].quellen_id == "sec-form4-123"
+
+
+def test_pruefe_grounding_protokolliert_nichts_bei_geerdetem_output() -> None:
+    """@trace llm-grounding#AC10 — ein akzeptierter (geerdeter) Output
+    erzeugt keinen Protokolleintrag (nur Ablehnungen sind auditierbar
+    relevant, Spec AC10)."""
+    pruefe_grounding(_valid_output_roh(), _eingabe())
+
+    assert alle_eintraege() == ()
