@@ -13,7 +13,7 @@ merge_policy: pr
 cost_mode: balanced
 default_branch: main
 board: file
-# obsidian_source: wird von /agent-flow:from-notes gesetzt
+obsidian_source: /Users/alex/Library/Mobile Documents/iCloud~md~obsidian/Documents/AlexSecondBrain/300 Projekte/KI Investment
 deploy: docker
 image: ghcr.io/studis-softwareschmiede/ki-investment
 registry: ghcr
@@ -24,3 +24,7 @@ sonar:
   organization: ""
   project_key: ""
   host_url: ""
+
+adoption_validated_at: 2026-07-12
+adoption_validated_dialect: postgres
+adoption_validated_companions: [redis]
