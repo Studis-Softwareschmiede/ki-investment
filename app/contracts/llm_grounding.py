@@ -1,9 +1,11 @@
-"""Modul-Verträge LLM-Grounding-Gate: Analyse-Input/-Output + Grounding-Ergebnis.
+"""Modul-Verträge LLM-Grounding-Gate: Analyse-Input/-Output + Grounding-Ergebnis
+plus Cross-Check/Audit-Verträge (S-013).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang läuft
 über ein typisiertes DTO in `app/contracts/`. Dieses Modul bildet die Verträge
-aus `docs/specs/llm-grounding.md` ("Verträge") ab, für den Ausschnitt dieser
-Story (S-012, AC1-AC3):
+aus `docs/specs/llm-grounding.md` ("Verträge") ab.
+
+Aus S-012 (AC1-AC3):
 
 - `AnalyseInput` — was das LLM als strukturierten, geerdeten Input erhält
   (`{ titel, anlageklasse, fakten: [...] }`).
@@ -16,14 +18,29 @@ Story (S-012, AC1-AC3):
   ein Analyse-Output mit einem solchen Fakt gilt strukturell als ungültig
   (Grounding-Pflicht, AC1).
 - `GroundingErgebnis` — strukturiertes Ergebnis des Grounding-Gates
-  (`app.adapters.llm.grounding.pruefe_grounding`), an das Folge-Stories
-  (Protokollierung AC10, Cross-Check AC4) andocken können, ohne diese Story
-  zu erweitern.
+  (`app.adapters.llm.grounding.pruefe_grounding`).
+
+Neu aus S-013 (AC4, AC5, AC10) — Verträge des "Cross-Check-Moduls":
+
+- `Originalquelle` — der tatsächliche Wert einer Kennzahl an ihrer Quelle
+  (`quellen_id`), gegen den ein `AnalyseFakt.wert` deterministisch geprüft
+  wird (AC4).
+- `ToleranzKonfig` — konfigurierbare Toleranzschwelle je Kennzahl-Typ
+  (absolut vs. relativ, AC5); Standardwerte liegen in `app.config`
+  (ohne Codeänderung überschreibbar).
+- `Abweichung` — eine gemessene Abweichung zwischen Output- und Quellwert
+  je Kennzahl, Teil des Cross-Check-Ergebnisses.
+- `ProtokollEintrag` — ein auditierbarer Protokolleintrag (Grund, Zeitpunkt,
+  betroffene Kennzahl/Quelle, AC10); wird sowohl vom Grounding-Gate (S-012-
+  Ablehnungspfade) als auch vom Cross-Check-Modul über
+  `app.core.audit_log.protokolliere` geschrieben.
+- `CrossCheckErgebnis` — strukturiertes Ergebnis des deterministischen
+  Zahlen-Cross-Checks (`app.adapters.llm.cross_check.pruefe_cross_check`).
 
 Nicht Teil dieser Story (Nicht-Ziele der Spec `llm-grounding`): kein
 Feld-für-Feld-Schema über die hier genannten Verträge hinaus, keine
-Score-Berechnungslogik, kein Cross-Check gegen Originalquellen (AC4) und kein
-Mapping, welches Finanz-Plugin welche Kategorie erdet.
+Score-Berechnungslogik, kein Mapping, welches Finanz-Plugin welche Kategorie
+erdet, kein Halluzinations-KPI (AC8/AC9, spätere Story).
 """
 
 from __future__ import annotations
@@ -117,3 +134,87 @@ class GroundingErgebnis(BaseModel):
     grund: GroundingAblehnungsgrund | None = None
     detail: str | None = None
     output: AnalyseOutput | None = None
+
+
+class Originalquelle(BaseModel):
+    """Der tatsächliche Wert einer Kennzahl an ihrer Datenquelle (Verträge,
+    Spec `llm-grounding`, Cross-Check-Modul, AC4) — die Vergleichsbasis für
+    den deterministischen Cross-Check gegen `AnalyseFakt.wert`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    quellen_id: str = Field(min_length=1)
+    kennzahl_typ: str = Field(min_length=1)
+    wert: float
+
+
+class ToleranzKonfig(BaseModel):
+    """Konfigurierbare Toleranzschwelle eines Kennzahl-Typs (AC5) —
+    entweder eine absolute Differenz oder eine relative Abweichung
+    (Bruchteil des Quellwerts). Provisorische Default-Werte liegen in
+    `app.config`, ohne Codeänderung per `toleranz_config`-Übersteuerung
+    (Aufrufparameter) oder Env-Variable ersetzbar."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kennzahl_typ: str = Field(min_length=1)
+    typ: Literal["absolut", "relativ"]
+    schwelle: float = Field(ge=0)
+
+
+class Abweichung(BaseModel):
+    """Eine gemessene Abweichung zwischen Output- und Quellwert einer
+    Kennzahl (Verträge, Spec `llm-grounding`, Cross-Check-Modul, AC4)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kennzahl_typ: str = Field(min_length=1)
+    wert_output: float
+    wert_quelle: float
+    abweichung: float
+    toleranz: float
+
+
+#: Gründe, aus denen ein Protokolleintrag entsteht (AC10) — deckt sowohl
+#: die S-012-Ablehnungspfade des Grounding-Gates (`schema_verletzung`,
+#: `input_fremde_zahl`) als auch die S-013-Cross-Check-Ablehnungsgründe
+#: (`cross_check_abweichung`, `quelle_nicht_verfuegbar`,
+#: `toleranz_nicht_konfiguriert`, Edge-Cases der Spec) unter einem
+#: gemeinsamen Vokabular ab.
+ProtokollGrund = Literal[
+    "schema_verletzung",
+    "input_fremde_zahl",
+    "cross_check_abweichung",
+    "quelle_nicht_verfuegbar",
+    "toleranz_nicht_konfiguriert",
+]
+
+
+class ProtokollEintrag(BaseModel):
+    """Ein auditierbarer Protokolleintrag für eine abgelehnte/verworfene
+    Analyse (AC10): Grund, Zeitpunkt und betroffene Kennzahl/Quelle.
+    Enthält bewusst keine Rohdaten/Secrets — nur die für die Auditierung
+    nötigen strukturierten Felder (NFR "keine Secrets im Klartext")."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    zeitpunkt: datetime
+    grund: ProtokollGrund
+    kennzahl_typ: str | None = None
+    quellen_id: str | None = None
+    detail: str
+
+
+class CrossCheckErgebnis(BaseModel):
+    """Strukturiertes Ergebnis des deterministischen Zahlen-Cross-Checks
+    (AC4, `app.adapters.llm.cross_check.pruefe_cross_check`). Bricht die
+    Prüfung bei der ersten verwerfenden Abweichung/dem ersten Edge-Case ab
+    (konservatives Verwerfen) — `abweichungen` enthält alle bis dahin
+    berechneten Vergleiche, `protokoll_eintrag` ist gesetzt, sobald
+    `status == "verworfen"` (AC10)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: Literal["geerdet", "verworfen"]
+    abweichungen: tuple[Abweichung, ...] = Field(default=())
+    protokoll_eintrag: ProtokollEintrag | None = None

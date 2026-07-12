@@ -1,0 +1,65 @@
+"""Anwendungsweite Konfiguration (architecture.md §4 `app/config.py`:
+"Settings via pydantic-settings; lädt Feature-Toggles + Modus-Schalter",
+fastapi/A06).
+
+Für diese Story (S-013, AC5) trägt dieses Modul die konfigurierbaren
+Toleranzschwellen des deterministischen Zahlen-Cross-Checks
+(`app.adapters.llm.cross_check`) je Kennzahl-Typ — **ohne Codeänderung**
+über die Umgebungsvariable `TOLERANZ_CONFIG` (JSON-codiertes Mapping
+Kennzahl-Typ → `{typ, schwelle}`, pydantic-settings parst komplexe Felder
+aus einem JSON-String) oder eine `.env`-Datei überschreibbar. Weitere
+Feature-Toggles/Modus-Schalter (z.B. Order-Modus echt/simuliert) folgen in
+späteren Stories und erweitern `Settings`, ohne bestehende Felder zu
+berühren.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.contracts.llm_grounding import ToleranzKonfig
+
+#: Provisorische Default-Toleranzen je Kennzahl-Typ (AC5 — "ihre konkrete
+#: Festlegung ist offen/provisorisch"). Greifen nur für Kennzahl-Typen ohne
+#: eigenen Eintrag in `TOLERANZ_CONFIG`/im Aufrufparameter
+#: `toleranz_config` (Edge-Case "Toleranz nicht konfiguriert" — Default
+#: statt Codeänderung).
+DEFAULT_TOLERANZEN: dict[str, ToleranzKonfig] = {
+    "kgv": ToleranzKonfig(kennzahl_typ="kgv", typ="relativ", schwelle=0.02),
+    "kurs": ToleranzKonfig(kennzahl_typ="kurs", typ="relativ", schwelle=0.01),
+    "marktkapitalisierung": ToleranzKonfig(
+        kennzahl_typ="marktkapitalisierung", typ="relativ", schwelle=0.02
+    ),
+}
+
+
+class Settings(BaseSettings):
+    """Settings-Klasse (fastapi/A06) — Werte aus Env-Variablen/`.env`,
+    NIE hartkodierte Secrets. `toleranz_config` ist bewusst kein Secret,
+    sondern ein fachlicher Konfigurationsparameter (AC5)."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    #: Wird `TOLERANZ_CONFIG` gesetzt (Env-Variable, JSON-codiertes
+    #: Mapping), ERSETZT sie das VOLLSTÄNDIGE `DEFAULT_TOLERANZEN`-Mapping
+    #: — pydantic-settings merged komplexe Feldtypen NICHT mit dem
+    #: `default_factory`-Wert. Ein Override, der nur einen Kennzahl-Typ
+    #: enthält, lässt alle anderen Kennzahl-Typen ohne Toleranz zurück
+    #: (→ Edge-Case "Toleranz nicht konfiguriert" in
+    #: `app.adapters.llm.cross_check`, verwirft statt durchzulassen). Wer
+    #: nur einen einzelnen Wert anpassen will, muss das gesamte Mapping
+    #: (alle Kennzahl-Typen) in `TOLERANZ_CONFIG` mitliefern.
+    toleranz_config: dict[str, ToleranzKonfig] = Field(
+        default_factory=lambda: dict(DEFAULT_TOLERANZEN)
+    )
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Settings-Singleton (fastapi/A06) — Zugriff über diese Factory statt
+    globaler Instanziierung, damit Tests sie via
+    `get_settings.cache_clear()` (nach Env-Änderung) neu laden können."""
+    return Settings()
