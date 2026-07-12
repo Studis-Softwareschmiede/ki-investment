@@ -1,14 +1,19 @@
-"""Tests für die LLM-Grounding-Verträge (Story S-012).
+"""Tests für die LLM-Grounding-Verträge (Story S-012 + S-013).
 
-Covers (llm-grounding): AC1, AC3
+Covers (llm-grounding): AC1, AC3, AC4, AC5, AC10
 
 `app.contracts.llm_grounding` bildet die Verträge aus
 `docs/specs/llm-grounding.md` ab. Diese Tests decken auf DTO-Ebene AC1
-(`AnalyseFakt` verweigert die Instanziierung ohne Quellen-ID/Timestamp) und
+(`AnalyseFakt` verweigert die Instanziierung ohne Quellen-ID/Timestamp),
 AC3 (`AnalyseOutput` wird gegen ein festes JSON-Schema validiert — Score je
-Kategorie 0–10 oder "fehlt", Pflichtfelder, kein unbekanntes Zusatzfeld).
+Kategorie 0–10 oder "fehlt", Pflichtfelder, kein unbekanntes Zusatzfeld)
+sowie die S-013-Cross-Check-/Audit-Verträge: AC4 (`Abweichung`,
+`CrossCheckErgebnis`), AC5 (`ToleranzKonfig`) und AC10 (`ProtokollEintrag`).
 Die End-to-End-Prüfung eines rohen (dict-)Analyse-Output-Kandidaten inkl.
-AC2 (Input-Bindung) liegt in `tests/adapters/llm/test_grounding.py`.
+AC2 (Input-Bindung) liegt in `tests/adapters/llm/test_grounding.py`; das
+tatsächliche Verhalten des Cross-Checks (AC4/AC5) und des Audit-Protokolls
+(AC10) liegt in `tests/adapters/llm/test_cross_check.py` und
+`tests/core/test_audit_log.py`.
 """
 
 from __future__ import annotations
@@ -20,11 +25,16 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts.llm_grounding import (
+    Abweichung,
     AnalyseFakt,
     AnalyseInput,
     AnalyseOutput,
     AnalyseScores,
+    CrossCheckErgebnis,
     GroundingErgebnis,
+    Originalquelle,
+    ProtokollEintrag,
+    ToleranzKonfig,
 )
 
 VALID_FAKT_KWARGS = {
@@ -163,3 +173,91 @@ def test_groundingergebnis_erzwingt_status_invariante(kwargs: dict) -> None:
         kwargs = dict(kwargs, output=AnalyseOutput(**_valid_output_kwargs()))
     with pytest.raises(ValidationError):
         GroundingErgebnis(**kwargs)
+
+
+def test_toleranzkonfig_akzeptiert_absolut_und_relativ() -> None:
+    """@trace llm-grounding#AC5 — eine Toleranzschwelle je Kennzahl-Typ
+    unterscheidet absolute und relative Abweichung."""
+    absolut = ToleranzKonfig(kennzahl_typ="kurs", typ="absolut", schwelle=2.0)
+    relativ = ToleranzKonfig(kennzahl_typ="kgv", typ="relativ", schwelle=0.02)
+    assert absolut.typ == "absolut"
+    assert relativ.typ == "relativ"
+
+
+def test_toleranzkonfig_lehnt_negative_schwelle_ab() -> None:
+    """@trace llm-grounding#AC5 — eine negative Toleranzschwelle ist keine
+    sinnvolle Konfiguration und wird strukturell abgelehnt."""
+    with pytest.raises(ValidationError):
+        ToleranzKonfig(kennzahl_typ="kgv", typ="relativ", schwelle=-0.01)
+
+
+def test_originalquelle_traegt_kennzahl_typ_und_wert() -> None:
+    """@trace llm-grounding#AC4 — die Originalquelle für den Cross-Check
+    trägt Kennzahl-Typ, Quellen-ID und den tatsächlichen Wert."""
+    quelle = Originalquelle(quellen_id="sec-form4-123", kennzahl_typ="kgv", wert=12.4)
+    assert isinstance(quelle.wert, Decimal)
+    assert quelle.wert == Decimal("12.4")
+
+
+def test_abweichung_traegt_output_quelle_abweichung_und_toleranz() -> None:
+    """@trace llm-grounding#AC4 — eine Abweichung dokumentiert Output-Wert,
+    Quellwert, gemessene Abweichung und die angewendete Toleranz."""
+    abweichung = Abweichung(
+        kennzahl_typ="kgv", wert_output=12.5, wert_quelle=12.4, abweichung=0.1, toleranz=0.02
+    )
+    assert abweichung.wert_output == Decimal("12.5")
+    assert abweichung.wert_quelle == Decimal("12.4")
+    assert abweichung.abweichung == Decimal("0.1")  # Decimal, keine Float-Drift (P7)
+    assert isinstance(abweichung.toleranz, Decimal)
+
+
+def test_crosscheckergebnis_verworfen_traegt_protokoll_eintrag() -> None:
+    """@trace llm-grounding#AC4,AC10 — ein verworfenes Cross-Check-Ergebnis
+    trägt einen Protokolleintrag mit Grund, Zeitpunkt und betroffener
+    Kennzahl/Quelle."""
+    ergebnis = CrossCheckErgebnis(
+        status="verworfen",
+        abweichungen=[
+            Abweichung(
+                kennzahl_typ="kgv",
+                wert_output=100.0,
+                wert_quelle=50.0,
+                abweichung=1.0,
+                toleranz=0.05,
+            )
+        ],
+        protokoll_eintrag=ProtokollEintrag(
+            zeitpunkt=datetime(2026, 7, 1, tzinfo=UTC),
+            grund="cross_check_abweichung",
+            kennzahl_typ="kgv",
+            quellen_id="sec-form4-123",
+            detail="Abweichung über Toleranz.",
+        ),
+    )
+    assert ergebnis.status == "verworfen"
+    assert ergebnis.protokoll_eintrag is not None
+    assert ergebnis.protokoll_eintrag.grund == "cross_check_abweichung"
+
+
+def test_protokolleintrag_erlaubt_kennzahl_typ_und_quellen_id_optional() -> None:
+    """@trace llm-grounding#AC10 — ein Protokolleintrag ohne bekannte
+    Kennzahl/Quelle (z.B. eine schema-weite Ablehnung) ist trotzdem
+    gültig — Grund, Zeitpunkt und Detail bleiben Pflicht."""
+    eintrag = ProtokollEintrag(
+        zeitpunkt=datetime(2026, 7, 1, tzinfo=UTC),
+        grund="schema_verletzung",
+        detail="Pflichtfeld fehlt.",
+    )
+    assert eintrag.kennzahl_typ is None
+    assert eintrag.quellen_id is None
+
+
+def test_protokolleintrag_lehnt_unbekannten_grund_ab() -> None:
+    """@trace llm-grounding#AC10 — `grund` ist auf das feste
+    `ProtokollGrund`-Vokabular beschränkt (kein freier String)."""
+    with pytest.raises(ValidationError):
+        ProtokollEintrag(
+            zeitpunkt=datetime(2026, 7, 1, tzinfo=UTC),
+            grund="irgendwas-unbekanntes",
+            detail="x",
+        )
