@@ -95,6 +95,7 @@ erDiagram
 | asset_class_id | SMALLINT | FK → asset_class.id |
 | category_code | TEXT | FK → analysis_category.code |
 | weight_pct | NUMERIC(6,3) | NOT NULL, CHECK `0 ≤ weight_pct ≤ 100` |
+| config_version | SMALLINT | NOT NULL, DEFAULT 1 — reine Tag-Spalte, **NICHT** Teil des PK und **NICHT** ausreichend für AC10 ("nachvollziehbar, welche Konfigurationsversion einer Analyse zugrunde lag"): ein künftiges Hochzählen per UPDATE überschreibt die Vorgänger-Gewichte in derselben Zeile, es entsteht **keine** Historie. Für AC10 fehlt noch — Folge-Story — entweder (a) eine separate Historien-/Snapshot-Tabelle je Version, oder (b) `config_version` als Teil eines erweiterten PK (`asset_class_id, category_code, config_version`) mit append-only-Zeilen + „aktuell gültig"-Zeiger; in beiden Fällen zusätzlich eine Referenz von `analysis_result` auf die tatsächlich genutzte Version |
 | — | — | PK (asset_class_id, category_code) · Σ je Klasse = 100 (→ BR-101) |
 
 ### `analysis_method` — Methodentabelle je Klasse (C-006, C-007, C-018)
