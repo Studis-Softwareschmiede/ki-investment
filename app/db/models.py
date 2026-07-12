@@ -7,6 +7,7 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
 
 import sqlalchemy as sa
@@ -14,10 +15,13 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    Index,
+    Integer,
     Numeric,
     SmallInteger,
     String,
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -27,6 +31,22 @@ PRIO_STUFE_VALUES = ("MVP", "Stufe2", "Stufe3")
 
 # data-model.md §1 `analysis_category`: CHECK code ∈ {...} (5 Analysekategorien, C-007)
 ANALYSIS_CATEGORY_CODES = ("fundamental", "technisch", "qualitativ", "makro", "risiko_quant")
+
+# data-model.md §1 `data_source`: CHECK kategorie ∈ {...} (5 Kategorien, C-009/AC5)
+DATA_SOURCE_KATEGORIE_VALUES = (
+    "equity_fundamentals",
+    "retail_social",
+    "blockchain_crypto",
+    "etf_fonds",
+    "makro_anleihen",
+)
+
+# data-model.md §1 `data_source`: CHECK qualitaet ∈ {...}
+DATA_SOURCE_QUALITAET_VALUES = ("niedrig", "mittel", "mittel_hoch", "hoch", "sehr_hoch")
+
+# data-model.md §1 `data_source`: frequenz_sekunden-Bereich (Socket-Scheduling)
+DATA_SOURCE_FREQUENZ_MIN_SECONDS = 30
+DATA_SOURCE_FREQUENZ_MAX_SECONDS = 86400
 
 
 class AssetClass(Base):
@@ -114,4 +134,92 @@ class CategoryWeight(Base):
         return (
             f"CategoryWeight(asset_class_id={self.asset_class_id!r}, "
             f"category_code={self.category_code!r}, weight_pct={self.weight_pct!r})"
+        )
+
+
+class DataSource(Base):
+    """Datenquellen-Registry (data-model.md `data_source`, C-009) — 12 Quellen in
+    5 Kategorien (AC5). `aktiv` ist der MVP-Kostentoggel (AC13): nur die 5
+    kostenlosen Quellen (SEC Form 4, Reddit, Polymarket, FRED,
+    Wirtschaftskalender) sind per Seed aktiv; kostenpflichtige/institutionelle
+    Quellen sind registriert, aber inaktiv und lösen ohne Aktivierung keinen
+    Abruf aus (siehe Migration
+    `ea80c97626ee_create_data_source_and_data_source_.py`).
+
+    `vault_ref` ist ein reiner Zeiger auf ein Secret (kein Klartext-Credential,
+    → BR-126) — die tatsächliche Auth-Kapselung je Adapter ist Sache der
+    Socket-Adapter-Basis (S-005), nicht dieser Registry.
+    """
+
+    __tablename__ = "data_source"
+    __table_args__ = (
+        CheckConstraint(
+            "kategorie IN ('equity_fundamentals', 'retail_social', 'blockchain_crypto', "
+            "'etf_fonds', 'makro_anleihen')",
+            name="ck_data_source_kategorie",
+        ),
+        CheckConstraint(
+            "qualitaet IN ('niedrig', 'mittel', 'mittel_hoch', 'hoch', 'sehr_hoch')",
+            name="ck_data_source_qualitaet",
+        ),
+        CheckConstraint(
+            f"frequenz_sekunden BETWEEN {DATA_SOURCE_FREQUENZ_MIN_SECONDS} "
+            f"AND {DATA_SOURCE_FREQUENZ_MAX_SECONDS}",
+            name="ck_data_source_frequenz_sekunden_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    kategorie: Mapped[str | None] = mapped_column(String, nullable=True)
+    qualitaet: Mapped[str | None] = mapped_column(String, nullable=True)
+    frequenz_sekunden: Mapped[int] = mapped_column(Integer, nullable=False)
+    kostenmodell: Mapped[str | None] = mapped_column(String, nullable=True)
+    kosten_monatlich_chf: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), nullable=True, default=Decimal("0"), server_default=sa.text("0")
+    )
+    zugangsart: Mapped[str | None] = mapped_column(String, nullable=True)
+    rate_limit: Mapped[str | None] = mapped_column(String, nullable=True)
+    vault_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    aktiv: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"DataSource(name={self.name!r}, kategorie={self.kategorie!r}, aktiv={self.aktiv!r})"
+
+
+class DataSourceAssetClass(Base):
+    """Quelle ↔ Anlageklasse (M:N, data-model.md `data_source_asset_class`,
+    C-009 Abdeckung). Ordnet jeder Quelle die Anlageklassen zu, für die sie
+    verwertbare Signale liefert (AC5); die Reddit-Zeilen dieser Tabelle sind
+    per Seed strukturell auf die retail-getriebenen Klassen 1/7 beschränkt
+    (AC6, BR-123 — Enforcement-Layer laut data-model.md §10 „App
+    (Quellen-Matching)", hier bereits durch die Seed-Daten selbst erfüllt).
+
+    `ix_data_source_asset_class_asset_class_id` (data-model.md §8) deckt den
+    Filter „Quellen je Klasse" (Datenquellen-Abfrage-Matching) ab — der
+    Composite-PK (data_source_id, asset_class_id) unterstützt diesen
+    Zugriffspfad allein nicht, da `asset_class_id` nicht der führende Teil
+    des PK-Index ist.
+    """
+
+    __tablename__ = "data_source_asset_class"
+    __table_args__ = (Index("ix_data_source_asset_class_asset_class_id", "asset_class_id"),)
+
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), primary_key=True
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), primary_key=True
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"DataSourceAssetClass(data_source_id={self.data_source_id!r}, "
+            f"asset_class_id={self.asset_class_id!r})"
         )
