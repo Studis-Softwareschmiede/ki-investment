@@ -1,0 +1,32 @@
+- id: dateneingang
+  name: 'Dateneingang'
+  order: 1
+  description: 'Socket-Adapter, Datenquellen, geteilte Abfrage, Datenqualität/Point-in-Time'
+- id: analyse
+  name: 'Analyse'
+  order: 2
+  description: 'Score-Engine (5 Kategorien), LLM-Grounding, Buy-/Sell-Analysepfade'
+- id: suche
+  name: 'Suche'
+  order: 3
+  description: 'Kandidatensuche (Suchkriteria) und Depot-Überwachung'
+- id: handel
+  name: 'Handel'
+  order: 4
+  description: 'Position-/Exit-Sizing, Strategie & Exit-Regeln, Risikomanagement, Order-Ausführung, Plattformen'
+- id: depot
+  name: 'Depot'
+  order: 5
+  description: 'Depotmodul (Bestand/G&V/Historie), Dashboard, Reporting'
+- id: konfiguration
+  name: 'Konfiguration'
+  order: 6
+  description: 'Anlageklassen-Toggles, Methodentabellen/Gewichte, Depotstrategie-Presets, Einstellungen'
+- id: lernschleife
+  name: 'Lernschleife'
+  order: 7
+  description: 'Research (Hypothesen) und zweistufiges Validierungs-Gate (Stufe 2)'
+- id: betrieb
+  name: 'Betrieb'
+  order: 8
+  description: 'Kill-Switch, Heartbeat, Alerts, Secrets, Paper-/Live-Trennung'

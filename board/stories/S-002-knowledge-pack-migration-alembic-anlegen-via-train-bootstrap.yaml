@@ -1,0 +1,25 @@
+id: S-002
+parent: F-001
+title: Knowledge-Pack migration/alembic anlegen (via /train --bootstrap migration/alembic)
+status: To Do
+priority: P1
+spec: docs/data-model.md
+implements:
+- AC1
+depends: null
+labels:
+- db
+- knowledge-pack
+size_est: null
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: null
+confidence: null
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:01:17Z'
+updated_at: '2026-07-12T10:01:17Z'
+done_at: null
