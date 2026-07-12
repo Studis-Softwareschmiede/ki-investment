@@ -4,7 +4,7 @@ title: <Feature-Titel>
 status: draft               # draft | active | superseded — genau diese drei Werte gültig; "approved" ist KEIN gültiger Status (Synonym-Drift für "active", siehe docs/specs/spec-status-lifecycle.md)
 version: 1
 spec_format: use-case-2.0   # aktuelle Standard-Version dieser Vorlage (offizielle Methodik-Bezeichnung, kein interner Zähler). requirement übernimmt diesen Wert 1:1 beim Anlegen neuer Specs. /agent-flow:reconcile Stufe 1 vergleicht den spec_format-Stempel jeder Spec gegen diesen Vorlagen-Wert, um veraltete/fehlende Form zu erkennen (docs/architecture/reconcile-subsystem.md §3, §8).
-area: <bereich-id>          # Pflicht für NEUE Specs: kebab-case-id eines Eintrags in board/areas.yaml (docs/specs/board-areas.md AC6). Bestehende Specs ohne area bleiben gültig bis zur Migration — nicht rückwirkend nachtragen. Zuordnung + Stempelung übernimmt requirement (docs/specs/requirement-area-intake.md).
+# area: <bereich-id>          # Pflicht für NEUE Specs: kebab-case-id eines Eintrags in board/areas.yaml (docs/specs/board-areas.md AC6). Bestehende Specs ohne area bleiben gültig bis zur Migration — nicht rückwirkend nachtragen. Zuordnung + Stempelung übernimmt requirement (docs/specs/requirement-area-intake.md).
 ---
 
 # Spec: <Feature-Titel>  (`<feature-slug>`)

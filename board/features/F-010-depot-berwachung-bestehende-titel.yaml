@@ -9,7 +9,9 @@ definition_of_done: null
 labels: null
 depends: null
 owner: null
-stories: null
-progress: null
+stories:
+- S-032
+- S-033
+progress: 0/2 done
 created_at: '2026-07-12T10:08:44Z'
-updated_at: '2026-07-12T10:08:44Z'
+updated_at: '2026-07-12T10:12:16Z'
