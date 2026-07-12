@@ -58,14 +58,14 @@ Der Datenqualitäts-Layer garantiert, dass jede weiterverarbeitete Zahl korrekt,
 - **Bronze-Datensatz:** `{ event_id (stabil), roh_wert, quelle, beobachtungs_zeitpunkt (point-in-time), empfangs_zeitpunkt, anlageklassen_tag }` — immutabel, versioniert.
 - **Silver-Datensatz:** `{ event_id, normalisierter_wert, einheit, adjustierungs_info, abgeleitet_aus: bronze_version }` — reproduzierbar aus Bronze.
 - **Gold-Datensatz:** `{ event_id, angereicherter_wert, qualitaetsindikator, herkunft: silver_version }` — Konsumenten-Sicht.
-- **Validierungs-Ergebnis:** `{ event_id, valide: bool, verletzte_regeln[...], zeitstempel }`.
+- **Validierungs-Ergebnis:** `{ event_id, valide: bool, verletzte_regeln[...], zeitstempel }`. Pflicht-Metadaten für die Vollständigkeitsprüfung (AC7) sind die laut `docs/data-model.md` §2 als `NOT NULL` deklarierten Bronze-Datensatz-Felder (`event_id`, `roh_wert`, `quelle`, `beobachtungs_zeitpunkt`); `anlageklassen_tag` ist dort physisch nullable und daher optional — sofern gesetzt, wird er gegen den Wertebereich 1–11 geprüft.
 - **Replay-Abfrage:** Input `{ titel/quelle, stand_zeitpunkt }` → Output: Datenlage exakt wie zum `stand_zeitpunkt` bekannt.
 
 ## Edge-Cases & Fehlerverhalten
 - Revision trifft für ein Datum ein, das bereits in Gold verarbeitet wurde → neue Point-in-Time-Version; nachgelagerte Recalculation über das Recalculation-Window (`[[dateneingang]]`) verwendet die neue Version, alte Replays bleiben stabil (AC10).
 - Corporate Action rückwirkend gemeldet → historische Silver-Reihe wird neu adjustiert abgeleitet, Bronze bleibt unverändert (AC6).
 - Delisting eines gehaltenen Titels → Titel verschwindet nicht aus dem historischen Universum (AC5).
-- Event-ID kollidiert mit inhaltlich abweichendem Datenpunkt → als Validierungsfehler behandeln und protokollieren (AC7/AC8), nicht stillschweigend überschreiben.
+- Event-ID kollidiert mit inhaltlich abweichendem Datenpunkt → als Validierungsfehler behandeln und protokollieren (AC7/AC8), nicht stillschweigend überschreiben. Unterscheidung zur Revision (AC10/A1): eine Revision behält denselben `beobachtungs_zeitpunkt` derselben Beobachtung, nur der Wert ändert sich; weicht bei kollidierender Event-ID zusätzlich der `beobachtungs_zeitpunkt` ab, gilt das als andere Beobachtung unter wiederverwendeter Event-ID (Validierungsfehler).
 
 ## NFRs
 - Reproduzierbarkeit: Silver und Gold müssen zu jedem Zeitpunkt aus Bronze rekonstruierbar sein (Audit/Replay).
