@@ -1,0 +1,21 @@
+id: F-011
+title: Depotmodul (Bestand, G/V, Transaktionshistorie)
+goal: 'Wahrheit über den Bestand: bucht Fills, rechnet G/V inkl. Kosten und liefert
+  Portfolio-Aggregate an das Risikomanagement.'
+status: Backlog
+priority: P0
+spec: docs/specs/depot.md
+definition_of_done: null
+labels: null
+depends: null
+owner: null
+stories:
+- S-015
+- S-016
+- S-035
+- S-036
+- S-053
+- S-054
+progress: 0/6 done
+created_at: '2026-07-12T10:08:44Z'
+updated_at: '2026-07-12T10:12:16Z'

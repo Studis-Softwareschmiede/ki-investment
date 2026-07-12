@@ -1,0 +1,31 @@
+id: S-034
+parent: F-008
+title: Sell-Pfad (bestehende Titel) gegen fixierte Exit-Regeln
+status: To Do
+priority: P1
+spec: docs/specs/analyse-pipelines.md
+implements:
+- AC5
+- AC6
+- AC7
+depends:
+- S-033
+labels:
+- analyse
+- mvp
+size_est: M
+dispo_est: '3'
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start: Wiederbewertung ausschliesslich gegen beim Kauf fixierte
+  Exit-Regeln (kein moving-the-goalposts, Leitfrage abgebildet, AC5), Sell-Signal
+  mit Dringlichkeit an Exit-Sizing (AC6), Hard/Soft-Klassifikation inkl. Katastrophen-Enum
+  (AC7). Empfängt Ereignisse aus depot-ueberwachung.'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:09:34Z'
+updated_at: '2026-07-12T10:09:35Z'
+done_at: null

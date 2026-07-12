@@ -1,0 +1,18 @@
+id: F-008
+title: Analysepfade — Einstieg (Buy) und Wiederbewertung (Sell)
+goal: 'Zwei getrennte Pfade: Buy-Signal bei Score ≥ 8 und Sell-Signal gegen fixierte
+  Exit-Regeln mit Dringlichkeit.'
+status: Backlog
+priority: P1
+spec: docs/specs/analyse-pipelines.md
+definition_of_done: null
+labels: null
+depends: null
+owner: null
+stories:
+- S-028
+- S-034
+- S-052
+progress: 0/3 done
+created_at: '2026-07-12T10:08:44Z'
+updated_at: '2026-07-12T10:12:16Z'

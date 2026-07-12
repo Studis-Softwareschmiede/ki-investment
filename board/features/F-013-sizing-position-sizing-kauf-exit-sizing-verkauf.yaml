@@ -1,0 +1,19 @@
+id: F-013
+title: Sizing — Position-Sizing (Kauf) & Exit-Sizing (Verkauf)
+goal: Bestimmt Kauf-Ordergrösse (Fractional Kelly + Cap + Kosten) und Verkaufs-Ausführungsform
+  (Dringlichkeit, Tranchen, Order-Typ) ohne LLM.
+status: Backlog
+priority: P1
+spec: docs/specs/sizing.md
+definition_of_done: null
+labels: null
+depends: null
+owner: null
+stories:
+- S-039
+- S-041
+- S-042
+- S-055
+progress: 0/4 done
+created_at: '2026-07-12T10:08:45Z'
+updated_at: '2026-07-12T10:12:16Z'

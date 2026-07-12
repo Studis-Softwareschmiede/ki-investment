@@ -1,0 +1,31 @@
+id: S-048
+parent: F-015
+title: 'Fill-Handling: Teilfills/Rejects/Timeouts & Arrival-Price-Slippage/TCA an
+  Depot'
+status: To Do
+priority: P1
+spec: docs/specs/ausfuehrung-paper.md
+implements:
+- AC7
+- AC8
+depends:
+- S-035
+- S-046
+labels:
+- handel
+- broker
+- mvp
+size_est: L
+dispo_est: '5'
+dispo_act: null
+dispo_forecast: null
+estimate_note: Cold-Start; Kern-Fehlerbehandlung (häufigste Verlustquelle), idempotente
+  Fill→Depot-Fortschreibung (P8), Order-Lifecycle-Zustände.
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T10:10:09Z'
+updated_at: '2026-07-12T10:10:12Z'
+done_at: null
