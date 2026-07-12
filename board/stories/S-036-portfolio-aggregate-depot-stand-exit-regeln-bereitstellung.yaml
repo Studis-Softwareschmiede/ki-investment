@@ -1,7 +1,7 @@
 id: S-036
 parent: F-011
 title: Portfolio-Aggregate & Depot-Stand-/Exit-Regeln-Bereitstellung
-status: To Do
+status: In Progress
 priority: P1
 spec: docs/specs/depot.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Cold-Start; Aggregation je GICS-Branche/Klasse/Cash als Risiko-In
   aus Positionen reproduzierbar.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-036-portfolio-aggregate
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:38Z'
-updated_at: '2026-07-12T10:09:41Z'
+updated_at: '2026-07-12T20:25:08Z'
 done_at: null

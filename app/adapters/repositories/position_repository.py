@@ -35,6 +35,16 @@ die append-only `transaction`-Historie, inkl. Arrival-Price/Slippage) und
 siehe `app.db.models.Transaction`-Docstring für die App-seitige
 BR-115-Durchsetzung (keine Update-/Delete-Methode existiert in diesem
 Adapter für diese Tabelle).
+
+Story S-036 (AC8/AC9) ergänzt `alle_offenen_positionen`: liest ALLE
+offenen Lots eines `mode` über sämtliche Titel hinweg (nicht nur einen,
+wie `offene_positionen`), inklusive Anlageklasse, GICS-Branche
+(`Instrument.gics_sector`, Outer-Join-Attribut, da nicht auf `Position`
+selbst gepflegt), Strategie-Name (`Strategy.name`) und Exit-Regeln
+(`ExitRule`, Outer-Join — noch keine Story legt `exit_rule`-Zeilen an,
+siehe `app.domain.portfolio.ports.ExitRegelnBestand`-Docstring). Basis für
+`app.domain.portfolio.portfolio_aggregate` (Portfolio-Aggregate,
+Depot-Stand, Titel-Strategie-Exit-Regeln-Output).
 """
 
 from __future__ import annotations
@@ -48,8 +58,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.contracts.depot import FillInput, Modus
-from app.db.models import DepotFillDedup, Position, Strategy, Transaction
-from app.domain.portfolio.ports import OffenePosition, TransaktionsEintrag
+from app.db.models import DepotFillDedup, ExitRule, Instrument, Position, Strategy, Transaction
+from app.domain.portfolio.ports import (
+    ExitRegelnBestand,
+    OffenePosition,
+    PositionsBestand,
+    TransaktionsEintrag,
+)
 from app.domain.portfolio.transaction_historie import berechne_slippage
 
 
@@ -265,6 +280,63 @@ class SqlAlchemyPositionRepository:
             )
             for z in zeilen
         ]
+
+    def alle_offenen_positionen(self, *, mode: Modus) -> list[PositionsBestand]:
+        """AC8/AC9 (S-036): depotweite Sicht auf ALLE offenen Lots **im
+        angegebenen `mode`** (Mode-Isolation, BR-113/BR-130), aufsteigend
+        nach `instrument_id`, `opened_at` sortiert (ältester Lot je Titel
+        zuerst — Voraussetzung für die Titel-Dedup-Logik in
+        `app.domain.portfolio.portfolio_aggregate
+        .ermittle_titel_strategie_exit_regeln`). `Instrument`/`ExitRule`
+        werden als Outer-Join angebunden: `gics_sector` kann fehlen (siehe
+        `app.db.models.Instrument`-Docstring), eine `exit_rule`-Zeile
+        existiert bislang für keinen Lot (S-037/S-038)."""
+        stmt = (
+            select(Position, Instrument.gics_sector, Strategy.name, ExitRule)
+            .join(Instrument, Instrument.id == Position.instrument_id)
+            .join(Strategy, Strategy.id == Position.strategy_id)
+            .outerjoin(ExitRule, ExitRule.position_id == Position.id)
+            .where(Position.status == "offen", Position.mode == mode)
+            .order_by(Position.instrument_id.asc(), Position.opened_at.asc())
+        )
+        zeilen = self._session.execute(stmt).all()
+        return [
+            PositionsBestand(
+                position_id=str(position.id),
+                titel_id=str(position.instrument_id),
+                asset_class_id=position.asset_class_id,
+                gics_branche=gics_sector,
+                menge=position.menge,
+                einstand_preis=position.einstand_preis,
+                strategie=strategie_name,
+                exit_regeln=_exit_regeln_aus_zeile(exit_rule_zeile),
+            )
+            for position, gics_sector, strategie_name, exit_rule_zeile in zeilen
+        ]
+
+
+def _exit_regeln_aus_zeile(zeile: ExitRule | None) -> ExitRegelnBestand:
+    """AC9 (S-036): bildet eine `exit_rule`-Zeile auf `ExitRegelnBestand`
+    ab — existiert (noch) keine Zeile (kein Aufrufer legt bislang eine an,
+    S-037/S-038), liefert dies ein Objekt mit ausschliesslich `None`-
+    Feldern statt eines Fehlers."""
+    if zeile is None:
+        return ExitRegelnBestand(
+            stop_loss_pct=None,
+            take_profit_pct=None,
+            stop_typ=None,
+            atr_multiplikator=None,
+            thesis_invalidation=None,
+            time_box=None,
+        )
+    return ExitRegelnBestand(
+        stop_loss_pct=zeile.stop_loss_pct,
+        take_profit_pct=zeile.take_profit_pct,
+        stop_typ=zeile.stop_typ,
+        atr_multiplikator=zeile.atr_multiplikator,
+        thesis_invalidation=zeile.thesis_invalidation,
+        time_box=zeile.time_box,
+    )
 
 
 def _als_uuid(titel_id: str) -> uuid.UUID | None:

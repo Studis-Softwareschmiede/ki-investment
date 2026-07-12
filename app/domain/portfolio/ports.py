@@ -48,12 +48,21 @@ AC7). Bewusst KEINE Update-/Delete-Methode im Port — das ist die
 App-seitige Hälfte der BR-115-Durchsetzung (siehe
 `app.db.models.Transaction`-Docstring): es existiert schlicht kein
 Aufrufer-Pfad, über den ein Eintrag nachträglich verändert werden könnte.
+
+Story S-036 (AC8/AC9) ergänzt `alle_offenen_positionen`: eine depotweite
+(nicht titel-spezifische) Sicht auf ALLE offenen Lots eines `mode` —
+Grundlage für die Portfolio-Aggregate (`app.domain.portfolio
+.portfolio_aggregate.berechne_portfolio_aggregat`, AC8) sowie für den
+Depot-Stand/Titel+Strategie+Exit-Regeln-Output an Risikomanagement und
+Depot-Überwachung (AC9). Anders als `offene_positionen` (ein Titel) liest
+diese Methode über ALLE Titel des angegebenen Modus hinweg, inklusive der
+(je Lot beim Kauf fixierten) Strategie und Exit-Regeln.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Protocol
 
@@ -91,6 +100,47 @@ class OffenePosition:
     einstand_preis: Decimal
     einstand_methode: str
     opened_at: datetime
+
+
+@dataclass(frozen=True)
+class ExitRegelnBestand:
+    """Schreibgeschützte Sicht auf die beim Kauf fixierten Exit-Regeln
+    eines Positions-Lots (S-036, AC9) — bildet `app.db.models.ExitRule`
+    ab. Keine Story legt bislang eine `exit_rule`-Zeile an (siehe
+    `app.db.models.Position`-Docstring: die inhaltliche Ableitung/
+    Persistenz der Exit-Regel-Kategorien ist `strategie-exit-regeln`,
+    S-037/S-038) — bis dahin liefert `SqlAlchemyPositionRepository
+    .alle_offenen_positionen` hier ein Objekt mit ausschliesslich `None`-
+    Feldern (kein Fehler, keine Fiktion eines Werts)."""
+
+    stop_loss_pct: Decimal | None
+    take_profit_pct: Decimal | None
+    stop_typ: str | None
+    atr_multiplikator: Decimal | None
+    thesis_invalidation: str | None
+    time_box: timedelta | None
+
+
+@dataclass(frozen=True)
+class PositionsBestand:
+    """Depotweite, schreibgeschützte Sicht auf einen offenen Positions-Lot
+    (S-036, AC8/AC9) — Basis für Portfolio-Aggregate
+    (`app.domain.portfolio.portfolio_aggregate.berechne_portfolio_aggregat`)
+    sowie für den Depot-Stand-/Titel-Strategie-Exit-Regeln-Output an
+    Risikomanagement und Depot-Überwachung. Anders als `OffenePosition`
+    (S-016, titel-spezifisch, für die Fill-Buchung) trägt dieses DTO auch
+    Anlageklasse, GICS-Branche, Strategie und Exit-Regeln — die für die
+    Fill-Buchung selbst irrelevanten, für die Aggregation aber
+    erforderlichen Attribute."""
+
+    position_id: str
+    titel_id: str
+    asset_class_id: int
+    gics_branche: str | None
+    menge: Decimal
+    einstand_preis: Decimal
+    strategie: str | None
+    exit_regeln: ExitRegelnBestand
 
 
 class PositionRepository(Protocol):
@@ -183,4 +233,20 @@ class PositionRepository(Protocol):
         Arrival-Price + Slippage) sowie für Steuerauszug/Dashboard (AC4).
         Leere Liste, falls für `titel_id`/`mode` noch kein Fill gebucht
         wurde."""
+        ...
+
+    def alle_offenen_positionen(self, *, mode: Modus) -> list[PositionsBestand]:
+        """AC8/AC9 (S-036): liefert ALLE offenen Positions-Lots **im
+        angegebenen `mode`** (Mode-Isolation, BR-113/BR-130) über sämtliche
+        Titel hinweg, inklusive Anlageklasse, GICS-Branche (`Instrument
+        .gics_sector`, `None` falls noch nicht gepflegt), Strategie-Name
+        und Exit-Regeln (`None`-Felder, solange keine `exit_rule`-Zeile
+        existiert, siehe `ExitRegelnBestand`-Docstring). Aufsteigend nach
+        `instrument_id`, `opened_at` sortiert (älteste Lot-Zeile je Titel
+        zuerst — Voraussetzung für die Dedup-Logik in
+        `app.domain.portfolio.portfolio_aggregate
+        .ermittle_titel_strategie_exit_regeln`, die bei mehreren Lots
+        desselben Titels (FIFO) den ältesten Lot als Titel-Repräsentant
+        verwendet). Leere Liste, falls kein offener Lot in diesem Modus
+        existiert."""
         ...

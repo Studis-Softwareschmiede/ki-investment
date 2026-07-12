@@ -429,6 +429,17 @@ waehrung, zeitstempel }`), sie fehlten hier jedoch als Spalten.
 
 ## 5 · Depot-Aggregate (C-015, C-017)
 
+> **S-036 (AC8/AC9)** liefert die Portfolio-Aggregate (Gewichtung je GICS-
+> Branche/Anlageklasse, Cash-Quote) sowie den Depot-Stand/Titel-Strategie-
+> Exit-Regeln-Output als **live berechnete Domain-Funktion** aus den
+> offenen `position`-Zeilen (`app.domain.portfolio.portfolio_aggregate`),
+> NICHT aus den beiden folgenden Tabellen — konsistent mit der NFR
+> „Aggregate sind aus Positionen + Historie reproduzierbar (kein stiller
+> Zustand ohne Herleitung)". `portfolio_snapshot`/`portfolio_weight`
+> bleiben als Schema für eine spätere **Persistenz-/Historien-Story**
+> (Zeitreihen-Trend fürs Dashboard) reserviert und sind von S-036 nicht
+> migriert worden.
+
 ### `portfolio_snapshot` — Depot-Aggregat je Zeitpunkt
 | Feld | Typ | Constraint |
 |---|---|---|
