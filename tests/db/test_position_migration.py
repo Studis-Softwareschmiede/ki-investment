@@ -1,6 +1,12 @@
-"""Tests für die Positions-Grundgerüst-Migration (Story S-015).
+"""Tests für die Positions-Grundgerüst-Migration (Story S-015 + S-053).
 
-Covers (depot): AC1, AC10
+Covers (depot): AC1, AC10, AC6
+
+S-053 (AC6, FX-Attribution) ergänzt Tests für die drei neuen, nullable
+Spalten `einstand_fx_rate`/`fx_kapital_gv`/`fx_waehrungs_gv` (Migration
+`f065be116c72`) — analog zur bestehenden Konvention werden nur die
+strukturellen Constraints (hier: NULLable, kein CHECK) gegen SQLite
+geprüft.
 
 `instrument`/`strategy`/`time_horizon` sind leere FK-Voraussetzungen (kein
 Seed — siehe Docstring von `app/db/migrations/versions/
@@ -207,3 +213,42 @@ def test_strategy_rejects_invalid_cluster() -> None:
         session.add(Strategy(id=uuid.uuid4(), name="X", cluster="ungueltig"))
         with pytest.raises(IntegrityError):
             session.commit()
+
+
+def test_position_fx_attribution_spalten_sind_nullable_und_default_none() -> None:
+    """@trace depot#AC6 — `einstand_fx_rate`/`fx_kapital_gv`/
+    `fx_waehrungs_gv` sind ohne Angabe `None` (CHF-Position, keine
+    Attribution nötig, → BR-129) — kein NOT-NULL-Constraint."""
+    engine = _engine()
+    with Session(engine) as session:
+        instrument, strategy = _seed_stammdaten(session)
+        position = _valid_position(instrument, strategy)
+        session.add(position)
+        session.commit()
+        session.refresh(position)
+
+        assert position.einstand_fx_rate is None
+        assert position.fx_kapital_gv is None
+        assert position.fx_waehrungs_gv is None
+
+
+def test_position_fx_attribution_spalten_persistieren_werte() -> None:
+    """@trace depot#AC6 — die drei FX-Attribution-Spalten persistieren
+    gesetzte Werte (Fremdwährungsposition)."""
+    engine = _engine()
+    with Session(engine) as session:
+        instrument, strategy = _seed_stammdaten(session)
+        position = _valid_position(
+            instrument,
+            strategy,
+            einstand_fx_rate=Decimal("0.90"),
+            fx_kapital_gv=Decimal("270"),
+            fx_waehrungs_gv=Decimal("26"),
+        )
+        session.add(position)
+        session.commit()
+        session.refresh(position)
+
+        assert position.einstand_fx_rate == Decimal("0.90")
+        assert position.fx_kapital_gv == Decimal("270")
+        assert position.fx_waehrungs_gv == Decimal("26")

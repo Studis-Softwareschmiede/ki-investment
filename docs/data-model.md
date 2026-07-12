@@ -317,6 +317,18 @@ erDiagram
 ## 4 · Position, Order, Trade, Transaktion (C-013, C-014, C-016, C-017)
 
 ### `position` — gehaltene Position (C-014, C-017)
+
+Präzisiert in S-053 (AC6): `einstand_fx_rate`, `fx_kapital_gv`,
+`fx_waehrungs_gv` ergänzt — die Verträge-Sektion von `docs/specs/depot.md`
+verlangt für die Position bereits `fx_kapital_gv`/`fx_waehrungs_gv`
+(FX-Attribution), sie fehlten hier jedoch als Spalten;
+`einstand_fx_rate` ist die zur Berechnung nötige Zusatzspalte (Ø-Einstands-
+FX-Kurs, analog zu `einstand_preis`), in der ursprünglichen Verträge-Liste
+nicht namentlich geführt (Feldname-Lücke, S-053 präzisiert). `fx_kapital_gv`/
+`fx_waehrungs_gv` sind — wie `unrealisierter_gv` — reservierte Spalten ohne
+Schreibpfad (Bewertungsschleife ist eigene, künftige Story); `einstand_fx_rate`
+wird dagegen ab S-053 aktiv fortgeschrieben (Kauf/Nachkauf, → BR-129).
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
@@ -330,6 +342,9 @@ erDiagram
 | einstand_methode | TEXT | NOT NULL, CHECK ∈ {gleitender_durchschnitt, fifo}, DEFAULT `gleitender_durchschnitt` (CH-Default, → BR-112) |
 | realisierter_gv | NUMERIC(20,8) | NOT NULL DEFAULT 0 |
 | unrealisierter_gv | NUMERIC(20,8) | (berechnet bei Bewertung) |
+| einstand_fx_rate | NUMERIC(20,8) | Ø-Einstands-FX-Kurs (Kurs zur CHF-Basiswährung bei Einstand); NULL bei CHF-Positionen (→ AC6/BR-129) |
+| fx_kapital_gv | NUMERIC(20,8) | unrealisierter Kapitalgewinn-Anteil in CHF (FX-Attribution, berechnet bei Bewertung — noch kein Schreibpfad, analog `unrealisierter_gv`, → AC6/BR-129) |
+| fx_waehrungs_gv | NUMERIC(20,8) | unrealisierter Währungsgewinn-Anteil in CHF (FX-Attribution, berechnet bei Bewertung — noch kein Schreibpfad, analog `unrealisierter_gv`, → AC6/BR-129) |
 | status | TEXT | CHECK ∈ {offen, geschlossen} |
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
 | opened_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
@@ -385,6 +400,18 @@ ergänzt — die Verträge-Sektion von `docs/specs/depot.md` verlangte diese
 drei Felder für die Transaktionshistorie bereits (Tupel `{ trade_id,
 titel_id, richtung, menge, fill_preis, arrival_price, slippage, kosten,
 waehrung, zeitstempel }`), sie fehlten hier jedoch als Spalten.
+
+`fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf` waren bereits vor S-053 als
+Spalten angelegt (Migration `a1c4e7f2b930`, S-035), aber unbefüllt (NULL,
+Docstring-Vermerk „das ist AC6/S-053, ausserhalb dieser Story"); S-053
+(AC6) verdrahtet sie: `fx_rate` wird bei jedem Fremdwährungs-Fill (Kauf
+UND Verkauf) aus `FillInput.fx_rate` übernommen, `kapital_gv_chf`/
+`waehrungs_gv_chf` nur bei einem Fremdwährungs-**Verkauf** über
+`app.domain.portfolio.fx_attribution.berechne_fx_split_realisiert`
+gesetzt (kein G/V auf einen Kauf). Ergänzt ausserdem `fx_rate,
+kapital_gv_chf, waehrungs_gv_chf` in der Verträge-Sektion von
+`docs/specs/depot.md` (Transaktionshistorie-Tupel, das diese drei Felder
+bislang nicht führte).
 
 | Feld | Typ | Constraint |
 |---|---|---|

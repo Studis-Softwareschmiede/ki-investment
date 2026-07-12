@@ -57,6 +57,15 @@ Depot-Stand/Titel+Strategie+Exit-Regeln-Output an Risikomanagement und
 Depot-Überwachung (AC9). Anders als `offene_positionen` (ein Titel) liest
 diese Methode über ALLE Titel des angegebenen Modus hinweg, inklusive der
 (je Lot beim Kauf fixierten) Strategie und Exit-Regeln.
+
+Story S-053 (AC6, FX-Attribution) ergänzt `OffenePosition.einstand_fx_rate`
+(Ø-Einstands-FX-Kurs des Lots, `None` bei CHF-Positionen) sowie den
+`einstand_fx_rate`-Parameter von `lege_position_an`/`aktualisiere_kauf` und
+den `fx_split`-Parameter von `schreibe_transaktion` — Grundlage für die
+realisierte FX-Attribution (`app.domain.portfolio.fx_attribution
+.berechne_fx_split_realisiert`), persistiert als `Transaction.fx_rate`/
+`kapital_gv_chf`/`waehrungs_gv_chf` (data-model.md §4 `transaction`,
+→ BR-129).
 """
 
 from __future__ import annotations
@@ -67,6 +76,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from app.contracts.depot import FillInput, Modus
+from app.domain.portfolio.fx_attribution import FxSplit
 
 
 @dataclass(frozen=True)
@@ -75,7 +85,8 @@ class TransaktionsEintrag:
     Transaktionshistorie (S-035, AC4/AC7) — bildet das Verträge-Tupel aus
     `docs/specs/depot.md` §Verträge "Transaktionshistorie" ab: `{ trade_id,
     titel_id, richtung, menge, fill_preis, arrival_price, slippage,
-    kosten, waehrung, zeitstempel }`."""
+    kosten, waehrung, zeitstempel }`, ergänzt in S-053 (AC6) um `fx_rate,
+    kapital_gv_chf, waehrungs_gv_chf` (FX-Attribution, → BR-129)."""
 
     trade_id: str
     titel_id: str
@@ -87,6 +98,15 @@ class TransaktionsEintrag:
     kosten: Decimal
     waehrung: str
     zeitstempel: datetime
+    #: AC6 (S-053): FX-Kurs zur CHF-Basiswährung bei diesem Trade, `None`
+    #: bei CHF (→ BR-129).
+    fx_rate: Decimal | None = None
+    #: AC6 (S-053): realisierter Kapitalgewinn-Anteil in CHF — nur bei
+    #: einem Fremdwährungs-Verkauf gesetzt, sonst `None`.
+    kapital_gv_chf: Decimal | None = None
+    #: AC6 (S-053): realisierter Währungsgewinn-Anteil in CHF — nur bei
+    #: einem Fremdwährungs-Verkauf gesetzt, sonst `None`.
+    waehrungs_gv_chf: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +120,10 @@ class OffenePosition:
     einstand_preis: Decimal
     einstand_methode: str
     opened_at: datetime
+    #: AC6 (S-053): Ø-Einstands-FX-Kurs des Lots (Kurs zur CHF-Basiswährung
+    #: bei Einstand) — `None` bei einer CHF-Position (keine Attribution
+    #: nötig, → BR-129).
+    einstand_fx_rate: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -171,21 +195,35 @@ class PositionRepository(Protocol):
         ...
 
     def lege_position_an(
-        self, fill: FillInput, *, einstand_preis: Decimal, einstand_methode: str
+        self,
+        fill: FillInput,
+        *,
+        einstand_preis: Decimal,
+        einstand_methode: str,
+        einstand_fx_rate: Decimal | None = None,
     ) -> str:
         """Legt einen neuen offenen Positions-Lot für einen Kauf-Fill an
         (erster Kauf eines Titels, oder — bei FIFO — jeder weitere Kauf)
         und liefert die neue `position_id`. `einstand_preis` ist bereits
         gebühren-genettet (AC3) berechnet worden — dieser Port persistiert
-        ihn nur."""
+        ihn nur. `einstand_fx_rate` (AC6, S-053): der FX-Kurs des Fills bei
+        einer Fremdwährungsposition, `None` bei CHF."""
         ...
 
     def aktualisiere_kauf(
-        self, position_id: str, *, neue_menge: Decimal, neuer_einstand_preis: Decimal
+        self,
+        position_id: str,
+        *,
+        neue_menge: Decimal,
+        neuer_einstand_preis: Decimal,
+        einstand_fx_rate: Decimal | None = None,
     ) -> None:
         """Schreibt einen Nachkauf in einen bestehenden offenen Lot fort
         (gleitender Durchschnitt, AC5/A1): neue Menge + neuer (bereits
-        gebühren-genetteter, AC3) Ø-Einstandspreis."""
+        gebühren-genetteter, AC3) Ø-Einstandspreis. `einstand_fx_rate`
+        (AC6, S-053): der neue, mengen-gewichtet gemittelte Ø-Einstands-
+        FX-Kurs (`app.domain.portfolio.fx_attribution
+        .berechne_neuen_einstand_fx_rate_bei_kauf`), `None` bei CHF."""
         ...
 
     def verbuche_verkauf_lot(
@@ -211,7 +249,9 @@ class PositionRepository(Protocol):
         (Bestand unverändert)."""
         ...
 
-    def schreibe_transaktion(self, fill: FillInput, *, position_id: str | None) -> None:
+    def schreibe_transaktion(
+        self, fill: FillInput, *, position_id: str | None, fx_split: FxSplit | None = None
+    ) -> None:
         """AC4/AC7 (S-035): schreibt den Fill unveränderlich in die
         append-only Transaktionshistorie (Titel, Richtung, Menge,
         Fill-Preis, Kosten, Zeitstempel, Währung) — inklusive Arrival-Price
@@ -222,7 +262,16 @@ class PositionRepository(Protocol):
         `position_id` ist optional — bei einem Verkauf, der bei FIFO
         mehrere Lots verbraucht (A2), ist der Fill keinem einzelnen Lot
         eindeutig zuordenbar (der Verträge-Vertrag der Historie selbst
-        referenziert ohnehin nur `titel_id`, keine `position_id`)."""
+        referenziert ohnehin nur `titel_id`, keine `position_id`).
+
+        `fx_split` (AC6, S-053): der bereits aggregierte realisierte
+        Kapital-/Währungsgewinn-Split (`app.domain.portfolio
+        .fx_attribution.berechne_fx_split_realisiert`/`aggregiere_fx_split`)
+        — nur bei einem Verkauf-Fill in Fremdwährung gesetzt, sonst `None`
+        (kein G/V auf einen Kauf, keine Attribution bei CHF, → BR-129).
+        `fill.fx_rate` selbst wird unabhängig von `fx_split` immer
+        gespeichert (Referenzwert für spätere Auswertung/Ø-Bildung), sofern
+        gesetzt."""
         ...
 
     def historie_je_titel(self, titel_id: str, *, mode: Modus) -> list[TransaktionsEintrag]:

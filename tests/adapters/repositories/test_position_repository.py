@@ -1,7 +1,7 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
 DBA-Zweit-Review).
 
-Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9
+Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 
 Deckt die Bestandsermittlung, auf der `app.domain.portfolio.fill_booking
 .pruefe_fill` die AC10-Prüfung "keine resultierende negative Menge"
@@ -37,6 +37,12 @@ S-036 (AC8/AC9) ergänzt `alle_offenen_positionen` (depotweite,
 mode-isolierte Sicht über ALLE Titel hinweg, inkl. Anlageklasse,
 GICS-Branche, Strategie-Name und Exit-Regeln — Basis für
 `app.domain.portfolio.portfolio_aggregate`).
+
+S-053 (AC6, FX-Attribution) ergänzt: `lege_position_an`/`aktualisiere_kauf`
+persistieren `Position.einstand_fx_rate`, `offene_positionen` liefert ihn
+zurück, und `schreibe_transaktion` persistiert bei gesetztem `fx_split`
+zusätzlich `Transaction.fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf`
+(→ BR-129).
 """
 
 from __future__ import annotations
@@ -61,6 +67,7 @@ from app.db.models import (
     Strategy,
     TimeHorizon,
 )
+from app.domain.portfolio.fx_attribution import FxSplit
 
 
 def _make_engine():
@@ -771,3 +778,142 @@ def test_alle_offenen_positionen_sortiert_nach_titel_und_opened_at() -> None:
         repository = SqlAlchemyPositionRepository(session)
         bestand = repository.alle_offenen_positionen(mode="simuliert")
         assert [p.position_id for p in bestand] == [str(aelterer.id), str(juengerer.id)]
+
+
+# --- S-053: FX-Attribution (AC6, deckt A3) ---------------------------------
+
+
+def test_lege_position_an_persistiert_einstand_fx_rate() -> None:
+    """@trace depot#AC6 — ein Fremdwährungs-Kauf persistiert den
+    Ø-Einstands-FX-Kurs auf dem neuen Lot."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(instrument_id, waehrung="USD", fx_rate=Decimal("0.90"))
+
+        position_id = repository.lege_position_an(
+            fill,
+            einstand_preis=Decimal("101"),
+            einstand_methode="gleitender_durchschnitt",
+            einstand_fx_rate=Decimal("0.90"),
+        )
+        session.commit()
+
+        position = session.get(Position, uuid.UUID(position_id))
+        assert position.einstand_fx_rate == Decimal("0.90")
+
+
+def test_lege_position_an_ohne_fx_rate_bleibt_einstand_fx_rate_none() -> None:
+    """@trace depot#AC6 — ein CHF-Kauf lässt `einstand_fx_rate` `None`
+    (keine Attribution nötig)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(instrument_id)
+
+        position_id = repository.lege_position_an(
+            fill, einstand_preis=Decimal("101"), einstand_methode="gleitender_durchschnitt"
+        )
+        session.commit()
+
+        position = session.get(Position, uuid.UUID(position_id))
+        assert position.einstand_fx_rate is None
+
+
+def test_aktualisiere_kauf_schreibt_einstand_fx_rate_fort() -> None:
+    """@trace depot#AC6 — ein Nachkauf schreibt den (bereits gemittelten)
+    neuen Ø-Einstands-FX-Kurs auf denselben Lot fort."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        position = _make_position(instrument_id, strategy_id, menge=Decimal("10"), status="offen")
+        session.add(position)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        repository.aktualisiere_kauf(
+            str(position.id),
+            neue_menge=Decimal("20"),
+            neuer_einstand_preis=Decimal("111.5"),
+            einstand_fx_rate=Decimal("0.95"),
+        )
+        session.commit()
+
+        aktualisiert = session.get(Position, position.id)
+        assert aktualisiert.einstand_fx_rate == Decimal("0.95")
+
+
+def test_offene_positionen_liefert_einstand_fx_rate() -> None:
+    """@trace depot#AC6 — `offene_positionen` liefert den persistierten
+    Ø-Einstands-FX-Kurs zurück (Grundlage für die realisierte
+    FX-Attribution bei einem späteren Verkauf)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        position = _make_position(instrument_id, strategy_id, menge=Decimal("10"), status="offen")
+        position.einstand_fx_rate = Decimal("0.90")
+        session.add(position)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        lots = repository.offene_positionen(str(instrument_id), mode="simuliert")
+        assert lots[0].einstand_fx_rate == Decimal("0.90")
+
+
+def test_schreibe_transaktion_persistiert_fx_rate_ohne_fx_split_bei_kauf() -> None:
+    """@trace depot#AC6 — ein Fremdwährungs-Kauf speichert `fx_rate` als
+    Referenzwert, aber KEIN `kapital_gv_chf`/`waehrungs_gv_chf` (kein G/V
+    auf einen Kauf)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(instrument_id, waehrung="USD", fx_rate=Decimal("0.90"))
+
+        repository.schreibe_transaktion(fill, position_id=None, fx_split=None)
+        session.commit()
+
+        eintrag = repository.historie_je_titel(str(instrument_id), mode="simuliert")[0]
+        assert eintrag.fx_rate == Decimal("0.90")
+        assert eintrag.kapital_gv_chf is None
+        assert eintrag.waehrungs_gv_chf is None
+
+
+def test_schreibe_transaktion_persistiert_fx_split_bei_verkauf() -> None:
+    """@trace depot#AC6 — ein Fremdwährungs-Verkauf mit gesetztem
+    `fx_split` persistiert `kapital_gv_chf`/`waehrungs_gv_chf` zusätzlich
+    zu `fx_rate`."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _verkauf_fill(instrument_id, waehrung="USD", fx_rate=Decimal("0.95"))
+        fx_split = FxSplit(kapital_gv_chf=Decimal("175.5"), waehrungs_gv_chf=Decimal("59.75"))
+
+        repository.schreibe_transaktion(fill, position_id=None, fx_split=fx_split)
+        session.commit()
+
+        eintrag = repository.historie_je_titel(str(instrument_id), mode="simuliert")[0]
+        assert eintrag.fx_rate == Decimal("0.95")
+        assert eintrag.kapital_gv_chf == Decimal("175.5")
+        assert eintrag.waehrungs_gv_chf == Decimal("59.75")
+
+
+def test_schreibe_transaktion_chf_hat_keinen_fx_rate() -> None:
+    """@trace depot#AC6 — ein CHF-Fill bleibt bei `fx_rate`/`kapital_gv_chf`/
+    `waehrungs_gv_chf` durchgängig `None`."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(instrument_id)
+
+        repository.schreibe_transaktion(fill, position_id=None)
+        session.commit()
+
+        eintrag = repository.historie_je_titel(str(instrument_id), mode="simuliert")[0]
+        assert eintrag.fx_rate is None
+        assert eintrag.kapital_gv_chf is None
+        assert eintrag.waehrungs_gv_chf is None

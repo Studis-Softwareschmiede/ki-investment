@@ -76,6 +76,27 @@ Fall `None` übergeben (siehe `_position_id_fuer_historie`).
   theoretisch gegen einen „simuliert"-Lot desselben Titels gemittelt oder
   verrechnet werden konnte (Verstoss gegen „echt/simuliert nie vermischt",
   BR-130).
+
+**S-053 (AC6, FX-Attribution)** ergänzt die realisierte FX-Zerlegung
+(deckt A3):
+
+- **Kauf.** `_verbuche_kauf` ermittelt bei einem Fremdwährungs-Fill
+  (`fill.fx_rate is not None`) den neuen Ø-Einstands-FX-Kurs
+  (`app.domain.portfolio.fx_attribution
+  .berechne_neuen_einstand_fx_rate_bei_kauf` — gleiches
+  Mittelungs-Prinzip wie `berechne_neuen_einstand_bei_kauf` für den Preis)
+  und übergibt ihn an `repository.lege_position_an`/`aktualisiere_kauf`.
+  Bei CHF-Fills bleibt der Wert `None` (keine Attribution nötig, BR-129).
+- **Verkauf.** `_verbuche_verkauf` berechnet je verbrauchtem Lot den
+  realisierten FX-Split (`fx_attribution.berechne_fx_split_realisiert`,
+  benötigt `lot.einstand_fx_rate` + `fill.fx_rate`) und aggregiert die
+  Lot-Splits (`fx_attribution.aggregiere_fx_split`) zu
+  `BuchungsErgebnis.fx_split_gesamt` — analog zu
+  `realisierter_gv_gesamt`/`aggregiere_gv`.
+- `verbuche_fill` übergibt `fx_split_gesamt` an `schreibe_transaktion`
+  (nur bei Verkauf in Fremdwährung gesetzt, sonst `None`), die den Wert als
+  `Transaction.kapital_gv_chf`/`waehrungs_gv_chf` persistiert
+  (→ BR-129).
 """
 
 from __future__ import annotations
@@ -86,6 +107,12 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from app.contracts.depot import FillInput
+from app.domain.portfolio.fx_attribution import (
+    FxSplit,
+    aggregiere_fx_split,
+    berechne_fx_split_realisiert,
+    berechne_neuen_einstand_fx_rate_bei_kauf,
+)
 from app.domain.portfolio.ports import OffenePosition, PositionRepository
 
 EinstandMethode = Literal["gleitender_durchschnitt", "fifo"]
@@ -115,12 +142,17 @@ class UnzureichenderBestandFehler(ValueError):
 class LotBuchung:
     """Ein einzelner, gegen einen Lot verbuchter Anteil eines Verkaufs-Fills
     (AC2/AC3/AC5) — für FIFO typischerweise mehrere je Verkauf, für
-    gleitenden Durchschnitt immer genau einer."""
+    gleitenden Durchschnitt immer genau einer.
+
+    `fx_split` (AC6, S-053): der realisierte Kapital-/Währungsgewinn-Split
+    dieses Lot-Anteils in CHF, nur gesetzt bei einem Fremdwährungs-Verkauf
+    (sonst `None`, → BR-129)."""
 
     position_id: str
     verbrauchte_menge: Decimal
     resultierende_menge: Decimal
     realisierter_gv: Decimal
+    fx_split: FxSplit | None = None
 
 
 @dataclass(frozen=True)
@@ -132,13 +164,18 @@ class BuchungsErgebnis:
     `bereits_verbucht=True` (DBA-Zweit-Review S-016, ADR-011) heisst: der
     `client_order_id`-Wert des Fills war bereits bekannt (At-least-once-
     Zustellung hat denselben Fill doppelt zugestellt) — es fand KEINE
-    Mutation statt, alle anderen Felder bleiben auf ihrem Default."""
+    Mutation statt, alle anderen Felder bleiben auf ihrem Default.
+
+    `fx_split_gesamt` (AC6, S-053): die über alle verbrauchten Lots
+    aggregierte FX-Attribution eines Fremdwährungs-Verkaufs (`None` bei
+    Kauf oder bei CHF, → BR-129)."""
 
     richtung: Literal["kauf", "verkauf"]
     position_id: str | None = None
     lot_buchungen: tuple[LotBuchung, ...] = ()
     realisierter_gv_gesamt: Decimal = Decimal("0")
     bereits_verbucht: bool = False
+    fx_split_gesamt: FxSplit | None = None
 
 
 def berechne_unrealisierten_gv(
@@ -242,7 +279,11 @@ def verbuche_fill(
     # AC4/AC7 (S-035): append-only Transaktionshistorie-Eintrag NACH der
     # eigentlichen Positions-Buchung — derselbe Commit wie Dedup-Marker +
     # Positions-Mutation (siehe Transaktionale-Invariante oben).
-    repository.schreibe_transaktion(fill, position_id=_position_id_fuer_historie(ergebnis))
+    repository.schreibe_transaktion(
+        fill,
+        position_id=_position_id_fuer_historie(ergebnis),
+        fx_split=ergebnis.fx_split_gesamt,
+    )
     return ergebnis
 
 
@@ -272,15 +313,24 @@ def _verbuche_kauf(
 
     if methode == "fifo":
         neuer_einstand = _quantize_geld(_netter_kaufpreis(fill.menge, fill.fill_preis, fill.kosten))
+        # AC6 (S-053): bei FIFO legt jeder Kauf einen eigenen Lot an — keine
+        # Mittelung des FX-Kurses nötig, der neue Lot trägt schlicht den
+        # FX-Kurs des eigenen Fills (`None` bei CHF).
         position_id = repository.lege_position_an(
-            fill, einstand_preis=neuer_einstand, einstand_methode="fifo"
+            fill,
+            einstand_preis=neuer_einstand,
+            einstand_methode="fifo",
+            einstand_fx_rate=fill.fx_rate,
         )
         return BuchungsErgebnis(richtung="kauf", position_id=position_id)
 
     if not offene_lots:
         neuer_einstand = _quantize_geld(_netter_kaufpreis(fill.menge, fill.fill_preis, fill.kosten))
         position_id = repository.lege_position_an(
-            fill, einstand_preis=neuer_einstand, einstand_methode="gleitender_durchschnitt"
+            fill,
+            einstand_preis=neuer_einstand,
+            einstand_methode="gleitender_durchschnitt",
+            einstand_fx_rate=fill.fx_rate,
         )
         return BuchungsErgebnis(richtung="kauf", position_id=position_id)
 
@@ -294,8 +344,30 @@ def _verbuche_kauf(
             kosten=fill.kosten,
         )
     )
+    # AC6 (S-053): der Ø-Einstands-FX-Kurs wird bei Nachkauf nach demselben
+    # mengen-gewichteten Prinzip gemittelt wie der Ø-Einstandspreis; bei
+    # CHF-Fills (`fill.fx_rate is None`) bleibt der Lot ohne FX-Kurs.
+    # Reviewer-Befund (Iteration 2, Important): ungerundet an der
+    # Schreibgrenze (NUMERIC(20,8), P7/ADR-010) übergeben würde unter
+    # Postgres still gerundet, unter SQLite (Testsuite) nicht — daher hier
+    # `_quantize_geld` analog zu `neuer_einstand` oben anwenden.
+    neuer_einstand_fx_rate = (
+        _quantize_geld(
+            berechne_neuen_einstand_fx_rate_bei_kauf(
+                bisherige_menge=lot.menge,
+                bisheriger_fx_rate=lot.einstand_fx_rate,
+                kauf_menge=fill.menge,
+                kauf_fx_rate=fill.fx_rate,
+            )
+        )
+        if fill.fx_rate is not None
+        else None
+    )
     repository.aktualisiere_kauf(
-        lot.position_id, neue_menge=lot.menge + fill.menge, neuer_einstand_preis=neuer_einstand
+        lot.position_id,
+        neue_menge=lot.menge + fill.menge,
+        neuer_einstand_preis=neuer_einstand,
+        einstand_fx_rate=neuer_einstand_fx_rate,
     )
     return BuchungsErgebnis(richtung="kauf", position_id=lot.position_id)
 
@@ -346,6 +418,21 @@ def _verbuche_verkauf(fill: FillInput, *, repository: PositionRepository) -> Buc
         )
         resultierende_menge = lot.menge - verbrauch
 
+        # AC6 (S-053): FX-Attribution je Lot-Anteil — nur bei einem
+        # Fremdwährungs-Verkauf möglich/nötig (`fill.fx_rate` UND
+        # `lot.einstand_fx_rate` gesetzt); bei CHF bleibt der Split `None`
+        # (→ BR-129, keine Attribution).
+        fx_split_anteil: FxSplit | None = None
+        if fill.fx_rate is not None and lot.einstand_fx_rate is not None:
+            fx_split_anteil = berechne_fx_split_realisiert(
+                einstand_preis=lot.einstand_preis,
+                einstand_fx_rate=lot.einstand_fx_rate,
+                verkauf_preis=fill.fill_preis,
+                verkauf_fx_rate=fill.fx_rate,
+                verkaufte_menge=verbrauch,
+                kosten=kosten_anteil,
+            )
+
         repository.verbuche_verkauf_lot(
             lot.position_id,
             neue_menge=resultierende_menge,
@@ -357,12 +444,17 @@ def _verbuche_verkauf(fill: FillInput, *, repository: PositionRepository) -> Buc
                 verbrauchte_menge=verbrauch,
                 resultierende_menge=resultierende_menge,
                 realisierter_gv=realisierter_gv_anteil,
+                fx_split=fx_split_anteil,
             )
         )
         verbleibende_verkaufsmenge -= verbrauch
+
+    fx_splits = [b.fx_split for b in lot_buchungen if b.fx_split is not None]
+    fx_split_gesamt = aggregiere_fx_split(fx_splits) if fx_splits else None
 
     return BuchungsErgebnis(
         richtung="verkauf",
         lot_buchungen=tuple(lot_buchungen),
         realisierter_gv_gesamt=aggregiere_gv(b.realisierter_gv for b in lot_buchungen),
+        fx_split_gesamt=fx_split_gesamt,
     )

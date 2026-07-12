@@ -45,6 +45,14 @@ selbst gepflegt), Strategie-Name (`Strategy.name`) und Exit-Regeln
 siehe `app.domain.portfolio.ports.ExitRegelnBestand`-Docstring). Basis für
 `app.domain.portfolio.portfolio_aggregate` (Portfolio-Aggregate,
 Depot-Stand, Titel-Strategie-Exit-Regeln-Output).
+
+Story S-053 (AC6, FX-Attribution) ergänzt: `lege_position_an`/
+`aktualisiere_kauf` persistieren zusätzlich `Position.einstand_fx_rate`
+(Ø-Einstands-FX-Kurs, `None` bei CHF), `offene_positionen` liefert ihn
+zurück (`OffenePosition.einstand_fx_rate`), und `schreibe_transaktion`
+persistiert bei einem gesetzten `fx_split` (Verkauf in Fremdwährung)
+zusätzlich `Transaction.fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf`
+(→ BR-129).
 """
 
 from __future__ import annotations
@@ -59,6 +67,7 @@ from sqlalchemy.orm import Session
 
 from app.contracts.depot import FillInput, Modus
 from app.db.models import DepotFillDedup, ExitRule, Instrument, Position, Strategy, Transaction
+from app.domain.portfolio.fx_attribution import FxSplit
 from app.domain.portfolio.ports import (
     ExitRegelnBestand,
     OffenePosition,
@@ -133,17 +142,25 @@ class SqlAlchemyPositionRepository:
                 einstand_preis=p.einstand_preis,
                 einstand_methode=p.einstand_methode,
                 opened_at=p.opened_at,
+                einstand_fx_rate=p.einstand_fx_rate,
             )
             for p in positionen
         ]
 
     def lege_position_an(
-        self, fill: FillInput, *, einstand_preis: Decimal, einstand_methode: str
+        self,
+        fill: FillInput,
+        *,
+        einstand_preis: Decimal,
+        einstand_methode: str,
+        einstand_fx_rate: Decimal | None = None,
     ) -> str:
         """Legt einen neuen offenen Lot für einen Kauf-Fill an (AC2/AC3/
         AC5) — löst `fill.strategie` (Name) gegen `strategy.id` auf;
         `fill.anlageklasse`/`fill.zeithorizont` sind bereits identische
-        Fremdschlüsselwerte (`asset_class_id`/`time_horizon_id`)."""
+        Fremdschlüsselwerte (`asset_class_id`/`time_horizon_id`).
+        `einstand_fx_rate` (AC6, S-053): FX-Kurs des Fills, `None` bei
+        CHF."""
         strategy_id = self._session.scalars(
             select(Strategy.id).where(Strategy.name == fill.strategie)
         ).first()
@@ -162,6 +179,7 @@ class SqlAlchemyPositionRepository:
             menge=fill.menge,
             einstand_preis=einstand_preis,
             einstand_methode=einstand_methode,
+            einstand_fx_rate=einstand_fx_rate,
             status="offen",
             mode=fill.mode,
         )
@@ -170,15 +188,23 @@ class SqlAlchemyPositionRepository:
         return str(position.id)
 
     def aktualisiere_kauf(
-        self, position_id: str, *, neue_menge: Decimal, neuer_einstand_preis: Decimal
+        self,
+        position_id: str,
+        *,
+        neue_menge: Decimal,
+        neuer_einstand_preis: Decimal,
+        einstand_fx_rate: Decimal | None = None,
     ) -> None:
         """Schreibt einen Nachkauf in einen bestehenden Lot fort
-        (gleitender Durchschnitt, AC5/A1)."""
+        (gleitender Durchschnitt, AC5/A1). `einstand_fx_rate` (AC6, S-053):
+        der neue, mengen-gewichtet gemittelte Ø-Einstands-FX-Kurs, `None`
+        bei CHF."""
         position = self._session.get(Position, uuid.UUID(position_id))
         if position is None:
             raise ValueError(f"Position {position_id!r} nicht gefunden.")
         position.menge = neue_menge
         position.einstand_preis = neuer_einstand_preis
+        position.einstand_fx_rate = einstand_fx_rate
 
     def verbuche_verkauf_lot(
         self, position_id: str, *, neue_menge: Decimal, realisierter_gv_delta: Decimal
@@ -221,16 +247,25 @@ class SqlAlchemyPositionRepository:
             return False
         return True
 
-    def schreibe_transaktion(self, fill: FillInput, *, position_id: str | None) -> None:
+    def schreibe_transaktion(
+        self, fill: FillInput, *, position_id: str | None, fx_split: FxSplit | None = None
+    ) -> None:
         """AC4/AC7 (S-035): fügt der append-only `transaction`-Historie
         einen unveränderlichen Eintrag für `fill` hinzu — `typ` bildet
         `fill.richtung` ab (`kauf`→`buy`, `verkauf`→`sell`),
         `slippage_abs` wird über die reine Domain-Formel
         (`app.domain.portfolio.transaction_historie.berechne_slippage`)
         berechnet, nicht hier neu erfunden. `kosten_chf`/`preis` speichern
-        `fill.kosten`/`fill.fill_preis` unverändert (keine FX-Umrechnung —
-        das ist AC6/S-053, ausserhalb dieser Story, analog zur bestehenden
-        Behandlung von `Position.einstand_preis`/`realisierter_gv`)."""
+        `fill.kosten`/`fill.fill_preis` unverändert (keine FX-Umrechnung
+        dieser beiden Felder selbst).
+
+        AC6 (S-053): `fx_rate` speichert `fill.fx_rate` unabhängig von
+        `fx_split` (Referenzwert, `None` bei CHF); `kapital_gv_chf`/
+        `waehrungs_gv_chf` übernehmen `fx_split` NUR falls gesetzt (ein
+        Fremdwährungs-Verkauf, `app.domain.portfolio.position_booking
+        ._verbuche_verkauf`/`fx_attribution.berechne_fx_split_realisiert`)
+        — bei Kauf oder CHF bleiben beide `None` (→ BR-129: keine
+        Attribution ohne Fremdwährung)."""
         typ = "buy" if fill.richtung == "kauf" else "sell"
         zeile = Transaction(
             id=uuid.uuid4(),
@@ -243,6 +278,9 @@ class SqlAlchemyPositionRepository:
             waehrung=fill.waehrung,
             arrival_price=fill.arrival_price,
             slippage_abs=berechne_slippage(fill.fill_preis, fill.arrival_price),
+            fx_rate=fill.fx_rate,
+            kapital_gv_chf=fx_split.kapital_gv_chf if fx_split is not None else None,
+            waehrungs_gv_chf=fx_split.waehrungs_gv_chf if fx_split is not None else None,
             mode=fill.mode,
             booked_at=fill.zeitstempel,
         )
@@ -254,7 +292,8 @@ class SqlAlchemyPositionRepository:
         für `titel_id` **im angegebenen `mode`** (Mode-Isolation, BR-130),
         aufsteigend nach `booked_at` sortiert. Leere Liste, falls
         `titel_id` keine gültige UUID ist oder noch kein Fill gebucht
-        wurde."""
+        wurde. Trägt seit S-053 (AC6) zusätzlich `fx_rate`/`kapital_gv_chf`/
+        `waehrungs_gv_chf` je Eintrag (alle `None` bei CHF oder Kauf)."""
         instrument_id = _als_uuid(titel_id)
         if instrument_id is None:
             return []
@@ -277,6 +316,9 @@ class SqlAlchemyPositionRepository:
                 kosten=z.kosten_chf,
                 waehrung=z.waehrung,
                 zeitstempel=z.booked_at,
+                fx_rate=z.fx_rate,
+                kapital_gv_chf=z.kapital_gv_chf,
+                waehrungs_gv_chf=z.waehrungs_gv_chf,
             )
             for z in zeilen
         ]

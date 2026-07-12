@@ -374,6 +374,18 @@ class Position(Base):
     Eintrittspunkt (`app.domain.portfolio.fill_booking.pruefe_fill`,
     AC1/AC10) — das eigentliche Anlegen/Fortschreiben einer Positions-Zeile
     (Ø-Einstand-Berechnung, Gebühren-Netting, G/V) ist S-016 (AC2/AC3/AC5).
+
+    **S-053 (AC6, FX-Attribution)** ergänzt drei Spalten:
+    `einstand_fx_rate` (Ø-Einstands-FX-Kurs, `None` bei CHF) wird
+    fortgeschrieben — analog zu `einstand_preis` — über
+    `app.adapters.repositories.position_repository
+    .SqlAlchemyPositionRepository.lege_position_an`/`aktualisiere_kauf`.
+    `fx_kapital_gv`/`fx_waehrungs_gv` (unrealisierte FX-Attribution) sind
+    dagegen — analog zu `unrealisierter_gv` (S-016) — reservierte Spalten
+    OHNE Schreibpfad: das Nachführen anhand des Live-Kurses ist die noch
+    nicht gebaute Bewertungs-Schleife (siehe `app.domain.portfolio
+    .fx_attribution.berechne_fx_split_unrealisiert`-Docstring), kein
+    Fill-getriebener Schreibpfad dieser Story.
     """
 
     __tablename__ = "position"
@@ -419,6 +431,9 @@ class Position(Base):
         Numeric(20, 8), nullable=False, default=Decimal("0"), server_default=sa.text("0")
     )
     unrealisierter_gv: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    einstand_fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    fx_kapital_gv: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    fx_waehrungs_gv: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     status: Mapped[str | None] = mapped_column(String, nullable=True)
     mode: Mapped[str] = mapped_column(String, nullable=False)
     opened_at: Mapped[datetime] = mapped_column(
