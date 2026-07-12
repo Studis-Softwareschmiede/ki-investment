@@ -12,7 +12,7 @@ dependencies = [
     "fastapi>=0.115",
     "psycopg[binary]>=3.3.4",
     "sqlalchemy>=2.0",
-    "uvicorn[standard]>=0.34",
+    "uvicorn[standard]>=0.51.0",
 ]
 
 # Dev-/Test-Werkzeuge — via `uv sync` ins venv, nicht ins Runtime-Image nötig.
