@@ -1,7 +1,7 @@
 id: S-051
 parent: F-004
 title: Gold-Anreicherung & Survivorship-bias-freies historisches Universum
-status: In Progress
+status: Done
 priority: P2
 spec: docs/specs/datenqualitaet.md
 implements:
@@ -20,8 +20,8 @@ estimate_note: Gold-Konsumentensicht ohne Rückwirkung auf Bronze plus Universum
 confidence: low
 tok_est: null
 branch: feat/S-051-gold-universum
-pr: null
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/25
 blocked_reason: null
 created_at: '2026-07-12T10:10:22Z'
-updated_at: '2026-07-12T19:02:56Z'
-done_at: null
+updated_at: '2026-07-12T19:38:27Z'
+done_at: '2026-07-12T19:38:25Z'
