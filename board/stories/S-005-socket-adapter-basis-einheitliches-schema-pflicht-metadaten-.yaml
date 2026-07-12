@@ -2,7 +2,7 @@ id: S-005
 parent: F-003
 title: 'Socket-Adapter-Basis: einheitliches Schema + Pflicht-Metadaten + gekapselte
   Auth/Rate-Limits'
-status: In Progress
+status: Done
 priority: P0
 spec: docs/specs/dateneingang.md
 implements:
@@ -25,8 +25,8 @@ estimate_note: Adapter-Port + Normalisierung auf internes Schema, Metadaten-Voll
 confidence: low
 tok_est: null
 branch: feat/S-005-socket-adapter
-pr: null
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/8
 blocked_reason: null
 created_at: '2026-07-12T10:08:48Z'
-updated_at: '2026-07-12T12:21:28Z'
-done_at: null
+updated_at: '2026-07-12T12:54:59Z'
+done_at: '2026-07-12T12:54:59Z'
