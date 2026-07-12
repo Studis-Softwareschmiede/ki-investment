@@ -53,7 +53,7 @@ Die 11 Anlageklassen sind **Feature-Toggles in den Systemeinstellungen**, keine 
 
 ## Verträge
 
-**Toggle-Konfiguration (je Klasse):** `{ nummer: 1–11, name, aktiv: bool, empfehlungsstufe: MVP | Stufe 2 | Stufe 3 }`. Default aktiv: {1 Aktien, 2 ETFs, 7 Kryptowährungen}.
+**Toggle-Konfiguration (je Klasse):** `{ nummer: 1–11, name, aktiv: bool, empfehlungsstufe: MVP | Stufe 2 | Stufe 3 }`. Default aktiv: {1 Aktien, 2 ETFs, 7 Kryptowährungen}. Der persistierte `name` verwendet die Kurzform aus AC1 (z. B. `Cash/Geldmarkt`, `FX`, `Derivate`); die längeren Bezeichnungen der Verträge-Tabelle unten (`Cash / Geldmarkt`, `Fremdwährungen / FX`, `Derivate (Opt./Fut.)`) sind Anzeige-Label für Dokumentation/UI, keine zweite Datenquelle.
 
 **Konsumenten-Kontrakt Toggle:** Kandidatensuche, Datenquellen-Abfrage, Analyse, Handelsplattformen und Depotstrategie erhalten je Klasse den Aktiv-Zustand und dürfen bei `aktiv = false` weder Verarbeitung noch Datenabruf für diese Klasse auslösen — mit der Ausnahme aus AC5 (Überwachung/Exit offener Positionen).
 
