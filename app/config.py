@@ -18,11 +18,20 @@ Schwellwert (Default 2 %), ab dessen STRIKTER Überschreitung
 nimmt — ebenfalls ohne Codeänderung über die Umgebungsvariable
 `HALLUZINATIONS_KPI_SCHWELLWERT` überschreibbar (Muster von `TOLERANZ_CONFIG`
 folgend, hier aber ein einzelner Skalar statt eines Mappings).
+
+Aus S-016 (AC5, BR-112) kommt `einstand_methode_default` hinzu: die
+systemweite Default-Einstand-Methode (`gleitender_durchschnitt` | `fifo`),
+die `app.domain.portfolio.position_booking.verbuche_fill` beim allerersten
+Kauf eines Titels heranzieht (bereits offene Lots tragen ihre Methode
+selbst, siehe `docs/data-model.md` §4 `position.einstand_methode`).
+Default CH-Kontext (BR-112), ohne Codeänderung über
+`EINSTAND_METHODE_DEFAULT` überschreibbar.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,6 +79,13 @@ class Settings(BaseSettings):
     #: Entscheidungskette. Default 2 % (0.02), ohne Codeänderung über
     #: `HALLUZINATIONS_KPI_SCHWELLWERT` überschreibbar.
     halluzinations_kpi_schwellwert: float = Field(default=0.02, ge=0)
+
+    #: Default-Einstand-Methode (AC5, BR-112) für den allerersten Kauf
+    #: eines Titels — CH-Kontext, provisorisch. Ohne Codeänderung über
+    #: `EINSTAND_METHODE_DEFAULT` auf `"fifo"` umstellbar.
+    einstand_methode_default: Literal["gleitender_durchschnitt", "fifo"] = Field(
+        default="gleitender_durchschnitt"
+    )
 
 
 @lru_cache

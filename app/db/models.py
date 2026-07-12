@@ -464,3 +464,36 @@ class ExitRule(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"ExitRule(position_id={self.position_id!r}, stop_typ={self.stop_typ!r})"
+
+
+class DepotFillDedup(Base):
+    """Idempotenz-Ledger für die Fill→Depot-Fortschreibung (data-model.md §4
+    `depot_fill_dedup`, ADR-011, P8) — nachgezogen im DBA-Zweit-Review von
+    S-016 (Critical-Befund: ohne Dedup schreibt ein doppelt zugestellter
+    Fill (Redis-Queue, at-least-once) die Position doppelt fort).
+
+    Bewusst ein reiner Marker (`client_order_id` als PK, kein weiterer
+    fachlicher Inhalt) — **kein** Ersatz für die volle append-only
+    Transaktionshistorie (`transaction`, AC4/AC7 → S-035); diese Tabelle
+    beantwortet ausschliesslich die Frage „wurde dieser Fill schon einmal
+    verbucht?" (siehe `app.adapters.repositories.position_repository
+    .SqlAlchemyPositionRepository.markiere_fill_verbucht`).
+    """
+
+    __tablename__ = "depot_fill_dedup"
+    __table_args__ = (
+        Index("ix_depot_fill_dedup_instrument_id", "instrument_id"),
+        CheckConstraint("richtung IN ('kauf', 'verkauf')", name="ck_depot_fill_dedup_richtung"),
+    )
+
+    client_order_id: Mapped[str] = mapped_column(String, primary_key=True)
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    richtung: Mapped[str] = mapped_column(String, nullable=False)
+    verbucht_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"DepotFillDedup(client_order_id={self.client_order_id!r})"

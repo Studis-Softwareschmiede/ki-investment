@@ -1,4 +1,4 @@
-"""Tests für den Depot-Fill-Vertrag (Story S-015).
+"""Tests für den Depot-Fill-Vertrag (Story S-015 + S-016 DBA-Zweit-Review).
 
 Covers (depot): AC1, AC10
 
@@ -7,6 +7,11 @@ Covers (depot): AC1, AC10
 Pflichtfelder — fehlt eines, verweigert pydantic die Instanziierung) und
 AC1 (bei Kauf zusätzlich Strategie/Zeithorizont/Exit-Regeln/These Pflicht;
 bei Verkauf bleiben sie zulässig `None`).
+
+DBA-Zweit-Review von S-016 (Critical + Suggestion, ADR-011) ergänzt
+`client_order_id` als neues universelles Pflichtfeld (Dedup-Schlüssel) in
+der bestehenden AC10-Pflichtfeld-Parametrisierung sowie einen Ablehnungstest
+für `menge <= 0` (Erst-Review-Suggestion, `gt=0`).
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from app.contracts.depot import ExitRegeln, FillInput
 _ZEITSTEMPEL = datetime(2026, 7, 12, 10, 0, tzinfo=UTC)
 
 VALID_KAUF_KWARGS = {
+    "client_order_id": "order-kauf-1",
     "titel_id": "11111111-1111-1111-1111-111111111111",
     "anlageklasse": 1,
     "gics_branche": "Technology",
@@ -32,6 +38,7 @@ VALID_KAUF_KWARGS = {
     "arrival_price": Decimal("100.00"),
     "waehrung": "CHF",
     "zeitstempel": _ZEITSTEMPEL,
+    "mode": "simuliert",
     "strategie": "Index",
     "zeithorizont": 8,
     "exit_regeln": ExitRegeln(stop_typ="atr_trailing", stop_parameter=2.5),
@@ -39,6 +46,7 @@ VALID_KAUF_KWARGS = {
 }
 
 VALID_VERKAUF_KWARGS = {
+    "client_order_id": "order-verkauf-1",
     "titel_id": "11111111-1111-1111-1111-111111111111",
     "anlageklasse": 1,
     "gics_branche": "Technology",
@@ -49,6 +57,7 @@ VALID_VERKAUF_KWARGS = {
     "arrival_price": Decimal("109.50"),
     "waehrung": "CHF",
     "zeitstempel": _ZEITSTEMPEL,
+    "mode": "simuliert",
 }
 
 
@@ -77,6 +86,7 @@ def test_accepts_verkauf_without_kauf_only_attribute() -> None:
 @pytest.mark.parametrize(
     "missing_field",
     [
+        "client_order_id",
         "titel_id",
         "anlageklasse",
         "gics_branche",
@@ -87,6 +97,7 @@ def test_accepts_verkauf_without_kauf_only_attribute() -> None:
         "arrival_price",
         "waehrung",
         "zeitstempel",
+        "mode",
     ],
 )
 def test_rejects_missing_universelles_pflichtfeld(missing_field: str) -> None:
@@ -124,6 +135,16 @@ def test_rejects_anlageklasse_outside_1_to_11() -> None:
     """@trace depot#AC10 — Anlageklasse ausserhalb 1..11 ist ungültig."""
     with pytest.raises(ValidationError):
         FillInput(**dict(VALID_VERKAUF_KWARGS, anlageklasse=12))
+
+
+@pytest.mark.parametrize("ungueltige_menge", [Decimal("0"), Decimal("-1")])
+def test_rejects_menge_kleiner_gleich_null(ungueltige_menge: Decimal) -> None:
+    """@trace depot#AC10 — eine Menge <= 0 ist strukturell kein gültiger
+    Fill (Erst-Review-Suggestion, `gt=0`) — verhindert insbesondere einen
+    ZeroDivisionError bei der anteiligen Kostenverteilung
+    (`app.domain.portfolio.position_booking`)."""
+    with pytest.raises(ValidationError):
+        FillInput(**dict(VALID_VERKAUF_KWARGS, menge=ungueltige_menge))
 
 
 def test_rejects_empty_titel_id_and_gics_branche() -> None:

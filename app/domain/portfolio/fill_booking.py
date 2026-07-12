@@ -24,6 +24,13 @@ Positions-Fortschreibung (Ø-Einstand-Berechnung, Gebühren-Netting in die
 Kostenbasis, Einstand-Methode gleitender Ø/FIFO) ist **NICHT** Teil dieser
 Story (S-016, AC2/AC3/AC5); ebenso wenig die Transaktionshistorie/TCA
 (S-035, AC4/AC7) oder die Portfolio-Aggregate (S-036, AC8/AC9).
+
+DBA-Re-Review von S-016 (Iteration 3, Important — Mode-Isolation, BR-113/
+BR-130) zieht denselben Fix hier nach: `repository.aktuelle_menge` wird mit
+`mode=fill.mode` aufgerufen, damit der Bestandsvergleich (AC10) nur den
+Bestand DESSELBEN Modus berücksichtigt — ein „echt"-Verkauf darf nicht
+gegen einen „simuliert"-Bestand desselben Titels gedeckt erscheinen (und
+umgekehrt).
 """
 
 from __future__ import annotations
@@ -64,7 +71,7 @@ def pruefe_fill(rohdaten: Mapping[str, Any], *, repository: PositionRepository) 
         )
         return FillErgebnis(status="abgelehnt", grund="unvollstaendig", protokoll_eintrag=eintrag)
 
-    aktuelle_menge = repository.aktuelle_menge(fill.titel_id)
+    aktuelle_menge = repository.aktuelle_menge(fill.titel_id, mode=fill.mode)
     delta = fill.menge if fill.richtung == "kauf" else -fill.menge
     resultierende_menge = aktuelle_menge + delta
 
