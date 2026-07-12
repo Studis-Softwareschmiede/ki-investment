@@ -7,14 +7,26 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import sqlalchemy as sa
-from sqlalchemy import Boolean, CheckConstraint, SmallInteger, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    ForeignKey,
+    Numeric,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 # data-model.md §1 `asset_class`: CHECK prio_stufe ∈ {MVP, Stufe2, Stufe3}
 PRIO_STUFE_VALUES = ("MVP", "Stufe2", "Stufe3")
+
+# data-model.md §1 `analysis_category`: CHECK code ∈ {...} (5 Analysekategorien, C-007)
+ANALYSIS_CATEGORY_CODES = ("fundamental", "technisch", "qualitativ", "makro", "risiko_quant")
 
 
 class AssetClass(Base):
@@ -43,3 +55,63 @@ class AssetClass(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"AssetClass(id={self.id!r}, name={self.name!r}, aktiv={self.aktiv!r})"
+
+
+class AnalysisCategory(Base):
+    """Analysekategorie — 5 fixe Dimensionen der Bewertung (data-model.md
+    `analysis_category`, C-007). Stammdaten-Voraussetzung für `category_weight`
+    (FK `category_code`) und die spätere Methodentabelle (S-018, ausserhalb
+    dieser Story).
+    """
+
+    __tablename__ = "analysis_category"
+    __table_args__ = (
+        CheckConstraint(
+            "code IN ('fundamental', 'technisch', 'qualitativ', 'makro', 'risiko_quant')",
+            name="ck_analysis_category_code",
+        ),
+    )
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    ist_risiko: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"AnalysisCategory(code={self.code!r}, name={self.name!r})"
+
+
+class CategoryWeight(Base):
+    """Kategoriegewicht je Anlageklasse (data-model.md `category_weight`,
+    BR-101). Die fünf Gewichte einer Klasse müssen sich auf exakt 100 %
+    summieren (AC6/AC7) — DB-seitig durch einen deferred Constraint-Trigger
+    durchgesetzt (siehe Migration `2da446925bbc_...py`), App-seitig durch
+    `app.db.category_weights.validate_category_weights`.
+
+    `config_version` ist eine Vorbereitung auf die versionierten
+    Konfigurationsdaten aus AC10 (voller Versionierungs-Workflow folgt in
+    einer eigenen Folge-Story) — Default 1, noch ohne History-Tracking.
+    """
+
+    __tablename__ = "category_weight"
+    __table_args__ = (
+        CheckConstraint("weight_pct >= 0 AND weight_pct <= 100", name="ck_category_weight_range"),
+    )
+
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), primary_key=True
+    )
+    category_code: Mapped[str] = mapped_column(
+        String, ForeignKey("analysis_category.code"), primary_key=True
+    )
+    weight_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    config_version: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=1, server_default=sa.text("1")
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"CategoryWeight(asset_class_id={self.asset_class_id!r}, "
+            f"category_code={self.category_code!r}, weight_pct={self.weight_pct!r})"
+        )
