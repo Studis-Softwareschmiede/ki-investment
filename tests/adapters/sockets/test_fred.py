@@ -68,7 +68,8 @@ def test_api_key_never_appears_in_cleartext_in_logs(
     """@trace dateneingang#AC3 — der API-Key erscheint nie im Klartext in
     Log-Ausgaben, nur maskiert (`app.core.secrets.mask_secret`)."""
     caplog.set_level(logging.DEBUG, logger="app.adapters.sockets.fred")
-    geheimer_key = "sk_live_ABCDEFGHIJ"
+    # Fake-Wert, kein echtes Secret-Muster (gitleaks-FP-Fix) — gitleaks:allow
+    geheimer_key = "dummy-fixture-secret-42"  # gitleaks:allow
 
     FredAdapter(
         series_id="FEDFUNDS",

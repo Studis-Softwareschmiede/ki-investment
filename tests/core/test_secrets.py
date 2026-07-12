@@ -29,6 +29,8 @@ def test_masks_long_secret_keeping_only_first_and_last_two_chars() -> None:
     """@trace dateneingang#AC3 — längere Secrets behalten nur die ersten/
     letzten zwei Zeichen, der Rest wird maskiert — das Secret selbst
     erscheint an keiner Stelle im Klartext."""
-    masked = mask_secret("sk_live_ABCDEFGHIJ")
-    assert masked == "sk" + "*" * 14 + "IJ"
-    assert "sk_live_ABCDEFGHIJ" not in masked
+    # Fake-Wert, kein echtes Secret-Muster (gitleaks-FP-Fix) — gitleaks:allow
+    dummy_secret = "dummy-fixture-secret-42"  # gitleaks:allow
+    masked = mask_secret(dummy_secret)
+    assert masked == "du" + "*" * 19 + "42"
+    assert dummy_secret not in masked
