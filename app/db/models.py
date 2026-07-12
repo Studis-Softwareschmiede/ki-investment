@@ -83,6 +83,9 @@ MODE_VALUES = ("echt", "simuliert")
 # data-model.md §4 `exit_rule`: CHECK stop_typ ∈ {...}
 EXIT_RULE_STOP_TYP_VALUES = ("fix_pct", "atr_trailing", "fundamental", "keiner")
 
+# data-model.md §4 `transaction`: CHECK typ ∈ {...} (C-017, Story S-035)
+TRANSACTION_TYP_VALUES = ("buy", "sell", "dividend", "fee", "fx_adjust")
+
 
 class AssetClass(Base):
     """Anlageklasse — Stammdaten + Feature-Toggle (data-model.md `asset_class`, BR-100).
@@ -464,6 +467,88 @@ class ExitRule(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"ExitRule(position_id={self.position_id!r}, stop_typ={self.stop_typ!r})"
+
+
+class Transaction(Base):
+    """Append-only Transaktionshistorie (data-model.md §4 `transaction`,
+    C-017; Spec `docs/specs/depot.md`, Story S-035, AC4/AC7; → BR-115).
+
+    Ein Insert je Fill (Kauf/Verkauf) — `typ` bildet `FillInput.richtung`
+    ab (`kauf`→`buy`, `verkauf`→`sell`); `dividend`/`fee`/`fx_adjust` sind
+    im CHECK-Constraint mitgeführt (data-model.md §4), aber von keiner
+    Story bisher befüllt (kein Schreibpfad für diese Typen existiert noch).
+
+    **Append-only-Durchsetzung (AC4/BR-115), zwei Schichten:**
+    - **DB:** die Migration (`create_transaction_historie`) legt unter
+      Postgres einen `BEFORE UPDATE OR DELETE`-Trigger an, der jede
+      Mutation/Löschung mit einer Exception verweigert (wirkungslos unter
+      SQLite/Struktur-Tests, analog zu `with_for_update()`,
+      `position_repository`-Konvention).
+    - **App:** `PositionRepository` (der einzige Zugriffspfad, P1) bietet
+      für diese Tabelle ausschliesslich `schreibe_transaktion` (Insert)
+      und `historie_je_titel` (Lesen) an — keine Update-/Delete-Methode
+      existiert im Port, es gibt also strukturell keinen Aufrufer-Pfad für
+      eine nachträgliche Änderung.
+
+    `position_id` ist NULLable: ein Verkauf-Fill, der bei FIFO mehrere
+    Lots verbraucht (A2), ist keinem einzelnen Lot eindeutig zuordenbar —
+    der Verträge-Vertrag der Transaktionshistorie selbst
+    (`docs/specs/depot.md` §Verträge) referenziert ohnehin nur `titel_id`,
+    keine `position_id`.
+
+    `arrival_price`/`slippage_abs` sind NULLable auf Schema-Ebene (nur bei
+    `typ ∈ {buy, sell}` sinnvoll), werden aber von
+    `app.adapters.repositories.position_repository
+    .SqlAlchemyPositionRepository.schreibe_transaktion` für jeden
+    Kauf-/Verkauf-Fill immer gesetzt (AC7): `slippage_abs = preis −
+    arrival_price`, identische Formel zu BR-114 (`trade_fill.slippage_abs`,
+    C-016), hier auf die Depot-eigene Historie angewandt (C-017).
+    """
+
+    __tablename__ = "transaction"
+    __table_args__ = (
+        Index("ix_transaction_position_id", "position_id"),
+        Index("ix_transaction_instrument_id", "instrument_id"),
+        Index("ix_transaction_booked_at", "booked_at"),
+        Index("ix_transaction_mode", "mode"),
+        CheckConstraint(
+            "typ IN ('buy', 'sell', 'dividend', 'fee', 'fx_adjust')", name="ck_transaction_typ"
+        ),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_transaction_mode"),
+        CheckConstraint("length(waehrung) = 3", name="ck_transaction_waehrung_iso3"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    position_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("position.id"), nullable=True
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    typ: Mapped[str] = mapped_column(String, nullable=False)
+    menge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    preis: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    kosten_chf: Mapped[Decimal] = mapped_column(
+        Numeric(20, 8), nullable=False, default=Decimal("0"), server_default=sa.text("0")
+    )
+    waehrung: Mapped[str] = mapped_column(String, nullable=False)
+    arrival_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    slippage_abs: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    kapital_gv_chf: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    waehrungs_gv_chf: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    booked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"Transaction(instrument_id={self.instrument_id!r}, typ={self.typ!r}, "
+            f"menge={self.menge!r})"
+        )
 
 
 class DepotFillDedup(Base):

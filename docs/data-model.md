@@ -379,21 +379,31 @@ erDiagram
 | executed_at | TIMESTAMPTZ | NOT NULL |
 
 ### `transaction` — volle Transaktionshistorie (C-017, Steuer + Dashboard; append-only → BR-115)
+
+Präzisiert in S-035 (AC4/AC7): `waehrung`, `arrival_price`, `slippage_abs`
+ergänzt — die Verträge-Sektion von `docs/specs/depot.md` verlangte diese
+drei Felder für die Transaktionshistorie bereits (Tupel `{ trade_id,
+titel_id, richtung, menge, fill_preis, arrival_price, slippage, kosten,
+waehrung, zeitstempel }`), sie fehlten hier jedoch als Spalten.
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
-| position_id | UUID | FK → position.id |
+| position_id | UUID | FK → position.id, NULLable (ein Verkauf-Fill, der bei FIFO mehrere Lots verbraucht, ist keinem einzelnen Lot eindeutig zuordenbar — der Verträge-Vertrag der Historie selbst referenziert ohnehin nur `titel_id`, keine `position_id`) |
 | instrument_id | UUID | FK → instrument.id, NOT NULL |
 | typ | TEXT | CHECK ∈ {buy, sell, dividend, fee, fx_adjust} |
 | menge | NUMERIC(20,8) | |
-| preis | NUMERIC(20,8) | |
+| preis | NUMERIC(20,8) | (Fill-Preis) |
 | kosten_chf | NUMERIC(20,8) | NOT NULL DEFAULT 0 (echte Kosten, in Kostenbasis genettet) |
+| waehrung | TEXT | NOT NULL, CHECK length = 3 (ISO-Code, AC4 — Handelswährung des Fills) |
+| arrival_price | NUMERIC(20,8) | Kurs bei Signal/Order-Auslösung (nur bei typ ∈ {buy, sell} gesetzt — TCA-Basis, → AC7/BR-114) |
+| slippage_abs | NUMERIC(20,8) | = preis − arrival_price (realisierte Slippage je Trade, TCA, → AC7/BR-114) |
 | fx_rate | NUMERIC(20,8) | (Kurs zur Basiswährung) |
 | kapital_gv_chf | NUMERIC(20,8) | (FX-Attribution: Kapitalgewinn, → BR-129) |
 | waehrungs_gv_chf | NUMERIC(20,8) | (FX-Attribution: Währungsgewinn, → BR-129) |
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
 | booked_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
-| — | — | **append-only** — kein UPDATE/DELETE (Steuer-Auditpfad, → BR-115) |
+| — | — | **append-only** — kein UPDATE/DELETE (Steuer-Auditpfad, → BR-115); S-035 setzt dies per Postgres-Trigger (`BEFORE UPDATE OR DELETE ... RAISE EXCEPTION`) durch, plus App-seitig dadurch, dass `PositionRepository` für diese Tabelle nur eine Schreib- (`schreibe_transaktion`, reines Insert) und eine Lese-Methode (`historie_je_titel`) anbietet — keine Update-/Delete-Methode existiert im Port |
 
 ### `depot_fill_dedup` — Idempotenz-Ledger für Fill-Zustellung (ADR-011, P8; nachgezogen S-016 DBA-Zweit-Review)
 | Feld | Typ | Constraint |
@@ -585,7 +595,7 @@ erDiagram
 | BR-112 | position.einstand_methode | Default gleitender Durchschnitt (CH), FIFO optional | DB-DEFAULT + CHECK |
 | BR-113 | order.mode | mode ∈ {echt, simuliert}; muss zu Position-mode und globalem/Klassen-Modus passen | App + DB-CHECK |
 | BR-114 | trade_fill.slippage_abs | slippage_abs = fill_preis − arrival_price je Fill gespeichert (TCA) | App |
-| BR-115 | transaction | Append-only; kein UPDATE/DELETE (Steuer-Auditpfad) | DB (kein Update/Delete-Grant) + App |
+| BR-115 | transaction | Append-only; kein UPDATE/DELETE (Steuer-Auditpfad) | DB (Trigger: `BEFORE UPDATE OR DELETE` löst Exception aus, S-035) + App (Port bietet keine Update-/Delete-Methode) |
 | BR-116 | portfolio_weight | Σ weight_pct je (snapshot, dimension) = 100; cash_quote_pct konsistent | App |
 | BR-117 | portfolio_strategy / portfolio_class_limit | Grenzwerte: Einzelposition/Sektor/Klasse/Cash innerhalb Profil-Bandbreiten; genau **eine** aktive Depotstrategie | App + partieller UNIQUE-Index |
 | BR-118 | trial_registry | Append-only; jede getestete Variante bleibt (abgelehnte → archived=true), **nie löschen** — DSR-Validität | DB (kein Delete-Grant) + App |

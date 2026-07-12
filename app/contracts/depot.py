@@ -37,7 +37,6 @@ Bildet aus der Spec ab, soweit von dieser Story (S-015, AC1 + AC10) benötigt:
   `app.domain.portfolio.position_booking`, S-016, AC2/AC3/AC5).
 
 Nicht Teil dieser Story (andere Storys/Nicht-Ziele):
-- Keine Transaktionshistorie/TCA-Persistenz (AC4/AC7 → S-035).
 - Keine Portfolio-Aggregate (AC8/AC9 → S-036).
 - Keine Exit-Regel-Interpretation/-Persistenz (Stop-Trigger-Kategorien,
   ATR-Multiplikator etc. → `strategie-exit-regeln`, S-037/S-038); S-016

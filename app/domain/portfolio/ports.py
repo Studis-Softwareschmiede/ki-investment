@@ -40,6 +40,14 @@ gedeckt werden (und umgekehrt). `mode` stammt in beiden Aufrufern
 (`position_booking._verbuche_kauf`/`_verbuche_verkauf`,
 `fill_booking.pruefe_fill`) aus `fill.mode` — nie aus einer globalen
 Konfiguration.
+
+Story S-035 (AC4/AC7) ergänzt den Port um die append-only
+Transaktionshistorie: `schreibe_transaktion` (Insert je Fill) und
+`historie_je_titel` (Lesen, Grundlage für die TCA je Trade + aggregiert,
+AC7). Bewusst KEINE Update-/Delete-Methode im Port — das ist die
+App-seitige Hälfte der BR-115-Durchsetzung (siehe
+`app.db.models.Transaction`-Docstring): es existiert schlicht kein
+Aufrufer-Pfad, über den ein Eintrag nachträglich verändert werden könnte.
 """
 
 from __future__ import annotations
@@ -50,6 +58,26 @@ from decimal import Decimal
 from typing import Protocol
 
 from app.contracts.depot import FillInput, Modus
+
+
+@dataclass(frozen=True)
+class TransaktionsEintrag:
+    """Schreibgeschützte Sicht auf einen Eintrag der append-only
+    Transaktionshistorie (S-035, AC4/AC7) — bildet das Verträge-Tupel aus
+    `docs/specs/depot.md` §Verträge "Transaktionshistorie" ab: `{ trade_id,
+    titel_id, richtung, menge, fill_preis, arrival_price, slippage,
+    kosten, waehrung, zeitstempel }`."""
+
+    trade_id: str
+    titel_id: str
+    richtung: str
+    menge: Decimal
+    fill_preis: Decimal
+    arrival_price: Decimal
+    slippage: Decimal
+    kosten: Decimal
+    waehrung: str
+    zeitstempel: datetime
 
 
 @dataclass(frozen=True)
@@ -131,4 +159,28 @@ class PositionRepository(Protocol):
         (Redis-Queue) hat denselben Fill doppelt zugestellt,
         `verbuche_fill` bricht in diesem Fall ohne weitere Mutation ab
         (Bestand unverändert)."""
+        ...
+
+    def schreibe_transaktion(self, fill: FillInput, *, position_id: str | None) -> None:
+        """AC4/AC7 (S-035): schreibt den Fill unveränderlich in die
+        append-only Transaktionshistorie (Titel, Richtung, Menge,
+        Fill-Preis, Kosten, Zeitstempel, Währung) — inklusive Arrival-Price
+        und der daraus berechneten realisierten Slippage (AC7,
+        `app.domain.portfolio.transaction_historie.berechne_slippage`).
+        Wird von `verbuche_fill` NACH einer erfolgreichen Positions-Buchung
+        aufgerufen (derselbe Commit wie Dedup-Marker + Positions-Mutation).
+        `position_id` ist optional — bei einem Verkauf, der bei FIFO
+        mehrere Lots verbraucht (A2), ist der Fill keinem einzelnen Lot
+        eindeutig zuordenbar (der Verträge-Vertrag der Historie selbst
+        referenziert ohnehin nur `titel_id`, keine `position_id`)."""
+        ...
+
+    def historie_je_titel(self, titel_id: str, *, mode: Modus) -> list[TransaktionsEintrag]:
+        """AC4/AC7 (S-035): liefert die vollständige, unveränderte
+        Transaktionshistorie eines Titels **im angegebenen `mode`**
+        (Mode-Isolation, BR-130), aufsteigend nach Zeitstempel sortiert —
+        Grundlage der TCA je Trade (AC7, jeder Eintrag trägt bereits
+        Arrival-Price + Slippage) sowie für Steuerauszug/Dashboard (AC4).
+        Leere Liste, falls für `titel_id`/`mode` noch kein Fill gebucht
+        wurde."""
         ...
