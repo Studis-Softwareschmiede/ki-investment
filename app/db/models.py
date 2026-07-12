@@ -8,20 +8,24 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
     SmallInteger,
     String,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -222,4 +226,298 @@ class DataSourceAssetClass(Base):
         return (
             f"DataSourceAssetClass(data_source_id={self.data_source_id!r}, "
             f"asset_class_id={self.asset_class_id!r})"
+        )
+
+
+class MarketDataBronze(Base):
+    """Bronze-Rohdaten — immutabel, Point-in-Time, versioniert (data-model.md
+    §2 `market_data_bronze`, BR-121/BR-122; Spec `docs/specs/datenqualitaet.md`
+    AC1/AC2/AC9/AC10).
+
+    Feldnamen 1:1 aus data-model.md §2 (physisches Schema); die Spec-Verträge
+    (`docs/specs/datenqualitaet.md` „Bronze-Datensatz") nennen dieselben
+    Inhalte unter den fachlichen Namen `event_id` (= `source_event_id`),
+    `roh_wert` (= `payload`), `quelle` (= `data_source_id`),
+    `beobachtungs_zeitpunkt` (= `observed_at`), `empfangs_zeitpunkt`
+    (= `ingested_at`), `anlageklassen_tag` (= `asset_class_tag`).
+
+    **Immutabilität (AC1, BR-121):** Es gibt in dieser Codebasis absichtlich
+    KEINE Update-/Delete-Funktion für diese Tabelle — `app.db.bronze` bietet
+    ausschliesslich `record_observation()` (Insert-only) und `replay()`
+    (Read-only). Als DB-seitige zweite Sicherungsebene (analog BR-101,
+    `category_weight`-Migration) legt die Migration
+    `<REVISION>_create_market_data_bronze.py` zusätzlich einen
+    BEFORE-UPDATE/DELETE-Trigger an, der jeden Änderungsversuch mit
+    `RAISE EXCEPTION` zurückweist (Wahl laut data-model.md §11 Fussnote dem
+    `coder` überlassen).
+
+    **Idempotenz + Versionierung (AC9/AC10, BR-122):** `source_event_id` ist
+    laut data-model.md §2 nicht global eindeutig, sondern gemeinsam mit
+    `data_source_id` **eine Ereignis-Identität, die über mehrere
+    Point-in-Time-Versionen hinweg stabil bleibt** — ein einzelnes physisches
+    `UNIQUE (data_source_id, source_event_id)` wäre mit AC10 (neue Version bei
+    Revision) unvereinbar, zusätzlich verlangt eine RANGE-partitionierte
+    Tabelle laut PostgreSQL, dass jeder Unique-Index die Partitionsspalte
+    (`ingested_at`) enthält — ein rein auf `ingested_at` erweiterter Index
+    würde die Duplikaterkennung selbst aushebeln (jede Zeile bekommt einen
+    frischen `ingested_at`-Wert). Die Dedupe-/Versionierungs-Entscheidung
+    (identischer Inhalt → idempotent überspringen [AC9]; abweichender Inhalt
+    → neue Version anlegen, nie überschreiben [AC10]) liegt daher in
+    `app.db.bronze.record_observation()` (App-Layer) sowie — als DB-seitige
+    zweite Sicherung, analog BR-101 — in einem BEFORE-INSERT-Trigger der
+    Migration. Diese Präzisierung ist in `docs/data-model.md` §2 nachgezogen.
+
+    `payload` entspricht der `roh_wert`-Spalte des Vertrags — unveränderte
+    Rohantwort/Wert der Quelle (JSONB, damit sowohl Skalare als auch
+    strukturierte Rohantworten passen).
+    """
+
+    __tablename__ = "market_data_bronze"
+    __table_args__ = (
+        Index("ix_market_data_bronze_source_ingested_at", "data_source_id", "ingested_at"),
+        Index("ix_market_data_bronze_asset_class_observed_at", "asset_class_tag", "observed_at"),
+        Index("ix_market_data_bronze_source_event_id", "data_source_id", "source_event_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    ingested_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        primary_key=True,
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_class_tag: Mapped[int | None] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=True
+    )
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Generisches JSON mit Postgres-Variant JSONB (data-model.md §2: "JSONB,
+    # unveraenderte Rohantwort") — generisches sa.JSON bleibt dialektportabel
+    # (SQLite-Tests, siehe Konvention der übrigen Migrations-Tests), waehrend
+    # unter Postgres physisch JSONB verwendet wird.
+    payload: Mapped[Any] = mapped_column(
+        sa.JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    quality_indicator: Mapped[str | None] = mapped_column(String, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"MarketDataBronze(data_source_id={self.data_source_id!r}, "
+            f"source_event_id={self.source_event_id!r}, observed_at={self.observed_at!r}, "
+            f"ingested_at={self.ingested_at!r})"
+        )
+
+
+class MarketDataSilver(Base):
+    """Silver-Schicht — normalisierte, Corporate-Actions-adjustierte Werte
+    (data-model.md §2 `market_data_silver`, präzisiert für S-024; Spec
+    `docs/specs/datenqualitaet.md` AC3/AC6).
+
+    Deckt den Spec-Vertrag "Silver-Datensatz" 1:1 (Feldnamen laut
+    data-model.md-Präzisierung):
+    `event_id` = `source_event_id`, `normalisierter_wert` = `normalisierter_wert`,
+    `einheit` = `einheit`, `adjustierungs_info` = `adjustierungs_info`,
+    `abgeleitet_aus: bronze_version` = `bronze_id` + `bronze_ingested_at`
+    (zusammen die vollständige FK auf die partitionierte `market_data_bronze`-
+    Tabelle, deren PK `(id, ingested_at)` ist — Partitionsschlüssel muss laut
+    Postgres Teil jeder FK auf eine partitionierte Tabelle sein).
+
+    **Reproduzierbarkeit (AC3-NFR):** diese Tabelle ist eine reine Ableitung
+    aus `market_data_bronze` — jede Zeile kann jederzeit aus der
+    referenzierten Bronze-Zeile + den zum Ableitungszeitpunkt bekannten
+    Corporate Actions neu berechnet werden (`app.db.silver`). Anders als
+    Bronze (BR-121, append-only) ist Silver **nicht** immutable: bei einer
+    rückwirkend gemeldeten Corporate Action werden die betroffenen Zeilen für
+    Symbol/Quelle gelöscht und neu abgeleitet (AC6-Edge-Case) — Bronze bleibt
+    dabei unverändert.
+
+    `instrument_id` aus data-model.md ist bewusst nicht umgesetzt — die
+    `instrument`-Tabelle existiert in dieser Codebasis noch nicht (siehe
+    data-model.md-Präzisierung + Coder-Handoff S-024). `symbol` (aus der
+    Bronze-Zeile übernommen) übernimmt stattdessen die fachliche Rolle,
+    Corporate Actions dem richtigen Titel zuzuordnen.
+
+    **`data_source_id` (Iteration 2, Reviewer-Befund, empirisch gegen
+    Postgres 17 belegt):** denormalisiert aus der Bronze-Zeile übernommen.
+    `source_event_id` ist laut BR-122/data-model.md §2 NUR gemeinsam mit
+    `data_source_id` eine eindeutige Ereignis-Identität — ohne diese Spalte
+    kann `rebuild_silver_series_for_symbol()` beim Löschen/Neu-Ableiten nicht
+    zuverlässig zwischen zwei Quellen unterscheiden, die zufällig dieselbe
+    `source_event_id`-Zeichenkette für dasselbe Symbol verwenden (silent
+    Cross-Data-Source-Datenverlust, siehe `.claude/lessons/coder.md`).
+
+    **`uq_market_data_silver_bronze_version` (Iteration 2, Reviewer-Befund):**
+    `(bronze_id, bronze_ingested_at, observed_at)` ist physisch UNIQUE — im
+    Unterschied zu `market_data_bronze` (BR-122) ist ein echter Unique-Index
+    hier möglich, weil `observed_at` (Partitionsschlüssel) für dieselbe
+    Bronze-Version deterministisch identisch ist (1:1 aus der referenzierten
+    Bronze-Zeile übernommen, nicht wie bei Bronze bei jedem Insert neu
+    vergeben) — der Index erfüllt damit sowohl die Postgres-Pflicht
+    (Partitionsschlüssel Teil jedes Unique-Index auf partitionierter Tabelle)
+    als auch die eigentliche Dedupe-Garantie. `record_silver_observation()`
+    fängt den daraus resultierenden `IntegrityError` bei einem parallelen
+    Duplikat-Versuch ab (siehe `app/db/silver.py`).
+    """
+
+    __tablename__ = "market_data_silver"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["bronze_id", "bronze_ingested_at"],
+            ["market_data_bronze.id", "market_data_bronze.ingested_at"],
+        ),
+        UniqueConstraint(
+            "bronze_id",
+            "bronze_ingested_at",
+            "observed_at",
+            name="uq_market_data_silver_bronze_version",
+        ),
+        Index("ix_market_data_silver_symbol_observed_at", "symbol", "observed_at"),
+        Index("ix_market_data_silver_source_event_id", "source_event_id"),
+        Index("ix_market_data_silver_bronze_id_ingested_at", "bronze_id", "bronze_ingested_at"),
+        Index("ix_market_data_silver_data_source_id_symbol", "data_source_id", "symbol"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True), primary_key=True, nullable=False
+    )
+    bronze_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    bronze_ingested_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=False
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    normalisierter_wert: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    einheit: Mapped[str] = mapped_column(String, nullable=False)
+    adjustierungs_info: Mapped[Any] = mapped_column(
+        sa.JSON().with_variant(JSONB, "postgresql"), nullable=True
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"MarketDataSilver(source_event_id={self.source_event_id!r}, "
+            f"symbol={self.symbol!r}, normalisierter_wert={self.normalisierter_wert!r}, "
+            f"einheit={self.einheit!r})"
+        )
+
+
+class MarketDataGold(Base):
+    """Gold-Schicht — angereicherte Konsumenten-Werte (data-model.md §2
+    `market_data_gold`, S-051; Spec `docs/specs/datenqualitaet.md` AC4).
+
+    Deckt den Spec-Vertrag "Gold-Datensatz" 1:1 (Feldnamen laut
+    data-model.md-Präzisierung): `event_id` = `source_event_id`,
+    `angereicherter_wert` = `angereicherter_wert`, `qualitaetsindikator` =
+    `qualitaetsindikator`, `herkunft: silver_version` = `silver_id` +
+    `silver_observed_at` (zusammen die vollständige FK auf die partitionierte
+    `market_data_silver`-Tabelle, deren PK `(id, observed_at)` ist —
+    Partitionsschlüssel muss laut Postgres Teil jeder FK auf eine
+    partitionierte Tabelle sein).
+
+    **Anreicherung (AC4):** `angereicherter_wert` wird unverändert aus
+    `market_data_silver.normalisierter_wert` übernommen (bereits normalisiert
+    + Corporate-Actions-adjustiert); `qualitaetsindikator` wird aus
+    `market_data_bronze.quality_indicator` propagiert (Socket-
+    Qualitätsmetadatum, in Silver bisher nicht exponiert) — die Gold-Zeile
+    kombiniert damit Information aus Silver (Wert) und Bronze (Qualitäts-
+    Kontext) zu einer konsumentenfertigen Sicht, ohne Score-/Signal-
+    Aggregation (z-Scores etc. sind laut Spec-Nicht-Ziel Sache der Analyse,
+    nicht dieser Schicht — siehe `app/db/gold.py`).
+
+    **Reproduzierbarkeit (AC4-NFR):** wie Silver ist auch Gold eine reine
+    Ableitung — `app.db.gold.rebuild_gold_series_for_symbol` leitet die
+    komplette Reihe jederzeit neu aus Silver/Bronze ab. Weder Bronze noch
+    Silver werden von diesem Modul verändert (AC4: "keine Anreicherung
+    verändert oder ersetzt die zugrunde liegenden Bronze-Rohdaten").
+
+    **`data_source_id` (denormalisiert, analog Silver/Iteration-2-Lehre):**
+    aus der Silver-Zeile übernommen — ohne diese Spalte könnte
+    `rebuild_gold_series_for_symbol` beim Löschen/Neu-Ableiten nicht
+    zuverlässig zwischen zwei Quellen unterscheiden, die zufällig dieselbe
+    `source_event_id`-Zeichenkette für dasselbe Symbol verwenden (dieselbe
+    Klasse Cross-Data-Source-Bug wie bei Silver, hier vorab vermieden).
+
+    **`ON DELETE CASCADE` (Iteration 2, DBA-Befund, Critical):**
+    `app.db.silver.rebuild_silver_series_for_symbol` löscht bei jeder
+    Corporate-Actions-Neuableitung ALLE bestehenden Silver-Zeilen für
+    `(data_source_id, symbol)` — ohne `ON DELETE CASCADE` schlägt dieses
+    `DELETE` unter Postgres mit einer Fremdschlüsselverletzung fehl, sobald
+    mindestens eine der zu löschenden Silver-Zeilen bereits eine abgeleitete
+    Gold-Zeile hat. Gold-Zeilen haben laut AC4 keine eigenständige Existenz
+    (reine Ableitung) und sind laut AC4-NFR jederzeit über
+    `app.db.gold.rebuild_gold_series_for_symbol` reproduzierbar — ein
+    automatisches Mitlöschen bei Silver-Neuableitung ist damit konsistent
+    zum bestehenden Silver-Design (siehe Migration `0da3d5a72ba2` für die
+    volle Begründung).
+    """
+
+    __tablename__ = "market_data_gold"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["silver_id", "silver_observed_at"],
+            ["market_data_silver.id", "market_data_silver.observed_at"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "silver_id",
+            "silver_observed_at",
+            "observed_at",
+            name="uq_market_data_gold_silver_version",
+        ),
+        Index("ix_market_data_gold_symbol_observed_at", "symbol", "observed_at"),
+        Index("ix_market_data_gold_source_event_id", "source_event_id"),
+        Index("ix_market_data_gold_silver_id_observed_at", "silver_id", "silver_observed_at"),
+        Index("ix_market_data_gold_data_source_id_symbol", "data_source_id", "symbol"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True), primary_key=True, nullable=False
+    )
+    silver_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    silver_observed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=False
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    angereicherter_wert: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    qualitaetsindikator: Mapped[str | None] = mapped_column(String, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"MarketDataGold(source_event_id={self.source_event_id!r}, "
+            f"symbol={self.symbol!r}, angereicherter_wert={self.angereicherter_wert!r}, "
+            f"qualitaetsindikator={self.qualitaetsindikator!r})"
         )

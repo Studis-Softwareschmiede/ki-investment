@@ -1,7 +1,7 @@
 id: S-022
 parent: F-004
 title: Bronze immutabel + Point-in-Time + Event-ID-Idempotenz + Revisions-Versionierung
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/datenqualitaet.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Append-only Bronze mit observed_at-Replay, UNIQUE(source_event_id
   Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-022-bronze-immutabel
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/21
 blocked_reason: null
 created_at: '2026-07-12T10:09:10Z'
-updated_at: '2026-07-12T10:09:10Z'
-done_at: null
+updated_at: '2026-07-12T16:05:50Z'
+done_at: '2026-07-12T16:05:49Z'

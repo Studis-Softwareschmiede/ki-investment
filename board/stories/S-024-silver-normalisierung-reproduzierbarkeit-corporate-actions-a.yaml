@@ -1,7 +1,7 @@
 id: S-024
 parent: F-004
 title: Silver-Normalisierung, Reproduzierbarkeit & Corporate-Actions-Adjustierung
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/datenqualitaet.md
 implements:
@@ -19,9 +19,9 @@ estimate_note: Silver aus Bronze reproduzierbar ableiten und Splits/Dividenden a
   (Bronze unverändert); Corporate-Actions-Logik ist Hauptrisiko, Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-024-silver-normalisierung
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/23
 blocked_reason: null
 created_at: '2026-07-12T10:09:13Z'
-updated_at: '2026-07-12T10:09:14Z'
-done_at: null
+updated_at: '2026-07-12T18:59:41Z'
+done_at: '2026-07-12T18:59:40Z'

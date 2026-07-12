@@ -41,7 +41,7 @@ erDiagram
 
     trading_platform ||--o{ platform_asset_class : "bepreist"
 
-    instrument ||--o{ market_data_silver : "hat Signale"
+    instrument ||--o{ market_data_silver : "hat Signale (Ziel-Relation nach Folge-Story — instrument_id noch nicht umgesetzt, S-024-Präzisierung §2)"
     instrument ||--|| instrument_signal_bundle : "aktuelles Bündel"
     instrument ||--o{ analysis_result : "wird analysiert"
     instrument ||--o{ position : "gehalten als"
@@ -62,6 +62,7 @@ erDiagram
     position ||--o{ risk_check_log : "geprüft durch"
     order ||--o{ trade_fill : "gefüllt durch"
     market_data_bronze ||--o{ market_data_silver : "normalisiert zu"
+    market_data_silver ||--o{ market_data_gold : "angereichert zu"
 
     portfolio_snapshot ||--o{ portfolio_weight : "gewichtet"
 
@@ -232,22 +233,89 @@ erDiagram
 | quality_indicator | TEXT | (Socket-Qualitätsmetadatum) |
 | observed_at | TIMESTAMPTZ | NOT NULL (fachlicher Zeitpunkt der Datenquelle, Point-in-Time) |
 | ingested_at | TIMESTAMPTZ | NOT NULL DEFAULT now() (Aufnahmezeit — **Partitionsschlüssel**) |
-| — | — | **PK (id, ingested_at)** · UNIQUE (data_source_id, source_event_id) · **append-only**, kein UPDATE/DELETE (→ BR-121) |
+| — | — | **PK (id, ingested_at)** · **append-only**, kein UPDATE/DELETE (→ BR-121) |
+
+> **BR-122-Präzisierung (S-022, AC9/AC10):** `UNIQUE (data_source_id, source_event_id)` ist als
+> **physischer** Index NICHT umsetzbar — er würde AC10 (rückwirkende Revision erzeugt eine
+> zusätzliche Point-in-Time-Version statt Überschreiben) strukturell verhindern, und auf einer
+> `RANGE`-partitionierten Tabelle müsste jeder Unique-Index zusätzlich den Partitionsschlüssel
+> (`ingested_at`) enthalten — was die Duplikaterkennung selbst aushebeln würde (jede Zeile trägt
+> ein frisches `ingested_at`). Idempotenz (AC9) + Versionierung (AC10) werden daher zweischichtig
+> **verhaltensseitig** durchgesetzt statt über einen Unique-Constraint: App-Layer
+> (`app/db/bronze.py::record_observation` — identischer Inhalt zur zuletzt bekannten Version
+> derselben `(data_source_id, source_event_id)` → idempotenter No-Op; abweichender Inhalt → neue
+> Zeile) sowie ein DB-seitiger BEFORE-INSERT-Trigger als zweite Sicherung (Migration
+> `cfdd83ba9a2c_create_market_data_bronze_bronze_layer.py`), analog zum BR-101-Muster bei
+> `category_weight`. `(data_source_id, source_event_id)` bleibt eine **logische**
+> Ereignis-Identität über mehrere Versionen hinweg, kein physischer Unique-Key.
+>
+> **Nebenläufigkeits-Härtung (S-022, Iteration 2, empirisch gegen Postgres 17 gemessen):**
+> unter READ COMMITTED sehen zwei parallele, noch nicht committete Transaktionen sich
+> gegenseitig nicht — `record_observation()` erwirkt daher VOR der Lese-Prüfung eine
+> `pg_advisory_xact_lock` je Ereignis-Identität, die konkurrierende Aufrufe serialisiert.
+> Der DB-Trigger wirft bei einem trotzdem durchgeschlüpften Duplikat außerdem KEIN stilles
+> `RETURN NULL` mehr (ORM-inkompatibel, siehe `.claude/lessons/coder.md`), sondern eine
+> abfangbare Exception (SQLSTATE `unique_violation`), die `record_observation()` fängt und
+> die massgebliche Zeile frisch nachlädt statt ein verwaistes ORM-Objekt zurückzugeben.
 
 **Partitionierung:** deklarativ nach `RANGE (ingested_at)`, **monatliche** Partitionen (Zeitreihen, hohes Volumen). Partitionsschlüssel muss Teil von PK/Unique sein → daher `(id, ingested_at)`.
 
-### `market_data_silver` — normalisierte Signale, einheitliches Bündel (C-009, Datenquellen-Abfrage)
+### `market_data_silver` — normalisierte, Corporate-Actions-adjustierte Werte (C-009, C-019; `docs/specs/datenqualitaet.md` AC3/AC6)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | Teil PK |
-| bronze_id | UUID | Referenz auf Bronze-Ursprung (Replay-Kette) |
-| instrument_id | UUID | FK → instrument.id |
-| signal_type | TEXT | NOT NULL (z.B. sentiment, insider, flow, macro) |
-| raw_value | NUMERIC(20,8) | |
-| z_score | NUMERIC(8,4) | CHECK `-3 ≤ z_score ≤ 3` (robuster z-Score, gekappt ±3; → BR-131) |
-| decay_gewicht | NUMERIC(6,4) | Aktualitäts-/Sentiment-Decay-Faktor |
-| observed_at | TIMESTAMPTZ | NOT NULL (Partitionsschlüssel) |
-| — | — | **PK (id, observed_at)**, RANGE-partitioniert monatlich |
+| bronze_id | UUID | Teil zusammengesetzter FK → `market_data_bronze(id, ingested_at)` — Referenz auf Bronze-Ursprung (Replay-Kette, Vertragsfeld `abgeleitet_aus: bronze_version`) |
+| bronze_ingested_at | TIMESTAMPTZ | Teil derselben zusammengesetzten FK (Partitionsschlüssel-Pflicht bei FK auf partitionierte Tabelle) |
+| data_source_id | UUID | FK → `data_source.id`, NOT NULL — denormalisiert aus der Bronze-Zeile (Iteration 2, Reviewer-Befund): `source_event_id` ist laut BR-122 nur gemeinsam mit `data_source_id` eine eindeutige Ereignis-Identität; ohne diese Spalte kann ein Rebuild/Delete-Scoping für eine Quelle silent Silver-Zeilen einer anderen Quelle löschen |
+| source_event_id | TEXT | NOT NULL — Vertragsfeld `event_id`, aus der Bronze-Zeile übernommen (denormalisiert, vermeidet Partitions-übergreifenden Join für einfache Lookups) |
+| symbol | TEXT | aus der Bronze-Zeile übernommen; fachlich nötig, um die passende Corporate-Actions-Historie je Titel zuzuordnen (AC6) — Ersatz für `instrument_id`, siehe Präzisierung unten |
+| normalisierter_wert | NUMERIC(20,8) | NOT NULL — Vertragsfeld `normalisierter_wert` |
+| einheit | TEXT | NOT NULL — Vertragsfeld `einheit` (AC3, einheitliches Format) |
+| adjustierungs_info | JSONB | Vertragsfeld `adjustierungs_info` (AC6): JSON-Objekt mit angewandten Corporate-Actions (Typ, Wirksamkeitsdatum, Faktor je Aktion) + kumuliertem Faktor; `NULL`, wenn keine Adjustierung nötig war |
+| observed_at | TIMESTAMPTZ | NOT NULL (Partitionsschlüssel, aus der Bronze-Zeile übernommen) |
+| — | — | **PK (id, observed_at)**, RANGE-partitioniert monatlich. **UNIQUE (bronze_id, bronze_ingested_at, observed_at)** (`uq_market_data_silver_bronze_version`, Iteration 2): physisch möglich, weil `observed_at` für dieselbe Bronze-Version deterministisch identisch ist — schliesst zusammen mit einer App-seitigen Advisory-Lock (`app/db/silver.py`) die Nebenläufigkeits-Lücke bei `record_silver_observation()`. **Nicht** append-only (Unterschied zu Bronze/BR-121): bei einer rückwirkend gemeldeten Corporate Action wird die betroffene historische Reihe für Symbol/Quelle vollständig neu abgeleitet (bestehende Zeilen gelöscht, neu berechnete Zeilen eingefügt) — Bronze bleibt dabei unverändert (AC6-Edge-Case). |
+
+> **Vertrag-Präzisierung (S-024, AC3/AC6):** Das ursprünglich hier notierte Schema
+> (`instrument_id`, `signal_type`, `raw_value`, `z_score`, `decay_gewicht`) war auf die
+> Sentiment-/Signal-Bündel-Nutzung der Datenquellen-Abfrage (`[[dateneingang]]`/S-021)
+> zugeschnitten und deckte den in `docs/specs/datenqualitaet.md` definierten
+> Silver-Datensatz-Vertrag (`{ event_id, normalisierter_wert, einheit, adjustierungs_info,
+> abgeleitet_aus: bronze_version }`, AC3/AC6 — normalisierte, Corporate-Actions-
+> adjustierte Werte) strukturell nicht ab (u.a. fehlten `einheit`/`adjustierungs_info`
+> vollständig). Diese Story präzisiert die Tabelle auf den tatsächlichen Vertrag; die
+> Signal-Bündel-Spalten (`signal_type`/`raw_value`/`z_score`/`decay_gewicht`) sind NICHT
+> Teil von AC3/AC6 und werden hier nicht gebaut — eine Folge-Story für die
+> Datenquellen-Abfrage-Signalaggregation kann sie bei Bedarf ergänzen (eigene Migration,
+> gleiche Tabelle oder eigene Tabelle — DBA-Entscheidung zu diesem Zeitpunkt).
+>
+> **`instrument_id` bewusst (noch) nicht umgesetzt:** die `instrument`-Tabelle existiert
+> in dieser Codebasis noch nicht (keine bisherige Story hat sie angelegt — `market_data_
+> bronze` hat aus demselben Grund bereits `symbol`/`asset_class_tag` statt `instrument_id`
+> verwendet, S-022). Silver folgt demselben, bereits etablierten Muster: `symbol` statt
+> `instrument_id`. Eine physische FK auf eine nicht existierende Tabelle ist nicht baubar;
+> das Nachrüsten von `instrument_id` (inkl. FK, sobald `instrument` existiert) ist eine
+> Folge-Story (SPEC-LÜCKE, siehe Coder-Handoff S-024).
+
+### `market_data_gold` — angereicherte Konsumenten-Werte (C-009, C-019; `docs/specs/datenqualitaet.md` AC4, S-051)
+| Feld | Typ | Constraint |
+|---|---|---|
+| id | UUID | Teil PK |
+| silver_id | UUID | Teil zusammengesetzter FK → `market_data_silver(id, observed_at)` **ON DELETE CASCADE** (Iteration 2, DBA-Befund) — Referenz auf die Silver-Ableitung (Vertragsfeld `herkunft: silver_version`) |
+| silver_observed_at | TIMESTAMPTZ | Teil derselben zusammengesetzten FK (Partitionsschlüssel-Pflicht bei FK auf partitionierte Tabelle) |
+| data_source_id | UUID | FK → `data_source.id`, NOT NULL — denormalisiert aus der Silver-Zeile (analog `market_data_silver.data_source_id`, S-024-Präzisierung): Cross-Data-Source-Sicherheit für Rebuild-/Delete-Scoping |
+| source_event_id | TEXT | NOT NULL — Vertragsfeld `event_id`, aus der Silver-Zeile übernommen |
+| symbol | TEXT | aus der Silver-Zeile übernommen |
+| angereicherter_wert | NUMERIC(20,8) | NOT NULL — Vertragsfeld `angereicherter_wert`; unverändert aus `market_data_silver.normalisierter_wert` übernommen (bereits normalisiert + Corporate-Actions-adjustiert, AC3/AC6) |
+| qualitaetsindikator | TEXT | Vertragsfeld `qualitaetsindikator`; propagiert aus `market_data_bronze.quality_indicator` (Socket-Qualitätsmetadatum, in Silver bisher nicht exponiert) — bewusst KEINE Score-/Signal-Aggregation (z-Scores etc. sind laut Spec-Nicht-Ziel Sache der Analyse, nicht dieser Schicht) |
+| observed_at | TIMESTAMPTZ | NOT NULL (Partitionsschlüssel, aus der Silver-Zeile übernommen) |
+| computed_at | TIMESTAMPTZ | NOT NULL DEFAULT now() (Zeitpunkt der Gold-Ableitung, Audit) |
+| — | — | **PK (id, observed_at)**, RANGE-partitioniert monatlich (analog Bronze/Silver). **UNIQUE (silver_id, silver_observed_at, observed_at)** (`uq_market_data_gold_silver_version`, `observed_at` redundant zu `silver_observed_at` — PostgreSQL verlangt den Partitionsschlüssel explizit in jedem Unique-Index auf einer `PARTITION BY RANGE`-Tabelle, empirisch gegen Postgres 17 verifiziert): genau ein Gold-Datensatz je Silver-Version (Idempotenz). **Nicht** append-only (analog Silver): bei einer Silver-Neuableitung (z.B. rückwirkende Corporate Action) wird die betroffene Gold-Reihe für Symbol/Quelle vollständig neu abgeleitet — Bronze/Silver bleiben dabei unverändert (AC4-Kern-Invariante). |
+
+> **AC4-Kern-Invariante** ("keine Anreicherung verändert oder ersetzt die zugrunde liegenden Bronze-Rohdaten"): `market_data_gold` besitzt keine Schreibfunktion auf `market_data_bronze`/`market_data_silver` — die Ableitung ist rein lesend. **AC8-Anschluss** ("ungültige Datenpunkte erscheinen nicht in den Gold-Ergebnissen"): strukturell garantiert, da ein Gold-Datensatz nur aus einer tatsächlich persistierten Silver-Zeile abgeleitet werden kann und `app.db.silver.record_silver_observation` ungültige Bronze-Kandidaten bereits ablehnt (AC7/AC8-Gate) — es entsteht keine Silver-Zeile, aus der ein ungültiger Kandidat nach Gold gelangen könnte.
+>
+> **`ON DELETE CASCADE` (Iteration 2, DBA-Befund, Critical):** die FK von `silver_id`/`silver_observed_at` auf `market_data_silver` trug ursprünglich keine `ON DELETE`-Klausel (Postgres-Default `NO ACTION`) — `app.db.silver.rebuild_silver_series_for_symbol()` löscht bei jeder Corporate-Actions-Neuableitung ALLE bestehenden Silver-Zeilen für `(data_source_id, symbol)`; sobald mindestens eine davon bereits eine abgeleitete Gold-Zeile hatte, schlug dieses `DELETE` unter echtem Postgres mit einer Fremdschlüsselverletzung fehl (in SQLite-Tests unbemerkt, da `PRAGMA foreign_keys=ON` in den betroffenen Test-Fixtures fehlte). **Entscheidung:** `ON DELETE CASCADE` statt eines Vorab-Löschens innerhalb von `rebuild_silver_series_for_symbol()` — Gold-Zeilen haben laut AC4 keine eigenständige Existenz (reine Ableitung) und sind laut AC4-NFR jederzeit über `app.db.gold.rebuild_gold_series_for_symbol()` reproduzierbar; automatisches Mitlöschen bei einer Silver-Neuableitung ist damit konsistent zum bestehenden Silver-Design. Die Anschluss-Pflicht "nach einer Silver-Neuableitung Gold neu aufbauen" liegt bei der (noch nicht gebauten) Orchestrierungsschicht.
+>
+> **AC5 (Survivorship-bias-freies historisches Universum) — keine eigene Tabelle:** die Abfrage „welche Titel existierten zum Zeitpunkt X" (`app.db.universum.historisches_universum`) benötigt **keine** eigene Instrument-/Delisting-Tabelle — sie wird direkt über `market_data_silver.observed_at <= stand_zeitpunkt` beantwortet (Silver enthält nur valide, per AC7/AC8-Gate geprüfte Beobachtungen). Da Beobachtungen nie rückwirkend gelöscht werden (Bronze: BR-121 append-only; Silver: nur bei Corporate-Actions-Neuableitung ersetzt, nie entfernt), bleibt ein Symbol nach seiner letzten Beobachtung (Delisting) in einer späteren Universums-Abfrage weiterhin enthalten — kein „aktuell aktiv"-Filter, kein Survivorship-Bias. Ein explizites Delisting-Datum je Titel wäre erst mit einer künftigen `instrument`-Tabelle sinnvoll modellierbar (siehe `instrument_id`-Präzisierung bei `market_data_silver` oben) — außerhalb des Scopes dieser Story.
 
 ### `instrument_signal_bundle` — Gold: angereichertes Signal-Bündel je Titel (C-009, Datenquellen-Abfrage)
 | Feld | Typ | Constraint |
@@ -517,8 +585,9 @@ erDiagram
 | platform_asset_class | (asset_class_id) | Plattform-Kosten je Klasse |
 | instrument | (asset_class_id), (symbol) | Klassenfilter + Symbol-Lookup |
 | market_data_bronze | (data_source_id, ingested_at), (asset_class_tag, observed_at) | Replay + PIT je Klasse (je Partition) |
-| market_data_bronze | UNIQUE (data_source_id, source_event_id) | Idempotenz (→ BR-122) |
-| market_data_silver | (instrument_id, observed_at), (signal_type) | Signal-Bündel je Titel |
+| market_data_bronze | (data_source_id, source_event_id) — **nicht** UNIQUE | Ereignis-Lookup für App-/DB-Layer-Idempotenz (→ BR-122-Präzisierung §2) |
+| market_data_silver | (symbol, observed_at), (source_event_id), (bronze_id, bronze_ingested_at), (data_source_id, symbol) | Corporate-Actions-Adjustierung je Titel/Zeit, Event-Lookup, Bronze-Rückverfolgung, Quellen-korrektes Rebuild-/Delete-Scoping (Iteration 2) |
+| market_data_gold | (symbol, observed_at), (source_event_id), (silver_id, silver_observed_at), (data_source_id, symbol) | Konsumenten-Lookup je Titel/Zeit, Event-Lookup, Silver-Rückverfolgung, Quellen-korrektes Rebuild-/Delete-Scoping (S-051) |
 | analysis_result | (instrument_id, created_at), (analyse_typ), (mode) | Analyse-Historie, Pfad-/Mode-Filter |
 | analysis_category_score | (analysis_result_id) | Scores je Analyse |
 | analysis_fact | (analysis_result_id), (source_id) | Fakten je Analyse, Quellen-Join |
@@ -543,6 +612,7 @@ erDiagram
 |---|---|---|
 | `market_data_bronze` | RANGE `ingested_at`, **monatlich** | Immutable (append-only). **Voll behalten** für Point-in-Time/Replay/Validierungs-Gate; Kalt-Archiv nach 24 Monaten (Detach + externes Objekt-Storage), nie im Betrieb löschen. Recalculation-Window 2–3 Tage für revisionsbehaftete Quellen (FRED) → **neue** Bronze-Zeilen, alte bleiben (PIT). |
 | `market_data_silver` | RANGE `observed_at`, monatlich | 12–24 Monate online, danach Detach/Archiv (rekonstruierbar aus Bronze). |
+| `market_data_gold` | RANGE `observed_at`, monatlich | 12–24 Monate online, danach Detach/Archiv (rekonstruierbar aus Bronze/Silver). |
 | `hallucination_log` | — (moderat) | 24 Monate (KPI-Trend). |
 | `heartbeat` | — (klein, upsert je Komponente) | Nur aktueller Stand; keine Historie. |
 | `alert_log` | optional monatlich | 12 Monate; acknowledged nach 90 Tagen archivierbar. |
@@ -580,8 +650,8 @@ erDiagram
 | BR-118 | trial_registry | Append-only; jede getestete Variante bleibt (abgelehnte → archived=true), **nie löschen** — DSR-Validität | DB (kein Delete-Grant) + App |
 | BR-119 | gate_result.ampel | 🟢 nur wenn Stufe A **und** B bestanden (sample ≥ 100, WFE ≥ 0.5, PSR ≥ 0.95); 🟡 A ok/B läuft; 🔴 durchgefallen | App |
 | BR-120 | gate_result.min_trl | MinTRL bei jeder Auswertung berechnet und gespeichert/angezeigt | App |
-| BR-121 | market_data_bronze | Immutable/append-only: kein UPDATE/DELETE innerhalb Online-Retention; Point-in-Time via observed_at | DB (kein Update/Delete-Grant) + App |
-| BR-122 | market_data_bronze | Idempotenz: UNIQUE (data_source_id, source_event_id) — Doppelaufnahme verhindert | DB-UNIQUE |
+| BR-121 | market_data_bronze | Immutable/append-only: kein UPDATE/DELETE innerhalb Online-Retention; Point-in-Time via observed_at | DB (BEFORE-UPDATE/DELETE-Trigger, S-022) + App |
+| BR-122 | market_data_bronze | Idempotenz + AC10-Versionierung: identischer Inhalt zu (data_source_id, source_event_id) → No-Op, abweichender Inhalt → neue PIT-Version (kein physischer Unique-Index möglich, siehe §2-Präzisierung) | App (`app/db/bronze.py`) + DB-Trigger |
 | BR-123 | data_source / asset_class | Reddit-Sentiment (retail_social) nur bei retail_driven-Klassen (Aktien 1, Krypto 7) — nicht Obligationen/FX | App (Quellen-Matching) |
 | BR-124 | asset_class.aktiv | Inaktive Klasse → keine Datenabfrage, keine Analyse, keine Datenkosten (Toggle in allen Modulen) | App |
 | BR-125 | asset_class.aktiv / position | Deaktivierte Klasse mit offenen Positionen: keine neuen Käufe, aber Überwachung + Exits bleiben aktiv | App |
@@ -590,7 +660,7 @@ erDiagram
 | BR-128 | instrument.gics_sector | Für Positionen handelbarer Klassen Pflicht (Depotstrategie-Sektorprüfung) | App |
 | BR-129 | transaction | Bei currency ≠ CHF: kapital_gv_chf und waehrungs_gv_chf getrennt ausgewiesen (FX-Attribution) | App |
 | BR-130 | mode (alle transaktionalen Entitäten) | echt- und simuliert-Daten in Aggregaten/Snapshots nie vermischt | App + Filter |
-| BR-131 | market_data_silver.z_score | Robuster z-Score gekappt auf ±3 | DB-CHECK + App |
+| BR-131 | (verschoben — Folge-Story) | Robuster z-Score gekappt auf ±3. `market_data_silver.z_score` war Teil des ursprünglichen (Signal-Bündel-)Zuschnitts der Tabelle; die S-024-Präzisierung (§2) hat diese Spalte entfernt, da sie nicht Teil des AC3/AC6-Silver-Datensatz-Vertrags ist — die Regel gilt für eine künftige Datenquellen-Abfrage-Signalaggregations-Story (z-Score-Feld dort neu einzuführen) | App (Folge-Story) |
 
 ---
 
@@ -601,7 +671,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
 2. **Konfig mit FK auf Basis:** `category_weight`, `analysis_method`, `data_source`, `data_source_asset_class`, `trading_platform`, `platform_asset_class`, `portfolio_strategy`, `portfolio_class_limit`.
 3. **Instrument:** `instrument` (FK asset_class).
-4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `instrument_signal_bundle`.
+4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
 5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`.
 6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`.
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
