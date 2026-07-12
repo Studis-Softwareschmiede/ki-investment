@@ -7,6 +7,7 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 
 from __future__ import annotations
 
+import sqlalchemy as sa
 from sqlalchemy import Boolean, CheckConstraint, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,7 +37,9 @@ class AssetClass(Base):
     name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     prio_stufe: Mapped[str] = mapped_column(String, nullable=False)
     aktiv: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    retail_driven: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retail_driven: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"AssetClass(id={self.id!r}, name={self.name!r}, aktiv={self.aktiv!r})"

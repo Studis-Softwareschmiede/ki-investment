@@ -14,6 +14,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 # revision identifiers, used by Alembic.
 revision: str = "b2bd709be080"
@@ -102,7 +103,14 @@ def upgrade() -> None:
             "prio_stufe IN ('MVP', 'Stufe2', 'Stufe3')", name="ck_asset_class_prio_stufe"
         ),
     )
-    op.bulk_insert(asset_class, ASSET_CLASS_SEED)
+    # Idempotenter Seed (data-model.md §11 Punkt 10: "ON CONFLICT DO NOTHING") —
+    # ein wiederholtes `alembic upgrade head` gegen eine bereits geseedete DB
+    # darf keine IntegrityError werfen und die Zeilenzahl nicht verändern.
+    op.execute(
+        pg_insert(asset_class).values(ASSET_CLASS_SEED).on_conflict_do_nothing(
+            index_elements=["id"]
+        )
+    )
 
 
 def downgrade() -> None:

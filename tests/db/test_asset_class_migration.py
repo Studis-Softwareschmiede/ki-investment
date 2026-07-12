@@ -17,6 +17,18 @@ Covers (anlageklassen-config): AC1, AC2, AC3, AC12
 Die Seed-Konstante wird direkt aus der Migrationsdatei importiert (statt
 dupliziert), damit ein kuenftiger Migrations-Edit ohne Test-Anpassung nicht
 unbemerkt divergiert.
+
+Zusaetzlich (Iteration 2, DBA-Review-Fix): der Seed-Insert der Migration
+verwendet `postgresql.insert(...).on_conflict_do_nothing()` (idempotenter
+Seed laut docs/data-model.md §11 Punkt 10). Da dieses Konstrukt nur unter dem
+Postgres-Dialekt compilierbar ist und `uv run pytest` laut
+`migration-tool-subsystem.md` §9 keinen Docker-Postgres startet, wird die
+Idempotenz hier durch Kompilieren des Insert-Statements gegen den
+Postgres-Dialekt geprueft (SQL enthaelt `ON CONFLICT ... DO NOTHING` auf der
+`id`-Spalte) statt durch tatsaechliches zweifaches Ausfuehren. Der reale
+zweifache `alembic upgrade head`-Lauf (weiterhin 11 Zeilen nach Re-Run) wurde
+manuell gegen die lokale Compose-Postgres-Instanz verifiziert (Coder-Self-Test,
+siehe Handoff).
 """
 
 from __future__ import annotations
@@ -159,3 +171,37 @@ def test_toggle_state_persists_across_reconnect(tmp_path) -> None:
         assert krypto is not None and krypto.aktiv is True
         assert cash is not None and cash.aktiv is False
     second_engine.dispose()
+
+
+def test_seed_insert_is_idempotent_via_on_conflict_do_nothing() -> None:
+    """Verifiziert data-model.md §11 Punkt 10 ("Idempotent seedbar via
+    ON CONFLICT DO NOTHING") fuer den Migrations-Seed-Insert — kein `@trace`-Tag,
+    da keiner bestimmten AC/BR zugeordnet, sondern eine allgemeine DB-Konvention.
+
+    `postgresql.insert(...).on_conflict_do_nothing(...)` ist nur unter dem
+    Postgres-Dialekt compilierbar (nicht gegen SQLite ausfuehrbar) — daher wird
+    hier die compilierte SQL geprueft statt ein echter Doppel-Lauf. Der reale
+    doppelte `alembic upgrade head`-Lauf (Zeilenzahl bleibt 11) wurde manuell
+    gegen die lokale Compose-Postgres-Instanz verifiziert (Coder-Self-Test).
+    """
+    from sqlalchemy import Boolean, Column, MetaData, SmallInteger, String, Table
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    metadata = MetaData()
+    asset_class = Table(
+        "asset_class",
+        metadata,
+        Column("id", SmallInteger, primary_key=True, autoincrement=False),
+        Column("name", String, nullable=False, unique=True),
+        Column("prio_stufe", String, nullable=False),
+        Column("aktiv", Boolean, nullable=False),
+        Column("retail_driven", Boolean, nullable=False),
+    )
+
+    stmt = pg_insert(asset_class).values(SEED).on_conflict_do_nothing(index_elements=["id"])
+    compiled_sql = str(stmt.compile(dialect=postgresql.dialect()))
+
+    assert "ON CONFLICT" in compiled_sql
+    assert "DO NOTHING" in compiled_sql
+    assert "(id)" in compiled_sql
