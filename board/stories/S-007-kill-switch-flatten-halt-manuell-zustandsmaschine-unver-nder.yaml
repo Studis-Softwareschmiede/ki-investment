@@ -2,7 +2,7 @@ id: S-007
 parent: F-005
 title: 'Kill-Switch «flatten & halt»: manuell, Zustandsmaschine, unveränderliches
   Protokoll'
-status: To Do
+status: In Progress
 priority: P0
 spec: docs/specs/betriebssicherung.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Manueller Halt+Flatten (Paper simuliert), Zustand angehalten nur 
   Kern, Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-007-kill-switch-flatten-halt
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:08:50Z'
-updated_at: '2026-07-12T10:08:50Z'
+updated_at: '2026-07-12T19:45:07Z'
 done_at: null
