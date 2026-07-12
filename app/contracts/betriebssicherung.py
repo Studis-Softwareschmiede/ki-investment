@@ -39,14 +39,53 @@ diese Stories betreffen:
   Story — der Broker-Adapter selbst ist Nicht-Ziel (Board-Item-Scope, siehe
   dort: "Live-Betrieb ist Nicht-Ziel des MVP").
 
-Nicht Teil dieser Story (Board-Item-Scope): kein Alert-Output-Vertrag
-(`{typ, schwere, nachricht, zeitstempel}`, AC7 Benachrichtigungskanal — noch
-kein Kanal gebaut); keine Heartbeat-/Drawdown-Verträge (AC4/AC5).
+Story S-025 (AC2, AC4, AC5) ergänzt die zuvor bewusst ausgesparten
+Auto-Trigger-Verträge, ohne die obigen S-007/S-008-Verträge zu ändern:
+
+- `Alert` — der Spec-Vertrag "Alert (Output an Benachrichtigungskanal):
+  `{typ, schwere, nachricht, zeitstempel}`". `typ` trägt bereits das volle
+  Vertrags-`Literal` (`kill|heartbeat|drawdown|quellenausfall|
+  halluzination`), obwohl diese Story nur `heartbeat`/`drawdown` tatsächlich
+  erzeugt — `quellenausfall` (AC9, S-014-Anschluss) und `halluzination`
+  (AC8, bereits `app.core.hallucination_kpi`) sind spätere/parallele
+  Konsumenten desselben Vertrags. `schwere` folgt dem bereits in
+  `docs/data-model.md` §7 `alert_log.severity` festgelegten Vokabular
+  (`info|warn|critical`) — kein neues Vokabular erfunden. AC7
+  (Benachrichtigungskanal selbst) bleibt Nicht-Ziel dieser Story (S-026);
+  `Alert` ist der interne, testbare Vertrag, an den S-026 andockt
+  (`app.core.alerts`).
+- `HeartbeatEintrag` — der Spec-Vertrag "Heartbeat (je Modul):
+  `{modul_id, letzter_ping_zeitstempel, intervall_soll}`; Ausfall wenn
+  `now − letzter_ping > intervall_soll`" (AC4). Trägt bewusst NUR diese drei
+  Vertragsfelder — die zusätzliche, pro Modul konfigurierbare Kritikalität
+  ("je nach Kritikalität/Konfiguration der Kill-Switch ausgelöst", AC4) ist
+  kein Teil dieses Austausch-Vertrags, sondern interner Registrierungs-
+  Zustand von `app.core.heartbeat` (siehe dortiger Modul-Docstring) — kein
+  Gold-Plating über den wörtlichen Spec-Vertrag hinaus.
+- `DrawdownStatus` — Lesemodell von `app.core.drawdown_monitor.
+  pruefe_drawdown()` (AC2, AC5): aktueller Stand, laufender Höchststand
+  (High-Water-Mark) und daraus abgeleiteter Drawdown in Prozent, plus die
+  zwei Ergebnis-Flags `ueberwachungsluecke` (Edge-Case „fehlender
+  Depot-Stand" — Verträge/Edge-Cases der Spec: wird als Lücke gemeldet,
+  NICHT stillschweigend als „kein Drawdown" gewertet, deckt auch den
+  Cold-Start ohne Baseline ab) und `kill_ausgeloest` (AC2, dieser Aufruf hat
+  den bestehenden `app.core.kill_switch.ausloesen()` getriggert). Kein
+  eigener Vertrag für den Equity-Kurve-Input selbst (Verträge: "Input:
+  Depot-Stand/Equity-Kurve aus dem Depotmodul") — das Depotmodul existiert
+  noch nicht (Cold-Start, Nicht-Ziel dieser Story); `aktualisiere_
+  equity_stand()` in `app.core.drawdown_monitor` nimmt bewusst nur
+  `Decimal` + `datetime` entgegen statt eines eigenen DTO, das mangels
+  Depotmodul-Gegenstück nicht validierbar wäre.
+
+Nicht Teil dieser Story (Board-Item-Scope): kein Alert-Benachrichtigungs-
+kanal selbst (AC7, S-026 — `Alert` ist nur der interne Vertrag, an den der
+künftige Kanal andockt); kein Depotmodul-Equity-Kurve-Vertrag (existiert
+noch nicht).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -137,3 +176,67 @@ class SecretStoreZugang(BaseModel):
     endpunkt: str = Field(min_length=1)
     api_key: str = Field(min_length=1, repr=False)
     api_secret: str | None = Field(default=None, repr=False)
+
+
+#: Alert-Typ (Verträge, Spec `betriebssicherung`) — das volle Vertrags-
+#: `Literal`; diese Story (S-025) erzeugt tatsächlich nur `"heartbeat"` und
+#: `"drawdown"`, die übrigen Werte werden von parallelen/späteren Modulen
+#: (`kill` bereits durch `app.core.kill_switch`-Auslösung motiviert,
+#: `quellenausfall` AC9, `halluzination` bereits AC8 via
+#: `app.core.hallucination_kpi`) verwendet, ohne diesen Vertrag zu ändern.
+AlertTyp = Literal["kill", "heartbeat", "drawdown", "quellenausfall", "halluzination"]
+
+#: Alert-Schwere — Vokabular übernommen aus `docs/data-model.md` §7
+#: `alert_log.severity` (CHECK ∈ {info, warn, critical}), kein neues
+#: Vokabular für diese Story erfunden.
+AlertSchwere = Literal["info", "warn", "critical"]
+
+
+class Alert(BaseModel):
+    """Alert (Output an Benachrichtigungskanal, Verträge): `{typ, schwere,
+    nachricht, zeitstempel}`. Im Paper-MVP informativ (AC7, Nicht-Ziel
+    dieser Story) — `app.core.alerts` sammelt Alerts in-memory und bietet
+    eine Callback-Andockstelle für den künftigen Benachrichtigungskanal
+    (S-026)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    typ: AlertTyp
+    schwere: AlertSchwere
+    nachricht: str = Field(min_length=1)
+    zeitstempel: datetime
+
+
+class HeartbeatEintrag(BaseModel):
+    """Heartbeat-Zustand EINES überwachten Pipeline-Moduls (Verträge, AC4):
+    `{modul_id, letzter_ping_zeitstempel, intervall_soll}`. Ausfall wird
+    von `app.core.heartbeat.pruefe_ausfaelle()` erkannt, wenn `now −
+    letzter_ping_zeitstempel > intervall_soll` (STRIKT `>`, analog zum
+    Halluzinations-KPI-Schwellwertvergleich in `app.core.hallucination_kpi`
+    — ein Ping GENAU am Intervall-Ende gilt noch nicht als Ausfall)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    modul_id: str = Field(min_length=1)
+    letzter_ping_zeitstempel: datetime
+    intervall_soll: timedelta
+
+
+class DrawdownStatus(BaseModel):
+    """Lesemodell von `app.core.drawdown_monitor.pruefe_drawdown()` (AC2,
+    AC5). `drawdown_pct` ist der relative Rückgang vom laufenden
+    Höchststand (High-Water-Mark) zum aktuellen Stand (`0` = am
+    Höchststand, `1` = Totalverlust). `ueberwachungsluecke=True` (Edge-Case
+    „fehlender Depot-Stand", deckt auch den Cold-Start ohne Baseline ab)
+    bedeutet: `aktueller_stand`/`hoechststand`/`drawdown_pct` sind `None` —
+    es wurde bewusst NICHT `0` gerechnet (kein stillschweigendes „kein
+    Drawdown"). `kill_ausgeloest=True` markiert, dass DIESER Aufruf den
+    bestehenden `app.core.kill_switch.ausloesen()` getriggert hat (AC2)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    aktueller_stand: Decimal | None = None
+    hoechststand: Decimal | None = None
+    drawdown_pct: Decimal | None = None
+    ueberwachungsluecke: bool
+    kill_ausgeloest: bool
