@@ -67,6 +67,14 @@ Benachrichtigungskanal (AC7); Heartbeat-Überwachung selbst (AC4).
 `app.core.heartbeat.pruefe_ausfaelle()` (AC4) rufen `ausloesen()` mit
 Quelle `"drawdown"` bzw. `"heartbeat"` auf, OHNE dieses Modul zu ändern
 (unveränderte Zustandsmaschine/Semantik, wie oben dokumentiert).
+
+**Update S-026 (AC7, Benachrichtigungskanal):** `ausloesen()` meldet JEDE
+Auslösung (auch eine idempotente Mehrfach-Auslösung — analog zum
+AC11-Protokoll) zusätzlich als `Alert(typ="kill", schwere="critical")`
+über `app.core.alerts.melde()` — AC7 fordert wörtlich, dass die
+„Kill-Switch-Auslösung" über den Benachrichtigungskanal gemeldet wird.
+Ein fehlschlagender Kanal blockiert diese Funktion nicht (`melde()` fängt
+Callback-Fehler bereits ab, s. dortiger Docstring, NFR „Verfügbarkeit").
 """
 
 from __future__ import annotations
@@ -77,12 +85,14 @@ import threading
 from datetime import datetime
 
 from app.contracts.betriebssicherung import (
+    Alert,
     Betriebszustand,
     KillSwitchAusloeser,
     KillSwitchEreignis,
     KillSwitchQuelle,
     KillSwitchStatus,
 )
+from app.core.alerts import melde
 
 _logger = logging.getLogger("audit.kill_switch")
 
@@ -103,7 +113,9 @@ def ausloesen(ausloeser: KillSwitchAusloeser) -> KillSwitchStatus:
     Idempotent (Edge-Case): ist der Zustand bereits `angehalten`, bleibt er
     unverändert (kein doppeltes Flatten, kein Zustandssprung) — die
     Auslösung wird trotzdem protokolliert (AC11, `wirkung=
-    "idempotent_bereits_angehalten"`)."""
+    "idempotent_bereits_angehalten"`) UND trotzdem als `Alert` gemeldet
+    (AC7, S-026 — jede Auslösung ist ein meldenswertes Ereignis, analog zum
+    AC11-Protokoll)."""
     global _zustand, _grund, _quelle, _ausgeloest_am
     with _lock:
         bereits_angehalten = _zustand == "angehalten"
@@ -124,6 +136,18 @@ def ausloesen(ausloeser: KillSwitchAusloeser) -> KillSwitchStatus:
         aktueller_status = _status_unlocked()
 
     _logger.warning(json.dumps(eintrag.model_dump(mode="json"), ensure_ascii=False, sort_keys=True))
+
+    melde(
+        Alert(
+            typ="kill",
+            schwere="critical",
+            nachricht=(
+                f"Kill-Switch ausgelöst (Quelle {ausloeser.quelle!r}): {ausloeser.grund} "
+                f"[{wirkung}]."
+            ),
+            zeitstempel=ausloeser.zeitstempel,
+        )
+    )
     return aktueller_status
 
 

@@ -45,15 +45,15 @@ Auto-Trigger-Verträge, ohne die obigen S-007/S-008-Verträge zu ändern:
 - `Alert` — der Spec-Vertrag "Alert (Output an Benachrichtigungskanal):
   `{typ, schwere, nachricht, zeitstempel}`". `typ` trägt bereits das volle
   Vertrags-`Literal` (`kill|heartbeat|drawdown|quellenausfall|
-  halluzination`), obwohl diese Story nur `heartbeat`/`drawdown` tatsächlich
-  erzeugt — `quellenausfall` (AC9, S-014-Anschluss) und `halluzination`
-  (AC8, bereits `app.core.hallucination_kpi`) sind spätere/parallele
-  Konsumenten desselben Vertrags. `schwere` folgt dem bereits in
-  `docs/data-model.md` §7 `alert_log.severity` festgelegten Vokabular
-  (`info|warn|critical`) — kein neues Vokabular erfunden. AC7
-  (Benachrichtigungskanal selbst) bleibt Nicht-Ziel dieser Story (S-026);
-  `Alert` ist der interne, testbare Vertrag, an den S-026 andockt
-  (`app.core.alerts`).
+  halluzination`), obwohl diese Story (S-025) nur `heartbeat`/`drawdown`
+  tatsächlich erzeugt — `quellenausfall` (AC9) und `halluzination` (AC8)
+  sind spätere Konsumenten desselben Vertrags (S-026: `app.core.
+  quellenausfall` bzw. `app.core.hallucination_kpi`, s. „Update S-026"
+  unten). `schwere` folgt dem bereits in `docs/data-model.md` §7
+  `alert_log.severity` festgelegten Vokabular (`info|warn|critical`) —
+  kein neues Vokabular erfunden. AC7 (Benachrichtigungskanal selbst) bleibt
+  Nicht-Ziel dieser Story (S-025, gebaut in S-026); `Alert` ist der
+  interne, testbare Vertrag, an den S-026 andockt (`app.core.alerts`).
 - `HeartbeatEintrag` — der Spec-Vertrag "Heartbeat (je Modul):
   `{modul_id, letzter_ping_zeitstempel, intervall_soll}`; Ausfall wenn
   `now − letzter_ping > intervall_soll`" (AC4). Trägt bewusst NUR diese drei
@@ -81,6 +81,20 @@ Nicht Teil dieser Story (Board-Item-Scope): kein Alert-Benachrichtigungs-
 kanal selbst (AC7, S-026 — `Alert` ist nur der interne Vertrag, an den der
 künftige Kanal andockt); kein Depotmodul-Equity-Kurve-Vertrag (existiert
 noch nicht).
+
+**Update S-026 (AC7, AC8, AC9, AC10):** der Benachrichtigungskanal selbst
+ist jetzt gebaut (`app.core.notification_channel`, AC7 + AC10 — persistente
+Zustell-Warteschlange bei nicht erreichbarem Kanal). `app.core.kill_switch.
+ausloesen()` meldet seither zusätzlich zum AC11-Protokoll bei JEDER
+Auslösung einen `Alert(typ="kill")` (AC7). `app.core.hallucination_kpi.
+berechne_kpi()` meldet bei jedem Alarm-Übergang zusätzlich zum
+Audit-Eintrag einen `Alert(typ="halluzination")` (AC8, Betriebssicherung
+als Alarm-Konsument). Neu: `app.core.quellenausfall` (AC9) — die
+betriebssicherungsseitige Konsumstelle für Ausfall-/Veraltungs-Signale
+einer Datenquelle (`melde_ausfall()` meldet `Alert(typ="quellenausfall")`
+und sperrt ein No-Evidence-No-Trade-Gate, `ist_evidenz_verfuegbar()`); die
+Ausfall-/Staleness-ERKENNUNG selbst bleibt Sache des (künftigen)
+Dateneingangs (Nicht-Ziel dieser Spec).
 """
 
 from __future__ import annotations

@@ -107,8 +107,15 @@ def test_drawdown_ueber_kill_schwelle_loest_bestehenden_kill_switch_aus() -> Non
     assert kill_status.quelle == "drawdown"
     assert kill_switch.ist_order_erzeugung_erlaubt() is False
 
-    (alert,) = alerts.alle_alerts()
-    assert alert.schwere == "critical"
+    # Zwei Alerts für dieses eine Ereignis: der Drawdown-Alert selbst
+    # (dieses Modul) PLUS der Kill-Alert, den `kill_switch.ausloesen()`
+    # bei JEDER Auslösung meldet (S-026, AC7).
+    alle = alerts.alle_alerts()
+    assert len(alle) == 2
+    drawdown_alert = next(a for a in alle if a.typ == "drawdown")
+    kill_alert = next(a for a in alle if a.typ == "kill")
+    assert drawdown_alert.schwere == "critical"
+    assert kill_alert.schwere == "critical"
 
 
 def test_drawdown_genau_auf_der_schwelle_loest_keinen_alarm_aus() -> None:
