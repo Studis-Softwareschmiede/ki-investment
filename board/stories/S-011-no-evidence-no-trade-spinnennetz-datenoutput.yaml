@@ -1,7 +1,7 @@
 id: S-011
 parent: F-006
 title: No-Evidence-No-Trade & Spinnennetz-Datenoutput
-status: To Do
+status: Done
 priority: P0
 spec: docs/specs/analyse-framework.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: 'Cold-Start, aber eng abgegrenzt: Überspringen bei ganzer Katego
   historischem Durchschnitt. Geringe Logik-Tiefe.'
 confidence: medium
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-011-no-evidence-spinnennetz
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/19
 blocked_reason: null
 created_at: '2026-07-12T10:08:53Z'
-updated_at: '2026-07-12T10:08:54Z'
-done_at: null
+updated_at: '2026-07-12T15:09:36Z'
+done_at: '2026-07-12T15:09:35Z'
