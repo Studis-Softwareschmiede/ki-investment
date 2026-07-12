@@ -22,6 +22,7 @@ folgend, hier aber ein einzelner Skalar statt eines Mappings).
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import Field
@@ -35,10 +36,10 @@ from app.contracts.llm_grounding import ToleranzKonfig
 #: `toleranz_config` (Edge-Case "Toleranz nicht konfiguriert" — Default
 #: statt Codeänderung).
 DEFAULT_TOLERANZEN: dict[str, ToleranzKonfig] = {
-    "kgv": ToleranzKonfig(kennzahl_typ="kgv", typ="relativ", schwelle=0.02),
-    "kurs": ToleranzKonfig(kennzahl_typ="kurs", typ="relativ", schwelle=0.01),
+    "kgv": ToleranzKonfig(kennzahl_typ="kgv", typ="relativ", schwelle=Decimal("0.02")),
+    "kurs": ToleranzKonfig(kennzahl_typ="kurs", typ="relativ", schwelle=Decimal("0.01")),
     "marktkapitalisierung": ToleranzKonfig(
-        kennzahl_typ="marktkapitalisierung", typ="relativ", schwelle=0.02
+        kennzahl_typ="marktkapitalisierung", typ="relativ", schwelle=Decimal("0.02")
     ),
 }
 

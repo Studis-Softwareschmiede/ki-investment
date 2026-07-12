@@ -19,6 +19,7 @@ tatsächliche Verhalten des Cross-Checks (AC4/AC5) und des Audit-Protokolls
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
@@ -30,6 +31,7 @@ from app.contracts.llm_grounding import (
     AnalyseOutput,
     AnalyseScores,
     CrossCheckErgebnis,
+    GroundingErgebnis,
     Originalquelle,
     ProtokollEintrag,
     ToleranzKonfig,
@@ -65,7 +67,16 @@ def test_accepts_analysefakt_mit_quellen_id_und_timestamp() -> None:
     fakt = AnalyseFakt(**VALID_FAKT_KWARGS)
     assert fakt.quellen_id == "sec-form4-123"
     assert fakt.timestamp == VALID_FAKT_KWARGS["timestamp"]
-    assert fakt.wert == 12.5
+    assert fakt.wert == Decimal("12.5")
+
+
+def test_analysefakt_wert_ist_decimal_ohne_float_drift() -> None:
+    """@trace llm-grounding#AC1 — `wert` ist `Decimal` (architecture.md P7);
+    ein nicht binär-exakter Float-Input wird verlustfrei über seine
+    String-Repräsentation koerziert, nicht über den Binärwert."""
+    fakt = AnalyseFakt(**dict(VALID_FAKT_KWARGS, wert=0.1))
+    assert isinstance(fakt.wert, Decimal)
+    assert fakt.wert == Decimal("0.1")
 
 
 @pytest.mark.parametrize("missing_field", ["quellen_id", "timestamp"])
@@ -145,6 +156,25 @@ def test_analyseinput_akzeptiert_geerdete_fakten() -> None:
     assert eingabe.fakten[0].quellen_id == "sec-form4-123"
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"status": "geerdet"},  # geerdet ohne output
+        {"status": "geerdet", "grund": "schema_verletzung"},  # geerdet mit grund
+        {"status": "abgelehnt"},  # abgelehnt ohne grund
+    ],
+)
+def test_groundingergebnis_erzwingt_status_invariante(kwargs: dict) -> None:
+    """@trace llm-grounding#AC3 — das Ergebnis-DTO des Gates gehört zum festen
+    Ergebnisvertrag: 'geerdet' verlangt output (kein grund), 'abgelehnt'
+    verlangt grund (kein output) — erzwungen im Modell, nicht nur im
+    Aufrufer (`pruefe_grounding`)."""
+    if kwargs["status"] == "geerdet" and "grund" in kwargs:
+        kwargs = dict(kwargs, output=AnalyseOutput(**_valid_output_kwargs()))
+    with pytest.raises(ValidationError):
+        GroundingErgebnis(**kwargs)
+
+
 def test_toleranzkonfig_akzeptiert_absolut_und_relativ() -> None:
     """@trace llm-grounding#AC5 — eine Toleranzschwelle je Kennzahl-Typ
     unterscheidet absolute und relative Abweichung."""
@@ -165,7 +195,8 @@ def test_originalquelle_traegt_kennzahl_typ_und_wert() -> None:
     """@trace llm-grounding#AC4 — die Originalquelle für den Cross-Check
     trägt Kennzahl-Typ, Quellen-ID und den tatsächlichen Wert."""
     quelle = Originalquelle(quellen_id="sec-form4-123", kennzahl_typ="kgv", wert=12.4)
-    assert quelle.wert == 12.4
+    assert isinstance(quelle.wert, Decimal)
+    assert quelle.wert == Decimal("12.4")
 
 
 def test_abweichung_traegt_output_quelle_abweichung_und_toleranz() -> None:
@@ -174,8 +205,10 @@ def test_abweichung_traegt_output_quelle_abweichung_und_toleranz() -> None:
     abweichung = Abweichung(
         kennzahl_typ="kgv", wert_output=12.5, wert_quelle=12.4, abweichung=0.1, toleranz=0.02
     )
-    assert abweichung.wert_output == 12.5
-    assert abweichung.wert_quelle == 12.4
+    assert abweichung.wert_output == Decimal("12.5")
+    assert abweichung.wert_quelle == Decimal("12.4")
+    assert abweichung.abweichung == Decimal("0.1")  # Decimal, keine Float-Drift (P7)
+    assert isinstance(abweichung.toleranz, Decimal)
 
 
 def test_crosscheckergebnis_verworfen_traegt_protokoll_eintrag() -> None:

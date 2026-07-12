@@ -66,9 +66,10 @@ erdet.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: Score je Analysekategorie: 0–10 oder der Platzhalter "fehlt" (Verträge,
 #: Spec `llm-grounding` — der Umgang mit "fehlt" (No-Evidence-No-Trade) ist
@@ -83,12 +84,21 @@ class AnalyseFakt(BaseModel):
     `quellen_id` und `timestamp` sind Pflicht (AC1) — fehlt eines von
     beiden, verweigert pydantic die Instanziierung; ein Analyse-Output mit
     einem solchen Fakt wird dadurch strukturell abgelehnt.
+
+    `wert` ist `Decimal`, nicht `float` (architecture.md P7): über
+    `kennzahl_typ` laufen absehbar auch Geldwerte (Kurs, Marktkapitalisierung),
+    und der Cross-Check-Toleranzvergleich (AC4,
+    `app.adapters.llm.cross_check`) darf keine Float-Rundungsdrift erben.
+    Scores bleiben davon unberührt (`AnalyseScores`, P7-Ausnahme für
+    Statistik), ebenso die Halluzinations-KPI-Quote (`quote`/`schwellwert`
+    in `HalluzinationsKpiErgebnis` — eine Statistik über Zählwerte, kein
+    Geld-/Kennzahlwert).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kennzahl_typ: str = Field(min_length=1)
-    wert: float
+    wert: Decimal
     quellen_id: str = Field(min_length=1)
     timestamp: datetime
 
@@ -155,17 +165,31 @@ class GroundingErgebnis(BaseModel):
     detail: str | None = None
     output: AnalyseOutput | None = None
 
+    @model_validator(mode="after")
+    def _status_invariante(self) -> GroundingErgebnis:
+        """geerdet ⇔ output gesetzt und kein grund; abgelehnt ⇔ grund gesetzt
+        und kein output — unabhängig von der Aufrufer-Disziplin in
+        `pruefe_grounding` (Folge-Stories docken an `grund`/`output` an)."""
+        if self.status == "geerdet" and (self.output is None or self.grund is not None):
+            raise ValueError("status 'geerdet' verlangt output und verbietet grund")
+        if self.status == "abgelehnt" and (self.grund is None or self.output is not None):
+            raise ValueError("status 'abgelehnt' verlangt grund und verbietet output")
+        return self
+
 
 class Originalquelle(BaseModel):
     """Der tatsächliche Wert einer Kennzahl an ihrer Datenquelle (Verträge,
     Spec `llm-grounding`, Cross-Check-Modul, AC4) — die Vergleichsbasis für
-    den deterministischen Cross-Check gegen `AnalyseFakt.wert`."""
+    den deterministischen Cross-Check gegen `AnalyseFakt.wert`. `wert` ist
+    `Decimal` wie sein Gegenstück `AnalyseFakt.wert` (architecture.md P7) —
+    der AC4-Toleranzvergleich rechnet durchgehend in `Decimal`, ohne
+    Float-Rundungsdrift."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     quellen_id: str = Field(min_length=1)
     kennzahl_typ: str = Field(min_length=1)
-    wert: float
+    wert: Decimal
 
 
 class ToleranzKonfig(BaseModel):
@@ -173,26 +197,30 @@ class ToleranzKonfig(BaseModel):
     entweder eine absolute Differenz oder eine relative Abweichung
     (Bruchteil des Quellwerts). Provisorische Default-Werte liegen in
     `app.config`, ohne Codeänderung per `toleranz_config`-Übersteuerung
-    (Aufrufparameter) oder Env-Variable ersetzbar."""
+    (Aufrufparameter) oder Env-Variable ersetzbar. `schwelle` ist `Decimal`
+    (architecture.md P7): sie wird direkt gegen die in `Decimal` gemessene
+    Abweichung verglichen — keine float/Decimal-Mischoperation."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kennzahl_typ: str = Field(min_length=1)
     typ: Literal["absolut", "relativ"]
-    schwelle: float = Field(ge=0)
+    schwelle: Decimal = Field(ge=0)
 
 
 class Abweichung(BaseModel):
     """Eine gemessene Abweichung zwischen Output- und Quellwert einer
-    Kennzahl (Verträge, Spec `llm-grounding`, Cross-Check-Modul, AC4)."""
+    Kennzahl (Verträge, Spec `llm-grounding`, Cross-Check-Modul, AC4).
+    Alle vier Zahlfelder sind `Decimal` (architecture.md P7) — sie stammen
+    aus dem durchgehend in `Decimal` geführten Toleranzvergleich."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kennzahl_typ: str = Field(min_length=1)
-    wert_output: float
-    wert_quelle: float
-    abweichung: float
-    toleranz: float
+    wert_output: Decimal
+    wert_quelle: Decimal
+    abweichung: Decimal
+    toleranz: Decimal
 
 
 #: Gründe, aus denen ein Protokolleintrag entsteht (AC10) — deckt sowohl

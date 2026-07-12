@@ -31,6 +31,7 @@ strukturierte Grundlage.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from app.config import get_settings
 from app.contracts.llm_grounding import (
@@ -45,11 +46,15 @@ from app.contracts.llm_grounding import (
 from app.core.audit_log import protokolliere
 
 
-def _berechne_abweichung(wert_output: float, wert_quelle: float, toleranz: ToleranzKonfig) -> float:
+def _berechne_abweichung(
+    wert_output: Decimal, wert_quelle: Decimal, toleranz: ToleranzKonfig
+) -> Decimal:
     """Berechnet die Abweichung nach dem konfigurierten Toleranz-Typ (AC5):
     `absolut` = reine Differenz, `relativ` = Differenz als Bruchteil des
     Quellwerts. Ein Quellwert von exakt 0 fällt für `relativ` auf die
-    absolute Differenz zurück (Division durch 0 vermeiden)."""
+    absolute Differenz zurück (Division durch 0 vermeiden). Rechnet
+    durchgehend in `Decimal` (architecture.md P7) — keine
+    Float-Rundungsdrift im Toleranzvergleich."""
     differenz = abs(wert_output - wert_quelle)
     if toleranz.typ == "absolut" or wert_quelle == 0:
         return differenz
