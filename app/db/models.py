@@ -8,7 +8,9 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy import (
@@ -21,7 +23,7 @@ from sqlalchemy import (
     SmallInteger,
     String,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -222,4 +224,93 @@ class DataSourceAssetClass(Base):
         return (
             f"DataSourceAssetClass(data_source_id={self.data_source_id!r}, "
             f"asset_class_id={self.asset_class_id!r})"
+        )
+
+
+class MarketDataBronze(Base):
+    """Bronze-Rohdaten — immutabel, Point-in-Time, versioniert (data-model.md
+    §2 `market_data_bronze`, BR-121/BR-122; Spec `docs/specs/datenqualitaet.md`
+    AC1/AC2/AC9/AC10).
+
+    Feldnamen 1:1 aus data-model.md §2 (physisches Schema); die Spec-Verträge
+    (`docs/specs/datenqualitaet.md` „Bronze-Datensatz") nennen dieselben
+    Inhalte unter den fachlichen Namen `event_id` (= `source_event_id`),
+    `roh_wert` (= `payload`), `quelle` (= `data_source_id`),
+    `beobachtungs_zeitpunkt` (= `observed_at`), `empfangs_zeitpunkt`
+    (= `ingested_at`), `anlageklassen_tag` (= `asset_class_tag`).
+
+    **Immutabilität (AC1, BR-121):** Es gibt in dieser Codebasis absichtlich
+    KEINE Update-/Delete-Funktion für diese Tabelle — `app.db.bronze` bietet
+    ausschliesslich `record_observation()` (Insert-only) und `replay()`
+    (Read-only). Als DB-seitige zweite Sicherungsebene (analog BR-101,
+    `category_weight`-Migration) legt die Migration
+    `<REVISION>_create_market_data_bronze.py` zusätzlich einen
+    BEFORE-UPDATE/DELETE-Trigger an, der jeden Änderungsversuch mit
+    `RAISE EXCEPTION` zurückweist (Wahl laut data-model.md §11 Fussnote dem
+    `coder` überlassen).
+
+    **Idempotenz + Versionierung (AC9/AC10, BR-122):** `source_event_id` ist
+    laut data-model.md §2 nicht global eindeutig, sondern gemeinsam mit
+    `data_source_id` **eine Ereignis-Identität, die über mehrere
+    Point-in-Time-Versionen hinweg stabil bleibt** — ein einzelnes physisches
+    `UNIQUE (data_source_id, source_event_id)` wäre mit AC10 (neue Version bei
+    Revision) unvereinbar, zusätzlich verlangt eine RANGE-partitionierte
+    Tabelle laut PostgreSQL, dass jeder Unique-Index die Partitionsspalte
+    (`ingested_at`) enthält — ein rein auf `ingested_at` erweiterter Index
+    würde die Duplikaterkennung selbst aushebeln (jede Zeile bekommt einen
+    frischen `ingested_at`-Wert). Die Dedupe-/Versionierungs-Entscheidung
+    (identischer Inhalt → idempotent überspringen [AC9]; abweichender Inhalt
+    → neue Version anlegen, nie überschreiben [AC10]) liegt daher in
+    `app.db.bronze.record_observation()` (App-Layer) sowie — als DB-seitige
+    zweite Sicherung, analog BR-101 — in einem BEFORE-INSERT-Trigger der
+    Migration. Diese Präzisierung ist in `docs/data-model.md` §2 nachgezogen.
+
+    `payload` entspricht der `roh_wert`-Spalte des Vertrags — unveränderte
+    Rohantwort/Wert der Quelle (JSONB, damit sowohl Skalare als auch
+    strukturierte Rohantworten passen).
+    """
+
+    __tablename__ = "market_data_bronze"
+    __table_args__ = (
+        Index("ix_market_data_bronze_source_ingested_at", "data_source_id", "ingested_at"),
+        Index("ix_market_data_bronze_asset_class_observed_at", "asset_class_tag", "observed_at"),
+        Index("ix_market_data_bronze_source_event_id", "data_source_id", "source_event_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    ingested_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        primary_key=True,
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    asset_class_tag: Mapped[int | None] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=True
+    )
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Generisches JSON mit Postgres-Variant JSONB (data-model.md §2: "JSONB,
+    # unveraenderte Rohantwort") — generisches sa.JSON bleibt dialektportabel
+    # (SQLite-Tests, siehe Konvention der übrigen Migrations-Tests), waehrend
+    # unter Postgres physisch JSONB verwendet wird.
+    payload: Mapped[Any] = mapped_column(
+        sa.JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    quality_indicator: Mapped[str | None] = mapped_column(String, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"MarketDataBronze(data_source_id={self.data_source_id!r}, "
+            f"source_event_id={self.source_event_id!r}, observed_at={self.observed_at!r}, "
+            f"ingested_at={self.ingested_at!r})"
         )
