@@ -417,3 +417,107 @@ class MarketDataSilver(Base):
             f"symbol={self.symbol!r}, normalisierter_wert={self.normalisierter_wert!r}, "
             f"einheit={self.einheit!r})"
         )
+
+
+class MarketDataGold(Base):
+    """Gold-Schicht — angereicherte Konsumenten-Werte (data-model.md §2
+    `market_data_gold`, S-051; Spec `docs/specs/datenqualitaet.md` AC4).
+
+    Deckt den Spec-Vertrag "Gold-Datensatz" 1:1 (Feldnamen laut
+    data-model.md-Präzisierung): `event_id` = `source_event_id`,
+    `angereicherter_wert` = `angereicherter_wert`, `qualitaetsindikator` =
+    `qualitaetsindikator`, `herkunft: silver_version` = `silver_id` +
+    `silver_observed_at` (zusammen die vollständige FK auf die partitionierte
+    `market_data_silver`-Tabelle, deren PK `(id, observed_at)` ist —
+    Partitionsschlüssel muss laut Postgres Teil jeder FK auf eine
+    partitionierte Tabelle sein).
+
+    **Anreicherung (AC4):** `angereicherter_wert` wird unverändert aus
+    `market_data_silver.normalisierter_wert` übernommen (bereits normalisiert
+    + Corporate-Actions-adjustiert); `qualitaetsindikator` wird aus
+    `market_data_bronze.quality_indicator` propagiert (Socket-
+    Qualitätsmetadatum, in Silver bisher nicht exponiert) — die Gold-Zeile
+    kombiniert damit Information aus Silver (Wert) und Bronze (Qualitäts-
+    Kontext) zu einer konsumentenfertigen Sicht, ohne Score-/Signal-
+    Aggregation (z-Scores etc. sind laut Spec-Nicht-Ziel Sache der Analyse,
+    nicht dieser Schicht — siehe `app/db/gold.py`).
+
+    **Reproduzierbarkeit (AC4-NFR):** wie Silver ist auch Gold eine reine
+    Ableitung — `app.db.gold.rebuild_gold_series_for_symbol` leitet die
+    komplette Reihe jederzeit neu aus Silver/Bronze ab. Weder Bronze noch
+    Silver werden von diesem Modul verändert (AC4: "keine Anreicherung
+    verändert oder ersetzt die zugrunde liegenden Bronze-Rohdaten").
+
+    **`data_source_id` (denormalisiert, analog Silver/Iteration-2-Lehre):**
+    aus der Silver-Zeile übernommen — ohne diese Spalte könnte
+    `rebuild_gold_series_for_symbol` beim Löschen/Neu-Ableiten nicht
+    zuverlässig zwischen zwei Quellen unterscheiden, die zufällig dieselbe
+    `source_event_id`-Zeichenkette für dasselbe Symbol verwenden (dieselbe
+    Klasse Cross-Data-Source-Bug wie bei Silver, hier vorab vermieden).
+
+    **`ON DELETE CASCADE` (Iteration 2, DBA-Befund, Critical):**
+    `app.db.silver.rebuild_silver_series_for_symbol` löscht bei jeder
+    Corporate-Actions-Neuableitung ALLE bestehenden Silver-Zeilen für
+    `(data_source_id, symbol)` — ohne `ON DELETE CASCADE` schlägt dieses
+    `DELETE` unter Postgres mit einer Fremdschlüsselverletzung fehl, sobald
+    mindestens eine der zu löschenden Silver-Zeilen bereits eine abgeleitete
+    Gold-Zeile hat. Gold-Zeilen haben laut AC4 keine eigenständige Existenz
+    (reine Ableitung) und sind laut AC4-NFR jederzeit über
+    `app.db.gold.rebuild_gold_series_for_symbol` reproduzierbar — ein
+    automatisches Mitlöschen bei Silver-Neuableitung ist damit konsistent
+    zum bestehenden Silver-Design (siehe Migration `0da3d5a72ba2` für die
+    volle Begründung).
+    """
+
+    __tablename__ = "market_data_gold"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["silver_id", "silver_observed_at"],
+            ["market_data_silver.id", "market_data_silver.observed_at"],
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "silver_id",
+            "silver_observed_at",
+            "observed_at",
+            name="uq_market_data_gold_silver_version",
+        ),
+        Index("ix_market_data_gold_symbol_observed_at", "symbol", "observed_at"),
+        Index("ix_market_data_gold_source_event_id", "source_event_id"),
+        Index("ix_market_data_gold_silver_id_observed_at", "silver_id", "silver_observed_at"),
+        Index("ix_market_data_gold_data_source_id_symbol", "data_source_id", "symbol"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True), primary_key=True, nullable=False
+    )
+    silver_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    silver_observed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=False
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_event_id: Mapped[str] = mapped_column(String, nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String, nullable=True)
+    angereicherter_wert: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    qualitaetsindikator: Mapped[str | None] = mapped_column(String, nullable=True)
+    computed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"MarketDataGold(source_event_id={self.source_event_id!r}, "
+            f"symbol={self.symbol!r}, angereicherter_wert={self.angereicherter_wert!r}, "
+            f"qualitaetsindikator={self.qualitaetsindikator!r})"
+        )
