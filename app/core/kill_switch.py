@@ -61,6 +61,12 @@ Gold-Plating über die zugewiesenen ACs hinaus).
 Nicht Teil dieser Story (Board-Item-Scope): automatische Trigger (AC2
 Drawdown, AC4 Heartbeat) — nur der manuelle Pfad wird hier ausgelöst;
 Benachrichtigungskanal (AC7); Heartbeat-Überwachung selbst (AC4).
+
+**Update S-025:** die automatischen Trigger sind inzwischen gebaut —
+`app.core.drawdown_monitor.pruefe_drawdown()` (AC2) und
+`app.core.heartbeat.pruefe_ausfaelle()` (AC4) rufen `ausloesen()` mit
+Quelle `"drawdown"` bzw. `"heartbeat"` auf, OHNE dieses Modul zu ändern
+(unveränderte Zustandsmaschine/Semantik, wie oben dokumentiert).
 """
 
 from __future__ import annotations

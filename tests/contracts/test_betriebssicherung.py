@@ -1,28 +1,36 @@
-"""Tests für die Kill-Switch- + Secret-Store-Verträge (Story S-007, S-008).
+"""Tests für die Kill-Switch- + Secret-Store- + Auto-Trigger-Verträge
+(Story S-007, S-008, S-025).
 
-Covers (betriebssicherung): AC1, AC3, AC6, AC11
+Covers (betriebssicherung): AC1, AC2, AC3, AC4, AC5, AC6, AC11
 
 `app.contracts.betriebssicherung` bildet die Verträge aus
 `docs/specs/betriebssicherung.md` ab, soweit sie diese Stories betreffen:
 den Kill-Switch-Auslöser-Input (`KillSwitchAusloeser`, AC1), den
 Betriebszustand (`Betriebszustand`/`KillSwitchStatus`, AC3), den
-unveränderlichen Protokolleintrag (`KillSwitchEreignis`, AC11) sowie den
-Secret-Store-Vertrag (`Umgebung`/`SecretStoreZugang`, AC6 — Story S-008).
-Das tatsächliche Zustandsmaschinen-/Protokollierungs-Verhalten liegt in
+unveränderlichen Protokolleintrag (`KillSwitchEreignis`, AC11), den
+Secret-Store-Vertrag (`Umgebung`/`SecretStoreZugang`, AC6 — Story S-008)
+sowie die Auto-Trigger-Verträge `Alert` (AC4/AC5 Output),
+`HeartbeatEintrag` (AC4) und `DrawdownStatus` (AC2/AC5, Story S-025). Das
+tatsächliche Zustandsmaschinen-/Protokollierungs-Verhalten liegt in
 `tests/core/test_kill_switch.py`; die tatsächliche Secret-Store-Auflösung
-(strikte Paper/Live-Trennung) liegt in `tests/core/test_secret_store.py` —
+(strikte Paper/Live-Trennung) liegt in `tests/core/test_secret_store.py`;
+das tatsächliche Heartbeat-/Drawdown-Verhalten liegt in
+`tests/core/test_heartbeat.py`/`tests/core/test_drawdown_monitor.py` —
 hier wird nur die Vertrags-/Struktur-Ebene geprüft.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
 
 from app.contracts.betriebssicherung import (
+    Alert,
+    DrawdownStatus,
+    HeartbeatEintrag,
     KillSwitchAusloeser,
     KillSwitchEreignis,
     KillSwitchStatus,
@@ -159,3 +167,101 @@ def test_secret_store_zugang_api_key_erscheint_nicht_im_repr() -> None:
     dargestellt = repr(zugang) + str(zugang)
     assert "dummy-fixture-secret-42" not in dargestellt
     assert "dummy-fixture-secret-99" not in dargestellt
+
+
+def test_alert_akzeptiert_alle_fuenf_vertrags_typen() -> None:
+    """@trace betriebssicherung#AC4,AC5 — der Alert-Vertrag akzeptiert alle
+    fünf von der Spec benannten Typen (`kill|heartbeat|drawdown|
+    quellenausfall|halluzination`), auch wenn diese Story (S-025) nur
+    `heartbeat`/`drawdown` tatsächlich erzeugt."""
+    for typ in ("kill", "heartbeat", "drawdown", "quellenausfall", "halluzination"):
+        alert = Alert(typ=typ, schwere="warn", nachricht="Testfall", zeitstempel=_ZEITSTEMPEL)
+        assert alert.typ == typ
+
+
+def test_alert_verweigert_unbekannten_typ_und_leere_nachricht() -> None:
+    """@trace betriebssicherung#AC4,AC5 — ein Typ außerhalb des
+    Vertrags-Literals sowie eine leere Nachricht werden strukturell
+    abgelehnt."""
+    with pytest.raises(ValidationError):
+        Alert(typ="unbekannt", schwere="warn", nachricht="x", zeitstempel=_ZEITSTEMPEL)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        Alert(typ="drawdown", schwere="warn", nachricht="", zeitstempel=_ZEITSTEMPEL)
+
+
+def test_alert_ist_unveraenderlich() -> None:
+    """@trace betriebssicherung#AC4,AC5 — `Alert` ist `frozen` (analog
+    `KillSwitchEreignis`)."""
+    alert = Alert(typ="drawdown", schwere="critical", nachricht="Test", zeitstempel=_ZEITSTEMPEL)
+    with pytest.raises(ValidationError):
+        alert.schwere = "info"  # type: ignore[misc]
+
+
+def test_heartbeat_eintrag_traegt_genau_die_drei_vertragsfelder() -> None:
+    """@trace betriebssicherung#AC4 — der Heartbeat-Vertrag trägt genau
+    `{modul_id, letzter_ping_zeitstempel, intervall_soll}` und lehnt
+    unbekannte Zusatzfelder ab (`extra="forbid"`)."""
+    eintrag = HeartbeatEintrag(
+        modul_id="ingest-fred",
+        letzter_ping_zeitstempel=_ZEITSTEMPEL,
+        intervall_soll=timedelta(minutes=5),
+    )
+    assert eintrag.modul_id == "ingest-fred"
+    assert eintrag.intervall_soll == timedelta(minutes=5)
+
+    with pytest.raises(ValidationError):
+        HeartbeatEintrag(
+            modul_id="x",
+            letzter_ping_zeitstempel=_ZEITSTEMPEL,
+            intervall_soll=timedelta(minutes=5),
+            kritisch=True,  # type: ignore[call-arg]
+        )
+
+
+def test_heartbeat_eintrag_verweigert_leere_modul_id() -> None:
+    """@trace betriebssicherung#AC4 — eine leere `modul_id` wird
+    strukturell abgelehnt."""
+    with pytest.raises(ValidationError):
+        HeartbeatEintrag(
+            modul_id="", letzter_ping_zeitstempel=_ZEITSTEMPEL, intervall_soll=timedelta(minutes=5)
+        )
+
+
+def test_drawdown_status_ueberwachungsluecke_setzt_zahlfelder_auf_none() -> None:
+    """@trace betriebssicherung#AC5 — im Überwachungslücke-Fall (Edge-Case:
+    fehlender Depot-Stand) bleiben alle Zahlfelder `None` statt eines
+    stillschweigenden `0`-Werts."""
+    status = DrawdownStatus(
+        aktueller_stand=None,
+        hoechststand=None,
+        drawdown_pct=None,
+        ueberwachungsluecke=True,
+        kill_ausgeloest=False,
+    )
+    assert status.aktueller_stand is None
+    assert status.drawdown_pct is None
+    assert status.ueberwachungsluecke is True
+    assert status.kill_ausgeloest is False
+
+
+def test_drawdown_status_traegt_berechnete_werte() -> None:
+    """@trace betriebssicherung#AC2,AC5 — bei vorhandenem Depot-Stand trägt
+    der Status Höchststand, aktuellen Stand und den daraus abgeleiteten
+    Drawdown-Prozentsatz."""
+    status = DrawdownStatus(
+        aktueller_stand=Decimal("80000"),
+        hoechststand=Decimal("100000"),
+        drawdown_pct=Decimal("0.20"),
+        ueberwachungsluecke=False,
+        kill_ausgeloest=True,
+    )
+    assert status.drawdown_pct == Decimal("0.20")
+    assert status.kill_ausgeloest is True
+
+
+def test_drawdown_status_ist_unveraenderlich() -> None:
+    """@trace betriebssicherung#AC5 — `DrawdownStatus` ist `frozen` (analog
+    `KillSwitchStatus`)."""
+    status = DrawdownStatus(ueberwachungsluecke=True, kill_ausgeloest=False)
+    with pytest.raises(ValidationError):
+        status.kill_ausgeloest = True  # type: ignore[misc]
