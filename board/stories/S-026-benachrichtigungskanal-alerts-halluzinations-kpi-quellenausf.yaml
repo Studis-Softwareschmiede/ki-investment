@@ -2,7 +2,7 @@ id: S-026
 parent: F-005
 title: 'Benachrichtigungskanal: Alerts, Halluzinations-KPI- & Quellenausfall-Konsum,
   persistente Zustellung'
-status: To Do
+status: In Progress
 priority: P1
 spec: docs/specs/betriebssicherung.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: Informativer Alarmkanal, Konsum des Halluzinations-KPI (>2%, exte
   Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-026-benachrichtigungskanal
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:16Z'
-updated_at: '2026-07-12T10:09:18Z'
+updated_at: '2026-07-12T23:04:25Z'
 done_at: null
