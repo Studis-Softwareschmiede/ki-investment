@@ -1,18 +1,20 @@
-"""Tests für die Analyse-Framework-Verträge (Storys S-009/S-010, Berechnungskern).
+"""Tests für die Analyse-Framework-Verträge (Storys S-009/S-010/S-011, Berechnungskern).
 
-Covers (analyse-framework): AC1, AC2, AC3, AC5, AC6, AC9
+Covers (analyse-framework): AC1, AC2, AC3, AC5, AC6, AC8, AC9, AC10
 
 `app.contracts.analyse_framework` bildet den Ausschnitt der Verträge aus
 `docs/specs/analyse-framework.md` ab, den der Berechnungskern
-(`app.domain.scoring.score_engine`) für diese Storys benötigt. Diese Tests
-decken auf DTO-Ebene die Grenzfälle, die für die Berechnungslogik relevant
-sind (AC2: Ranking strukturell auf 1–10 begrenzt; Methodenscore bewusst
-NICHT begrenzt, siehe `MethodeEingabe`-Docstring; AC3:
-Kategoriegewichte-Wertebereich; AC5/AC6: `ScoreSchwellen`-Defaults
-entsprechen den AC5-Werten, nicht gesetzte Felder fallen automatisch auf
-den Default zurück; AC9: `KategorieScores`/`methodenscore` akzeptieren
-fehlende Werte als `None`). Die eigentliche Formel-/Signal-Berechnung
-(AC1/AC4/AC5/AC6/AC7/AC9/AC11) liegt in
+(`app.domain.scoring.score_engine`) benötigt. Diese Tests decken auf
+DTO-Ebene die Grenzfälle, die für die Berechnungslogik relevant sind (AC2:
+Ranking strukturell auf 1–10 begrenzt; Methodenscore bewusst NICHT
+begrenzt, siehe `MethodeEingabe`-Docstring; AC3: Kategoriegewichte-
+Wertebereich; AC5/AC6: `ScoreSchwellen`-Defaults entsprechen den
+AC5-Werten, nicht gesetzte Felder fallen automatisch auf den Default
+zurück; AC9: `KategorieScores`/`methodenscore` akzeptieren fehlende Werte
+als `None`; AC8: `Uebersprungen`-Struktur des No-Evidence-Skip-Outputs;
+AC10: `SpinnennetzAchsen`/`Spinnennetz`-Wertebereich der Achsendaten). Die
+eigentliche Formel-/Signal-/Skip-/Spinnennetz-Berechnung
+(AC1/AC4/AC5/AC6/AC7/AC8/AC9/AC10/AC11) liegt in
 `tests/domain/scoring/test_score_engine.py`.
 """
 
@@ -28,6 +30,9 @@ from app.contracts.analyse_framework import (
     KategorieScores,
     MethodeEingabe,
     ScoreSchwellen,
+    Spinnennetz,
+    SpinnennetzAchsen,
+    Uebersprungen,
 )
 
 
@@ -86,7 +91,8 @@ def test_kategoriegewichte_akzeptiert_werte_0_bis_100_ohne_summenpruefung() -> N
 def test_kategorie_scores_default_ist_ueberall_none() -> None:
     """@trace analyse-framework#AC9 — `KategorieScores` ohne Angaben markiert
     alle 5 Kategorien als ohne Evidenz (`None`), der Hook für die
-    No-Evidence-No-Trade-Entscheidung (AC8, Folge-Story)."""
+    No-Evidence-No-Trade-Entscheidung (AC8, `Uebersprungen` weiter
+    unten)."""
     scores = KategorieScores()
     for kategorie in KATEGORIE_NAMEN:
         assert getattr(scores, kategorie) is None
@@ -170,3 +176,73 @@ def test_score_schwellen_lehnt_nicht_monotone_direkte_werte_ab(werte: dict[str, 
     Monotonie-Validierung."""
     with pytest.raises(ValidationError):
         ScoreSchwellen(**werte)
+
+
+# --- AC8: Uebersprungen (No-Evidence-No-Trade-Output) -----------------------
+
+
+def test_uebersprungen_traegt_grund_und_kategorie() -> None:
+    """@trace analyse-framework#AC8 — `Uebersprungen` bildet die
+    Verträge-Struktur `{ grund: "no-evidence", kategorie }` ab; `grund`
+    hat einen Default, da die Spec aktuell keinen anderen Skip-Grund
+    kennt."""
+    uebersprungen = Uebersprungen(kategorie="risiko")
+    assert uebersprungen.grund == "no-evidence"
+    assert uebersprungen.kategorie == "risiko"
+
+
+def test_uebersprungen_lehnt_unbekannten_grund_ab() -> None:
+    """@trace analyse-framework#AC8 — `grund` ist strukturell auf
+    "no-evidence" begrenzt (`Literal`); ein anderer Wert wird abgelehnt."""
+    with pytest.raises(ValidationError):
+        Uebersprungen(grund="sonstiges", kategorie="risiko")  # type: ignore[arg-type]
+
+
+# --- AC10: SpinnennetzAchsen/Spinnennetz (Spinnennetz-Datenoutput) ----------
+
+
+def test_spinnennetz_achsen_akzeptiert_alle_5_kategorien_im_bereich_0_bis_10() -> None:
+    """@trace analyse-framework#AC10 — `SpinnennetzAchsen` bildet die 5
+    Achsenwerte (0–10) ab, eine je Kategorie."""
+    achsen = SpinnennetzAchsen(
+        fundamental=8.0, technisch=6.0, qualitativ=7.0, makro=5.0, risiko=9.0
+    )
+    for kategorie in KATEGORIE_NAMEN:
+        assert 0 <= getattr(achsen, kategorie) <= 10
+
+
+@pytest.mark.parametrize("kategorie", list(KATEGORIE_NAMEN))
+def test_spinnennetz_achsen_lehnt_wert_ausserhalb_0_bis_10_ab(kategorie: str) -> None:
+    """@trace analyse-framework#AC10 — ein Achsenwert außerhalb 0–10 ist
+    strukturell ungültig (anders als `KategorieScores` ist `None` hier
+    ebenfalls kein gültiger Wert — eine Spinnennetz-Achse wird nur für
+    eine vollständige Analyse gebaut)."""
+    basiswerte = {name: 5.0 for name in KATEGORIE_NAMEN}
+    basiswerte[kategorie] = 10.01
+    with pytest.raises(ValidationError):
+        SpinnennetzAchsen(**basiswerte)
+
+
+def test_spinnennetz_ohne_historischen_durchschnitt() -> None:
+    """@trace analyse-framework#AC10 — "Historischer Durchschnitt nicht
+    vorhanden (neuer Titel) → Spinnennetz nur mit aktueller Datenreihe"
+    (Edge-Cases der Spec): `historischer_durchschnitt` ist optional."""
+    achsen = SpinnennetzAchsen(
+        fundamental=8.0, technisch=6.0, qualitativ=7.0, makro=5.0, risiko=9.0
+    )
+    spinnennetz = Spinnennetz(achsen=achsen)
+    assert spinnennetz.historischer_durchschnitt is None
+
+
+def test_spinnennetz_mit_historischem_durchschnitt_als_zweite_datenreihe() -> None:
+    """@trace analyse-framework#AC10 — der historische Durchschnitt wird
+    als zweite, vollwertige `SpinnennetzAchsen`-Datenreihe geführt."""
+    achsen = SpinnennetzAchsen(
+        fundamental=8.0, technisch=6.0, qualitativ=7.0, makro=5.0, risiko=9.0
+    )
+    historisch = SpinnennetzAchsen(
+        fundamental=7.0, technisch=6.5, qualitativ=6.0, makro=4.5, risiko=8.0
+    )
+    spinnennetz = Spinnennetz(achsen=achsen, historischer_durchschnitt=historisch)
+    assert spinnennetz.historischer_durchschnitt is not None
+    assert spinnennetz.historischer_durchschnitt.fundamental == 7.0

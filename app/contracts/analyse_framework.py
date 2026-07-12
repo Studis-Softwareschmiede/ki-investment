@@ -1,10 +1,10 @@
-"""Modul-Verträge Analyse-Framework — Berechnungskern (C-007, S-009/S-010).
+"""Modul-Verträge Analyse-Framework — Berechnungskern (C-007, S-009/S-010/S-011).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO in `app/contracts/`. Dieses Modul bildet den
-Ausschnitt der Verträge aus `docs/specs/analyse-framework.md` ab, den der
-Berechnungskern (`app.domain.scoring.score_engine`) für diese Storys
-benötigt (AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC9, AC11):
+vollen Output-Vertrag aus `docs/specs/analyse-framework.md` ab, den der
+Berechnungskern (`app.domain.scoring.score_engine`) für alle Storys dieses
+Features benötigt (AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC11):
 
 - `MethodeEingabe` — eine Methode innerhalb einer Analysekategorie
   (`methoden_id`, `ranking`, `methodenscore`), Eingabe für AC1/AC2/AC9.
@@ -15,7 +15,7 @@ benötigt (AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC9, AC11):
 - `KategorieScores` — die 5 Kategorie-Scores als Ausgabe von
   `berechne_kategorie_scores` (Output-Form `kategorie_scores` der
   Verträge); `None` je Kategorie markiert fehlende Evidenz (Hook für die
-  No-Evidence-No-Trade-Entscheidung AC8, Folge-Story S-011).
+  No-Evidence-No-Trade-Entscheidung, AC8).
 - `Signal` — die 5 möglichen Handlungssignale (Output-Feld `signal` der
   Verträge), Ausgabe von `score_engine.leite_signal_ab` (AC5) ggf. nach
   `score_engine.wende_risiko_sanity_cap_an` (AC7).
@@ -24,14 +24,26 @@ benötigt (AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC9, AC11):
   entsprechen den globalen AC5-Schwellen; wird ein Feld beim Instanziieren
   nicht gesetzt, greift automatisch der Default (AC6: "ist keine
   klassenspezifische Schwelle gesetzt, greifen die Default-Werte").
+- `Uebersprungen` — Output-Feld `uebersprungen?` der Verträge (AC8):
+  `{ grund: "no-evidence", kategorie }`, wenn eine ganze Analysekategorie
+  ohne Methodenscore war und der Titel deshalb übersprungen wurde.
+- `SpinnennetzAchsen` — die 5 Kategorie-Scores als (nicht-optionale)
+  Achsenwerte 0–10, Baustein des `spinnennetz`-Outputs (AC10). Anders als
+  `KategorieScores` strukturell ohne `None`, weil eine Spinnennetz-Achse
+  nur für eine vollständige Analyse (alle 5 Kategorien vorhanden) gebaut
+  wird.
+- `Spinnennetz` — Output-Feld `spinnennetz` der Verträge (AC10):
+  `{ achsen, historischer_durchschnitt? }`.
+- `AnalyseErgebnis` — der volle Output-Vertrag der Spec (`{
+  kategorie_scores, gesamtscore?, signal?, sanity_cap_angewendet,
+  spinnennetz?, uebersprungen? }`), Ausgabe von
+  `score_engine.fuehre_analyse_durch` (S-011, AC8/AC10 verdrahten die
+  bereits vorhandenen, reinen S-009/S-010-Bausteine zum Gesamtergebnis).
 
-Nicht Teil dieser Story (Nicht-Ziele/Folge-Story S-011): `spinnennetz` und
-`uebersprungen` aus dem vollen Output-Vertrag der Spec — diese Felder
-kommen mit AC8/AC10. Der Cap-Schwellwert aus AC7 ("Cap-Schwellwert 3 ist
-konfigurierbar") wird bewusst NICHT als eigenes DTO-Feld hier geführt,
-sondern als Parameter mit Default an
-`score_engine.wende_risiko_sanity_cap_an` — die Verträge der Spec nennen
-dafür keine eigene Input-Struktur.
+Der Cap-Schwellwert aus AC7 ("Cap-Schwellwert 3 ist konfigurierbar") wird
+bewusst NICHT als eigenes DTO-Feld hier geführt, sondern als Parameter mit
+Default an `score_engine.wende_risiko_sanity_cap_an` — die Verträge der
+Spec nennen dafür keine eigene Input-Struktur.
 """
 
 from __future__ import annotations
@@ -107,8 +119,8 @@ class Kategoriegewichte(BaseModel):
 class KategorieScores(BaseModel):
     """Kategorie-Scores einer Analyse (Verträge, `kategorie_scores`-Output,
     Ausschnitt AC1/AC9). `None` markiert eine Kategorie ohne verwertbare
-    Evidenz — die Entscheidung, einen Titel deswegen zu überspringen
-    (No-Evidence-No-Trade, AC8), ist Nicht-Ziel dieser Story."""
+    Evidenz — die Entscheidung, einen Titel deswegen zu überspringen, ist
+    `score_engine.ermittle_fehlende_kategorie`/`fuehre_analyse_durch` (AC8)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -117,6 +129,49 @@ class KategorieScores(BaseModel):
     qualitativ: float | None = None
     makro: float | None = None
     risiko: float | None = None
+
+
+class Uebersprungen(BaseModel):
+    """AC8 (No-Evidence-No-Trade): Output-Feld `uebersprungen?` der
+    Verträge, wenn ein Titel übersprungen wurde, weil für eine ganze
+    Analysekategorie jeder Methodenscore fehlte. `grund` ist strukturell
+    auf den einen in der Spec genannten Wert festgelegt — die Spec kennt
+    aktuell keinen anderen Skip-Grund."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    grund: Literal["no-evidence"] = "no-evidence"
+    kategorie: KategorieName
+
+
+class SpinnennetzAchsen(BaseModel):
+    """Die 5 Kategorie-Scores als Spinnennetz-Achsenwerte (Verträge, AC10:
+    "5×(0–10), eine Achse je Kategorie"). Anders als `KategorieScores`
+    strukturell NICHT optional: eine Spinnennetz-Achsenreihe wird nur für
+    eine vollständige Analyse gebaut (alle 5 Kategorien haben einen Score,
+    sonst greift AC8/`Uebersprungen` statt eines Spinnennetzes)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    fundamental: float = Field(ge=0, le=10)
+    technisch: float = Field(ge=0, le=10)
+    qualitativ: float = Field(ge=0, le=10)
+    makro: float = Field(ge=0, le=10)
+    risiko: float = Field(ge=0, le=10)
+
+
+class Spinnennetz(BaseModel):
+    """AC10 (Spinnennetz-Datenoutput): Output-Feld `spinnennetz` der
+    Verträge, `{ achsen, historischer_durchschnitt? }`. Die aktuelle
+    Datenreihe (`achsen`) ist Pflicht; der historische Durchschnitt je
+    Achse ist eine optionale zweite Datenreihe ("Historischer Durchschnitt
+    nicht vorhanden (neuer Titel) → Spinnennetz nur mit aktueller
+    Datenreihe", Edge-Cases der Spec)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    achsen: SpinnennetzAchsen
+    historischer_durchschnitt: SpinnennetzAchsen | None = None
 
 
 #: Die 5 Handlungssignale (Verträge, `signal`-Output, AC5/AC7).
@@ -169,3 +224,33 @@ class ScoreSchwellen(BaseModel):
                 f"halten={self.halten}, reduzieren={self.reduzieren}."
             )
         return self
+
+
+class AnalyseErgebnis(BaseModel):
+    """Voller Output-Vertrag der Spec (Ausgabe von
+    `score_engine.fuehre_analyse_durch`, AC8/AC10):
+    `{ kategorie_scores, gesamtscore?, signal?, sanity_cap_angewendet,
+    spinnennetz?, uebersprungen? }`.
+
+    Zwei sich gegenseitig ausschließende Ausprägungen:
+
+    - **Übersprungen (AC8):** `uebersprungen` gesetzt, `gesamtscore`,
+      `signal` und `spinnennetz` bleiben `None`
+      (`sanity_cap_angewendet=False`) — "kein Gesamtscore, kein Signal".
+    - **Vollständige Analyse (AC10):** `uebersprungen` bleibt `None`,
+      `gesamtscore`/`signal`/`spinnennetz` sind gesetzt.
+
+    `kategorie_scores` ist in beiden Fällen vorhanden (auch bei
+    "übersprungen" zeigt es, welche Kategorien tatsächlich Evidenz
+    hatten) — das entspricht der Verträge-Struktur der Spec, die
+    `kategorie_scores` nicht als optional führt.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kategorie_scores: KategorieScores
+    gesamtscore: float | None = None
+    signal: Signal | None = None
+    sanity_cap_angewendet: bool = False
+    spinnennetz: Spinnennetz | None = None
+    uebersprungen: Uebersprungen | None = None
