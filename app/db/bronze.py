@@ -54,7 +54,7 @@ Validierungs-Layer (AC7/AC8), nicht dieses Modul.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select, text
@@ -62,21 +62,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models import MarketDataBronze
-
-
-def _als_utc_naiv(zeitpunkt: datetime) -> datetime:
-    """Normalisiert einen Zeitpunkt fuer den Inhaltsvergleich (AC9/AC10).
-
-    SQLite (Test-Backend, kein natives `TIMESTAMPTZ`) liefert `tzinfo` bei
-    gespeicherten Zeitstempeln nicht zuverlaessig zurueck, waehrend
-    PostgreSQL (`TIMESTAMPTZ`, Produktiv-Backend) `tzinfo` konsistent
-    bewahrt. Der Vergleich normalisiert daher auf UTC-naiv, damit derselbe
-    Zeitpunkt unabhaengig vom Backend als identisch erkannt wird — der
-    fachliche Moment (nicht die Wall-Clock-Repraesentation) entscheidet.
-    """
-    if zeitpunkt.tzinfo is not None:
-        return zeitpunkt.astimezone(UTC).replace(tzinfo=None)
-    return zeitpunkt
+from app.db.utils import als_utc_naiv
 
 
 def _erwirke_dedupe_lock(
@@ -148,7 +134,7 @@ def record_observation(
     if (
         bestehende is not None
         and bestehende.payload == payload
-        and _als_utc_naiv(bestehende.observed_at) == _als_utc_naiv(beobachtungs_zeitpunkt)
+        and als_utc_naiv(bestehende.observed_at) == als_utc_naiv(beobachtungs_zeitpunkt)
     ):
         # AC9/E2: dasselbe Ereignis (gleiche Event-ID, gleicher Inhalt) ist
         # bereits bekannt — idempotent, kein Duplikat, keine neue Zeile.
