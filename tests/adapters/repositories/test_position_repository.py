@@ -1,7 +1,7 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
 DBA-Zweit-Review).
 
-Covers (depot): AC10, AC2, AC3, AC5
+Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7
 
 Deckt die Bestandsermittlung, auf der `app.domain.portfolio.fill_booking
 .pruefe_fill` die AC10-Prüfung "keine resultierende negative Menge"
@@ -27,6 +27,11 @@ BR-130) ergänzt `test_aktuelle_menge_zaehlt_nur_den_eigenen_modus` und
 `test_offene_positionen_filtert_nach_modus`: ein Titel mit gleichzeitig
 einer „echt"- und einer „simuliert"-Position darf über `mode=...` nur die
 Zeile(n) des angefragten Modus liefern.
+
+S-035 (AC4/AC7) ergänzt `schreibe_transaktion` (append-only Insert in die
+`transaction`-Historie inkl. Arrival-Price/Slippage) und
+`historie_je_titel` (chronologisch sortierte, Mode-isolierte Lesesicht,
+Grundlage der TCA je Trade + aggregiert).
 """
 
 from __future__ import annotations
@@ -101,6 +106,33 @@ def _kauf_fill(instrument_id: uuid.UUID, **overrides: object) -> FillInput:
         "zeithorizont": 8,
         "exit_regeln": ExitRegeln(stop_typ="atr_trailing", stop_parameter=2.5),
         "these": "Langfristiger Index-Halter.",
+    }
+    kwargs.update(overrides)
+    return FillInput(**kwargs)
+
+
+def _naiv(zeitpunkt: datetime) -> datetime:
+    """SQLite (Struktur-Tests, In-Memory) rundet `DateTime(timezone=True)`
+    beim Roundtrip auf naive `datetime`-Werte ab (bekannte SQLAlchemy/
+    SQLite-Einschränkung) — Vergleiche gegen einen ursprünglich tz-aware
+    Erwartungswert müssen diesen daher ebenfalls entkernen."""
+    return zeitpunkt.replace(tzinfo=None)
+
+
+def _verkauf_fill(instrument_id: uuid.UUID, **overrides: object) -> FillInput:
+    kwargs = {
+        "client_order_id": "order-verkauf-1",
+        "titel_id": str(instrument_id),
+        "anlageklasse": 1,
+        "gics_branche": "Technology",
+        "richtung": "verkauf",
+        "menge": Decimal("5"),
+        "fill_preis": Decimal("120"),
+        "kosten": Decimal("5"),
+        "arrival_price": Decimal("119"),
+        "waehrung": "CHF",
+        "zeitstempel": datetime(2026, 7, 12, 11, 0, tzinfo=UTC),
+        "mode": "simuliert",
     }
     kwargs.update(overrides)
     return FillInput(**kwargs)
@@ -418,3 +450,133 @@ def test_markiere_fill_verbucht_bleibt_retrybar_nach_rollback_der_transaktion() 
             "order-retry-1", titel_id=str(instrument_id), richtung="verkauf"
         )
         assert retry is True
+
+
+# --- S-035: append-only Transaktionshistorie & TCA (AC4/AC7) --------------
+
+
+def test_schreibe_transaktion_persistiert_alle_ac4_felder() -> None:
+    """@trace depot#AC4 — ein Fill wird mit Titel, Richtung, Menge,
+    Fill-Preis, Kosten, Zeitstempel und Währung in die Historie
+    geschrieben."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(instrument_id, menge=Decimal("10"), fill_preis=Decimal("100"))
+
+        repository.schreibe_transaktion(fill, position_id=None)
+        session.commit()
+
+        historie = repository.historie_je_titel(str(instrument_id), mode="simuliert")
+        assert len(historie) == 1
+        eintrag = historie[0]
+        assert eintrag.titel_id == str(instrument_id)
+        assert eintrag.richtung == "kauf"
+        assert eintrag.menge == Decimal("10")
+        assert eintrag.fill_preis == Decimal("100")
+        assert eintrag.kosten == fill.kosten
+        assert eintrag.waehrung == "CHF"
+        assert eintrag.zeitstempel == _naiv(fill.zeitstempel)
+
+
+def test_schreibe_transaktion_speichert_arrival_price_und_slippage() -> None:
+    """@trace depot#AC7 — Arrival-Price + die daraus berechnete realisierte
+    Slippage (Fill-Preis − Arrival-Price) werden je Trade gespeichert."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(instrument_id, fill_preis=Decimal("101.5"), arrival_price=Decimal("100"))
+
+        repository.schreibe_transaktion(fill, position_id=None)
+        session.commit()
+
+        eintrag = repository.historie_je_titel(str(instrument_id), mode="simuliert")[0]
+        assert eintrag.arrival_price == Decimal("100")
+        assert eintrag.slippage == Decimal("1.5")
+
+
+def test_schreibe_transaktion_akzeptiert_verkauf_ohne_eindeutige_position_id() -> None:
+    """@trace depot#AC4 — ein Verkauf-Fill, der bei FIFO mehreren Lots
+    zugeordnet werden könnte, kann trotzdem ohne `position_id` (NULL)
+    historisiert werden — die append-only Historie selbst verlangt keine
+    eindeutige Lot-Zuordnung (Verträge-Vertrag referenziert nur
+    `titel_id`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _verkauf_fill(instrument_id)
+
+        repository.schreibe_transaktion(fill, position_id=None)
+        session.commit()
+
+        eintrag = repository.historie_je_titel(str(instrument_id), mode="simuliert")[0]
+        assert eintrag.richtung == "verkauf"
+
+
+def test_historie_je_titel_ist_leer_ohne_gebuchte_fills() -> None:
+    """@trace depot#AC4,AC7 — kein gebuchter Fill für einen Titel ergibt
+    eine leere Historie, keinen Fehler."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.historie_je_titel(str(instrument_id), mode="simuliert") == []
+
+
+def test_historie_je_titel_sortiert_chronologisch_aufsteigend() -> None:
+    """@trace depot#AC4,AC7 — mehrere Einträge desselben Titels sind
+    aufsteigend nach Zeitstempel sortiert (Grundlage für TCA-Auswertung je
+    Trade in der richtigen Reihenfolge)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        spaeter = _kauf_fill(
+            instrument_id,
+            client_order_id="order-spaeter",
+            zeitstempel=datetime(2026, 7, 12, 15, 0, tzinfo=UTC),
+        )
+        frueher = _kauf_fill(
+            instrument_id,
+            client_order_id="order-frueher",
+            zeitstempel=datetime(2026, 7, 12, 9, 0, tzinfo=UTC),
+        )
+        # Absichtlich in "falscher" Reihenfolge geschrieben, um die
+        # `ORDER BY booked_at`-Sortierung zu erzwingen.
+        repository.schreibe_transaktion(spaeter, position_id=None)
+        repository.schreibe_transaktion(frueher, position_id=None)
+        session.commit()
+
+        historie = repository.historie_je_titel(str(instrument_id), mode="simuliert")
+        assert [e.zeitstempel for e in historie] == [
+            _naiv(frueher.zeitstempel),
+            _naiv(spaeter.zeitstempel),
+        ]
+
+
+def test_historie_je_titel_filtert_nach_modus() -> None:
+    """@trace depot#AC4,AC7 — Mode-Isolation (BR-130, analog zu
+    `offene_positionen`/`aktuelle_menge`): ein "echt"-Fill erscheint nicht
+    in der "simuliert"-Historie desselben Titels (und umgekehrt)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        echt_fill = _kauf_fill(instrument_id, client_order_id="order-echt", mode="echt")
+        simuliert_fill = _kauf_fill(
+            instrument_id, client_order_id="order-simuliert", mode="simuliert"
+        )
+        repository.schreibe_transaktion(echt_fill, position_id=None)
+        repository.schreibe_transaktion(simuliert_fill, position_id=None)
+        session.commit()
+
+        echt_historie = repository.historie_je_titel(str(instrument_id), mode="echt")
+        simuliert_historie = repository.historie_je_titel(str(instrument_id), mode="simuliert")
+
+        assert len(echt_historie) == 1
+        assert len(simuliert_historie) == 1
+        assert echt_historie[0].zeitstempel == _naiv(echt_fill.zeitstempel)
+        assert simuliert_historie[0].zeitstempel == _naiv(simuliert_fill.zeitstempel)

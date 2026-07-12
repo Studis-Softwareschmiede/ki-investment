@@ -25,12 +25,22 @@ SQLAlchemy-Import hier).
   Lots unterschiedliche Einstandspreise tragen.
 
 **Nicht Teil dieser Story** (siehe `docs/specs/depot.md`, andere Storys):
-FX-Attribution (AC6 → S-053), Transaktionshistorie/TCA (AC4/AC7 → S-035),
-Portfolio-Aggregate (AC8/AC9 → S-036). Der unrealisierte G/V wird hier nur
-als **reine Formel** angeboten (AC2) — das Nachführen des
-`unrealisierter_gv`-Spaltenwerts anhand des Live-Kurses (Bewertungsfrequenz,
-Socket-Live-Kurs-Zugriff) ist eine eigene Bewertungs-Schleife, kein
-Fill-getriebener Schreibpfad, und daher hier NICHT verdrahtet.
+FX-Attribution (AC6 → S-053), Portfolio-Aggregate (AC8/AC9 → S-036). Der
+unrealisierte G/V wird hier nur als **reine Formel** angeboten (AC2) — das
+Nachführen des `unrealisierter_gv`-Spaltenwerts anhand des Live-Kurses
+(Bewertungsfrequenz, Socket-Live-Kurs-Zugriff) ist eine eigene
+Bewertungs-Schleife, kein Fill-getriebener Schreibpfad, und daher hier
+NICHT verdrahtet.
+
+**S-035 (AC4/AC7)** ergänzt: `verbuche_fill` schreibt nach jeder
+erfolgreichen Buchung (Kauf ODER Verkauf, aber NICHT bei
+`bereits_verbucht=True`, siehe unten) über `repository.schreibe_transaktion`
+einen unveränderlichen Eintrag in die append-only Transaktionshistorie —
+Arrival-Price + die daraus berechnete Slippage speichert der Repository-
+Adapter (`app.domain.portfolio.transaction_historie.berechne_slippage`).
+Bei einem Verkauf, der (FIFO, A2) mehrere Lots verbraucht, ist der Fill
+keinem einzelnen Lot eindeutig zuordenbar — `position_id` wird in diesem
+Fall `None` übergeben (siehe `_position_id_fuer_historie`).
 
 **DBA-Zweit-Review (Iteration 2)** behebt drei Befunde:
 
@@ -223,10 +233,33 @@ def verbuche_fill(
         return BuchungsErgebnis(richtung=fill.richtung, bereits_verbucht=True)
 
     if fill.richtung == "kauf":
-        return _verbuche_kauf(
+        ergebnis = _verbuche_kauf(
             fill, repository=repository, einstand_methode_default=einstand_methode_default
         )
-    return _verbuche_verkauf(fill, repository=repository)
+    else:
+        ergebnis = _verbuche_verkauf(fill, repository=repository)
+
+    # AC4/AC7 (S-035): append-only Transaktionshistorie-Eintrag NACH der
+    # eigentlichen Positions-Buchung — derselbe Commit wie Dedup-Marker +
+    # Positions-Mutation (siehe Transaktionale-Invariante oben).
+    repository.schreibe_transaktion(fill, position_id=_position_id_fuer_historie(ergebnis))
+    return ergebnis
+
+
+def _position_id_fuer_historie(ergebnis: BuchungsErgebnis) -> str | None:
+    """AC4/AC7 (S-035): welche `position_id` bekommt der
+    Transaktionshistorie-Eintrag? Bei Kauf eindeutig die (neu angelegte
+    oder aktualisierte) Position. Bei Verkauf nur dann eindeutig, wenn
+    GENAU EIN Lot verbraucht wurde (gleitender Durchschnitt: immer; FIFO:
+    nur falls der älteste Lot allein die Verkaufsmenge deckt) — verbraucht
+    ein FIFO-Verkauf (A2) mehrere Lots, ist der Fill keinem einzelnen Lot
+    eindeutig zuordenbar, daher `None` (der Verträge-Vertrag der Historie
+    selbst referenziert ohnehin nur `titel_id`, keine `position_id`)."""
+    if ergebnis.richtung == "kauf":
+        return ergebnis.position_id
+    if len(ergebnis.lot_buchungen) == 1:
+        return ergebnis.lot_buchungen[0].position_id
+    return None
 
 
 def _verbuche_kauf(

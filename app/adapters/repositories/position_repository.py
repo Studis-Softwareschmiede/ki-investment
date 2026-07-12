@@ -28,6 +28,13 @@ zusätzlich auf `Position.mode == mode` — ein „echt"-Fill darf nie gegen
 einen „simuliert"-Lot desselben Titels gemittelt, verbraucht oder gedeckt
 werden (und umgekehrt). Beide Aufrufer (`position_booking`, `fill_booking`)
 übergeben durchgängig `fill.mode`.
+
+Story S-035 (AC4/AC7) ergänzt `schreibe_transaktion` (Insert je Fill in
+die append-only `transaction`-Historie, inkl. Arrival-Price/Slippage) und
+`historie_je_titel` (Lesen, chronologisch sortiert, Mode-isoliert) —
+siehe `app.db.models.Transaction`-Docstring für die App-seitige
+BR-115-Durchsetzung (keine Update-/Delete-Methode existiert in diesem
+Adapter für diese Tabelle).
 """
 
 from __future__ import annotations
@@ -41,8 +48,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.contracts.depot import FillInput, Modus
-from app.db.models import DepotFillDedup, Position, Strategy
-from app.domain.portfolio.ports import OffenePosition
+from app.db.models import DepotFillDedup, Position, Strategy, Transaction
+from app.domain.portfolio.ports import OffenePosition, TransaktionsEintrag
+from app.domain.portfolio.transaction_historie import berechne_slippage
 
 
 class SqlAlchemyPositionRepository:
@@ -163,8 +171,9 @@ class SqlAlchemyPositionRepository:
         """Verbucht den Verkaufs-Anteil eines Lots (AC2/AC3): neue
         Restmenge, `realisierter_gv` fortgeschrieben; bei Vollverkauf des
         Lots (`neue_menge == 0`) wird der Lot geschlossen — die
-        Transaktionshistorie bleibt (hier noch nicht persistiert, S-035)
-        unberührt."""
+        append-only Transaktionshistorie selbst wird NICHT hier, sondern
+        separat über `schreibe_transaktion` (S-035, AC4) fortgeschrieben
+        und bleibt von einer Lot-Schliessung unberührt bestehen."""
         position = self._session.get(Position, uuid.UUID(position_id))
         if position is None:
             raise ValueError(f"Position {position_id!r} nicht gefunden.")
@@ -196,6 +205,66 @@ class SqlAlchemyPositionRepository:
             self._session.rollback()
             return False
         return True
+
+    def schreibe_transaktion(self, fill: FillInput, *, position_id: str | None) -> None:
+        """AC4/AC7 (S-035): fügt der append-only `transaction`-Historie
+        einen unveränderlichen Eintrag für `fill` hinzu — `typ` bildet
+        `fill.richtung` ab (`kauf`→`buy`, `verkauf`→`sell`),
+        `slippage_abs` wird über die reine Domain-Formel
+        (`app.domain.portfolio.transaction_historie.berechne_slippage`)
+        berechnet, nicht hier neu erfunden. `kosten_chf`/`preis` speichern
+        `fill.kosten`/`fill.fill_preis` unverändert (keine FX-Umrechnung —
+        das ist AC6/S-053, ausserhalb dieser Story, analog zur bestehenden
+        Behandlung von `Position.einstand_preis`/`realisierter_gv`)."""
+        typ = "buy" if fill.richtung == "kauf" else "sell"
+        zeile = Transaction(
+            id=uuid.uuid4(),
+            position_id=uuid.UUID(position_id) if position_id is not None else None,
+            instrument_id=uuid.UUID(fill.titel_id),
+            typ=typ,
+            menge=fill.menge,
+            preis=fill.fill_preis,
+            kosten_chf=fill.kosten,
+            waehrung=fill.waehrung,
+            arrival_price=fill.arrival_price,
+            slippage_abs=berechne_slippage(fill.fill_preis, fill.arrival_price),
+            mode=fill.mode,
+            booked_at=fill.zeitstempel,
+        )
+        self._session.add(zeile)
+        self._session.flush()
+
+    def historie_je_titel(self, titel_id: str, *, mode: Modus) -> list[TransaktionsEintrag]:
+        """AC4/AC7 (S-035): vollständige, unveränderte Transaktionshistorie
+        für `titel_id` **im angegebenen `mode`** (Mode-Isolation, BR-130),
+        aufsteigend nach `booked_at` sortiert. Leere Liste, falls
+        `titel_id` keine gültige UUID ist oder noch kein Fill gebucht
+        wurde."""
+        instrument_id = _als_uuid(titel_id)
+        if instrument_id is None:
+            return []
+
+        stmt = (
+            select(Transaction)
+            .where(Transaction.instrument_id == instrument_id, Transaction.mode == mode)
+            .order_by(Transaction.booked_at.asc())
+        )
+        zeilen = self._session.scalars(stmt).all()
+        return [
+            TransaktionsEintrag(
+                trade_id=str(z.id),
+                titel_id=str(z.instrument_id),
+                richtung="kauf" if z.typ == "buy" else "verkauf",
+                menge=z.menge,
+                fill_preis=z.preis,
+                arrival_price=z.arrival_price,
+                slippage=z.slippage_abs,
+                kosten=z.kosten_chf,
+                waehrung=z.waehrung,
+                zeitstempel=z.booked_at,
+            )
+            for z in zeilen
+        ]
 
 
 def _als_uuid(titel_id: str) -> uuid.UUID | None:

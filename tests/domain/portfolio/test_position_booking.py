@@ -1,6 +1,6 @@
 """Tests für die Positions-Fortschreibung (Story S-016 + DBA-Zweit-Review).
 
-Covers (depot): AC2, AC3, AC5
+Covers (depot): AC2, AC3, AC5, AC4, AC7
 
 `app.domain.portfolio.position_booking` verbucht einen bereits über
 `pruefe_fill` (S-015) als "gebucht" geprüften Fill gegen den Positions-
@@ -38,6 +38,12 @@ ergänzt: `_Lot` trägt jetzt `mode`, `_FakeRepository.aktuelle_menge`/
 `test_verbuche_verkauf_verbraucht_nicht_lot_des_anderen_modus`) decken
 ab, dass ein "echt"-Fill niemals gegen einen "simuliert"-Lot desselben
 Titels gemittelt oder verbraucht wird (und umgekehrt).
+
+S-035 (AC4/AC7) ergänzt `_FakeRepository.schreibe_transaktion`/
+`historie_je_titel` (in-memory Liste statt DB) und Tests, die belegen,
+dass `verbuche_fill` NACH jeder erfolgreichen Buchung (Kauf/Verkauf) genau
+einen Transaktionshistorie-Eintrag schreibt — aber NICHT bei
+`bereits_verbucht=True` (Dedup-Kurzschluss, ADR-011).
 """
 
 from __future__ import annotations
@@ -50,7 +56,7 @@ from decimal import Decimal
 import pytest
 
 from app.contracts.depot import ExitRegeln, FillInput
-from app.domain.portfolio.ports import OffenePosition
+from app.domain.portfolio.ports import OffenePosition, TransaktionsEintrag
 from app.domain.portfolio.position_booking import (
     UnzureichenderBestandFehler,
     aggregiere_gv,
@@ -60,6 +66,7 @@ from app.domain.portfolio.position_booking import (
     berechne_unrealisierten_gv,
     verbuche_fill,
 )
+from app.domain.portfolio.transaction_historie import berechne_slippage
 
 _TITEL_ID = "11111111-1111-1111-1111-111111111111"
 _ZEITSTEMPEL = datetime(2026, 7, 12, 10, 0, tzinfo=UTC)
@@ -89,6 +96,7 @@ class _FakeRepository:
 
     lots: dict[str, _Lot] = field(default_factory=dict)
     verbuchte_client_order_ids: set[str] = field(default_factory=set)
+    transaktionen: list[tuple[FillInput, str | None]] = field(default_factory=list)
     _naechste_id: int = 0
     _naechster_zeitpunkt: datetime = field(default_factory=lambda: datetime(2026, 1, 1, tzinfo=UTC))
 
@@ -149,6 +157,27 @@ class _FakeRepository:
             return False
         self.verbuchte_client_order_ids.add(client_order_id)
         return True
+
+    def schreibe_transaktion(self, fill: FillInput, *, position_id: str | None) -> None:
+        self.transaktionen.append((fill, position_id))
+
+    def historie_je_titel(self, titel_id: str, *, mode: str) -> list[TransaktionsEintrag]:
+        return [
+            TransaktionsEintrag(
+                trade_id=str(index),
+                titel_id=fill.titel_id,
+                richtung=fill.richtung,
+                menge=fill.menge,
+                fill_preis=fill.fill_preis,
+                arrival_price=fill.arrival_price,
+                slippage=berechne_slippage(fill.fill_preis, fill.arrival_price),
+                kosten=fill.kosten,
+                waehrung=fill.waehrung,
+                zeitstempel=fill.zeitstempel,
+            )
+            for index, (fill, _position_id) in enumerate(self.transaktionen)
+            if fill.titel_id == titel_id and fill.mode == mode
+        ]
 
 
 def _kauf(**overrides: object) -> FillInput:
@@ -608,3 +637,106 @@ def test_verbuche_verkauf_verbraucht_nicht_lot_des_anderen_modus() -> None:
 
     assert echt_lot.menge == menge_vor_verkauf
     assert echt_lot.status == "offen"
+
+
+# --- S-035: append-only Transaktionshistorie & TCA (AC4/AC7) --------------
+
+
+def test_verbuche_fill_schreibt_transaktionshistorie_eintrag_bei_kauf() -> None:
+    """@trace depot#AC4 — ein erfolgreich verbuchter Kauf-Fill schreibt
+    genau EINEN unveränderlichen Eintrag in die Transaktionshistorie, mit
+    der neu angelegten `position_id`."""
+    repository = _FakeRepository()
+    fill = _kauf(menge=Decimal("10"), fill_preis=Decimal("100"), kosten=Decimal("10"))
+    ergebnis = verbuche_fill(
+        fill, repository=repository, einstand_methode_default="gleitender_durchschnitt"
+    )
+
+    assert len(repository.transaktionen) == 1
+    gebuchter_fill, position_id = repository.transaktionen[0]
+    assert gebuchter_fill is fill
+    assert position_id == ergebnis.position_id
+
+
+def test_verbuche_fill_schreibt_transaktionshistorie_eintrag_bei_einzelnem_lot_verkauf() -> None:
+    """@trace depot#AC4 — ein Verkauf, der genau EINEN Lot verbraucht
+    (gleitender Durchschnitt: immer der Fall), schreibt den Eintrag mit
+    der `position_id` dieses Lots."""
+    repository = _FakeRepository()
+    kauf_ergebnis = verbuche_fill(
+        _kauf(menge=Decimal("10"), fill_preis=Decimal("100"), kosten=Decimal("10")),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    verbuche_fill(
+        _verkauf(menge=Decimal("4"), fill_preis=Decimal("150"), kosten=Decimal("4")),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+
+    assert len(repository.transaktionen) == 2
+    _verkauf_fill, position_id = repository.transaktionen[1]
+    assert position_id == kauf_ergebnis.position_id
+
+
+def test_verbuche_fill_schreibt_position_id_none_bei_fifo_multi_lot_verkauf() -> None:
+    """@trace depot#AC4 — ein FIFO-Verkauf, der mehrere Lots verbraucht
+    (A2), ist keinem einzelnen Lot eindeutig zuordenbar — der
+    Transaktionshistorie-Eintrag trägt `position_id=None`."""
+    repository = _FakeRepository()
+    verbuche_fill(
+        _kauf(menge=Decimal("10"), fill_preis=Decimal("100"), kosten=Decimal("10")),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+    verbuche_fill(
+        _kauf(menge=Decimal("10"), fill_preis=Decimal("120"), kosten=Decimal("10")),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+    ergebnis = verbuche_fill(
+        _verkauf(menge=Decimal("15"), fill_preis=Decimal("150"), kosten=Decimal("15")),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+
+    assert len(ergebnis.lot_buchungen) == 2
+    _verkauf_fill, position_id = repository.transaktionen[-1]
+    assert position_id is None
+
+
+def test_verbuche_fill_schreibt_keine_transaktion_bei_bereits_verbuchtem_fill() -> None:
+    """@trace depot#AC4 — ADR-011/P8: ein Fill mit bereits bekannter
+    `client_order_id` (At-least-once-Zustellung) wird NICHT ein zweites
+    Mal in die Transaktionshistorie geschrieben."""
+    repository = _FakeRepository()
+    fill = _kauf(
+        client_order_id="order-transaktion-dedup-1",
+        menge=Decimal("10"),
+        fill_preis=Decimal("100"),
+        kosten=Decimal("10"),
+    )
+    verbuche_fill(fill, repository=repository, einstand_methode_default="gleitender_durchschnitt")
+    verbuche_fill(fill, repository=repository, einstand_methode_default="gleitender_durchschnitt")
+
+    assert len(repository.transaktionen) == 1
+
+
+def test_verbuche_fill_historie_eintrag_traegt_arrival_price_und_slippage() -> None:
+    """@trace depot#AC7 — der über `historie_je_titel` abrufbare Eintrag
+    trägt Arrival-Price, Fill-Preis und die daraus berechnete realisierte
+    Slippage je Trade."""
+    repository = _FakeRepository()
+    fill = _kauf(
+        menge=Decimal("10"),
+        fill_preis=Decimal("101.5"),
+        kosten=Decimal("10"),
+        arrival_price=Decimal("100"),
+    )
+    verbuche_fill(fill, repository=repository, einstand_methode_default="gleitender_durchschnitt")
+
+    historie = repository.historie_je_titel(_TITEL_ID, mode="simuliert")
+    assert len(historie) == 1
+    assert historie[0].arrival_price == Decimal("100")
+    assert historie[0].fill_preis == Decimal("101.5")
+    assert historie[0].slippage == Decimal("1.5")
