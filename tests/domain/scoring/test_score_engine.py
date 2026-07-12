@@ -1,13 +1,14 @@
-"""Tests für die Score-Engine — Berechnungskern (Story S-009).
+"""Tests für die Score-Engine — Berechnungskern (Storys S-009/S-010).
 
-Covers (analyse-framework): AC1, AC2, AC3, AC4, AC9, AC11
+Covers (analyse-framework): AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC9, AC11
 
-`app.domain.scoring.score_engine` deckt den Berechnungskern dieser Story:
+`app.domain.scoring.score_engine` deckt den Berechnungskern dieser Storys:
 Kategorie-Score (AC1/AC2, inkl. Ausschluss fehlender/ungültiger
-Methodenscores AC9), die AC4-Referenz-Verifikation, den Gesamtscore (AC3)
-und Determinismus (AC11). Signal-Ableitung (AC5/AC6), Sanity-Cap (AC7),
+Methodenscores AC9), die AC4-Referenz-Verifikation, den Gesamtscore (AC3),
+die Signal-Ableitung nach (je Anlageklasse konfigurierbaren) Score-
+Schwellen (AC5/AC6), den Risiko-Sanity-Cap (AC7) und Determinismus (AC11).
 No-Evidence-No-Trade-Skip (AC8) und Spinnennetz (AC10) sind Nicht-Ziel
-dieser Story (S-010/S-011) und werden hier nicht getestet.
+dieser Story (S-011) und werden hier nicht getestet.
 """
 
 from __future__ import annotations
@@ -19,11 +20,14 @@ from app.contracts.analyse_framework import (
     Kategoriegewichte,
     KategorieScores,
     MethodeEingabe,
+    ScoreSchwellen,
 )
 from app.domain.scoring.score_engine import (
     berechne_gesamtscore,
     berechne_kategorie_score,
     berechne_kategorie_scores,
+    leite_signal_ab,
+    wende_risiko_sanity_cap_an,
 )
 
 
@@ -192,5 +196,143 @@ def test_ac11_determinismus_gesamtscore_und_signal_relevante_kette() -> None:
 
     erster_lauf = berechne_gesamtscore(berechne_kategorie_scores(kategorien), gewichte)
     zweiter_lauf = berechne_gesamtscore(berechne_kategorie_scores(kategorien), gewichte)
+
+    assert erster_lauf == zweiter_lauf
+
+
+# --- AC5/AC6: Signal-Ableitung aus den Score-Schwellen ---------------------
+
+
+@pytest.mark.parametrize(
+    ("gesamtscore", "erwartetes_signal"),
+    [
+        (10.0, "KAUF"),
+        (8.0, "KAUF"),  # Untergrenze inklusiv
+        (7.9, "BEOBACHTEN"),
+        (6.0, "BEOBACHTEN"),  # Untergrenze inklusiv
+        (5.9, "HALTEN"),
+        (4.0, "HALTEN"),  # Untergrenze inklusiv
+        (3.9, "REDUZIEREN"),
+        (2.0, "REDUZIEREN"),  # Untergrenze inklusiv
+        (1.9, "VERKAUF"),
+        (0.0, "VERKAUF"),
+    ],
+)
+def test_ac5_signal_ableitung_default_schwellen_inklusive_untergrenzen(
+    gesamtscore: float, erwartetes_signal: str
+) -> None:
+    """@trace analyse-framework#AC5 — Signal-Ableitung nach den globalen
+    Default-Schwellen; die Untergrenzen sind inklusiv (genau 8.0 → KAUF,
+    genau 6.0 → BEOBACHTEN, genau 4.0 → HALTEN, genau 2.0 → REDUZIEREN)."""
+    assert leite_signal_ab(gesamtscore) == erwartetes_signal
+
+
+def test_ac6_ohne_klassenspezifische_schwelle_greifen_defaults() -> None:
+    """@trace analyse-framework#AC6 — wird keine `schwellen`-Instanz
+    übergeben (kein `score_schwellen` gesetzt), gelten dieselben
+    Default-Werte wie eine explizit mit `ScoreSchwellen()` gebaute
+    Default-Instanz."""
+    assert leite_signal_ab(8.0) == leite_signal_ab(8.0, ScoreSchwellen())
+    assert leite_signal_ab(7.9, None) == leite_signal_ab(7.9, ScoreSchwellen())
+
+
+def test_ac6_klassenspezifische_schwelle_ueberschreibt_nur_das_gesetzte_feld() -> None:
+    """@trace analyse-framework#AC6 — eine Anlageklasse mit kalibrierter,
+    höherer KAUF-Schwelle (9.0) lässt die übrigen Schwellen (beobachten/
+    halten/reduzieren) unverändert auf dem AC5-Default."""
+    schwellen = ScoreSchwellen(kauf=9.0)
+
+    # 8.5 läge unter Default-KAUF (8.0) nicht mehr, unter der
+    # klassenspezifischen Schwelle (9.0) schon: Signal fällt auf
+    # BEOBACHTEN zurück statt KAUF.
+    assert leite_signal_ab(8.5, schwellen) == "BEOBACHTEN"
+    assert leite_signal_ab(9.0, schwellen) == "KAUF"
+    # Unveränderte (nicht gesetzte) Schwellen verhalten sich weiterhin wie
+    # der AC5-Default.
+    assert leite_signal_ab(6.0, schwellen) == "BEOBACHTEN"
+    assert leite_signal_ab(4.0, schwellen) == "HALTEN"
+    assert leite_signal_ab(2.0, schwellen) == "REDUZIEREN"
+
+
+def test_ac11_determinismus_signal_ableitung() -> None:
+    """@trace analyse-framework#AC11 — identischer Gesamtscore und
+    identische Schwellen liefern zweimal exakt dasselbe Signal."""
+    schwellen = ScoreSchwellen(kauf=9.0)
+    assert leite_signal_ab(8.5, schwellen) == leite_signal_ab(8.5, schwellen)
+
+
+# --- AC7: Risiko-Sanity-Cap -------------------------------------------------
+
+
+@pytest.mark.parametrize("signal_vor_cap", ["KAUF", "BEOBACHTEN"])
+def test_ac7_sanity_cap_deckelt_kauf_und_beobachten_auf_halten(signal_vor_cap: str) -> None:
+    """@trace analyse-framework#AC7 — ist der Risiko-Score < 3 (Default-
+    Schwellwert), wird ein rechnerisches KAUF oder BEOBACHTEN auf HALTEN
+    gedeckelt und `sanity_cap_angewendet` ist True (deckt A1)."""
+    signal, sanity_cap_angewendet = wende_risiko_sanity_cap_an(signal_vor_cap, risiko_score=2.9)
+
+    assert signal == "HALTEN"
+    assert sanity_cap_angewendet is True
+
+
+@pytest.mark.parametrize("signal_vor_cap", ["REDUZIEREN", "VERKAUF"])
+def test_ac7_sanity_cap_laesst_reduzieren_und_verkauf_unveraendert(signal_vor_cap: str) -> None:
+    """@trace analyse-framework#AC7 — REDUZIEREN und VERKAUF bleiben trotz
+    niedrigem Risiko-Score unverändert (nur KAUF/BEOBACHTEN werden
+    gedeckelt)."""
+    signal, sanity_cap_angewendet = wende_risiko_sanity_cap_an(signal_vor_cap, risiko_score=1.0)
+
+    assert signal == signal_vor_cap
+    assert sanity_cap_angewendet is False
+
+
+def test_ac7_sanity_cap_greift_nicht_bei_risiko_score_exakt_der_schwelle() -> None:
+    """@trace analyse-framework#AC7 — der Cap-Schwellwert ist als "< 3"
+    definiert; ein Risiko-Score exakt 3.0 (Default-Schwellwert) löst den
+    Cap NICHT aus (Grenzfall-Test lt. Schätz-Notiz)."""
+    signal, sanity_cap_angewendet = wende_risiko_sanity_cap_an("KAUF", risiko_score=3.0)
+
+    assert signal == "KAUF"
+    assert sanity_cap_angewendet is False
+
+
+def test_ac7_sanity_cap_greift_knapp_unterhalb_der_schwelle() -> None:
+    """@trace analyse-framework#AC7 — ein Risiko-Score knapp unterhalb der
+    Schwelle (2.99 < 3.0) löst den Cap aus."""
+    signal, sanity_cap_angewendet = wende_risiko_sanity_cap_an("BEOBACHTEN", risiko_score=2.99)
+
+    assert signal == "HALTEN"
+    assert sanity_cap_angewendet is True
+
+
+def test_ac7_cap_schwellwert_ist_konfigurierbar() -> None:
+    """@trace analyse-framework#AC7 — "Der Cap-Schwellwert 3 ist
+    konfigurierbar": ein abweichender `cap_schwelle`-Wert verschiebt, ab
+    welchem Risiko-Score der Cap greift."""
+    # Mit einer strengeren, klassenspezifischen Schwelle (5.0) greift der
+    # Cap bereits bei einem Risiko-Score, der den Default (3.0) nicht
+    # ausgelöst hätte.
+    signal, sanity_cap_angewendet = wende_risiko_sanity_cap_an(
+        "KAUF", risiko_score=4.0, cap_schwelle=5.0
+    )
+
+    assert signal == "HALTEN"
+    assert sanity_cap_angewendet is True
+
+    # Mit dem Default-Schwellwert hätte derselbe Risiko-Score (4.0) den
+    # Cap NICHT ausgelöst.
+    unveraendertes_signal, unveraendertes_flag = wende_risiko_sanity_cap_an(
+        "KAUF", risiko_score=4.0
+    )
+    assert unveraendertes_signal == "KAUF"
+    assert unveraendertes_flag is False
+
+
+def test_ac11_determinismus_sanity_cap() -> None:
+    """@trace analyse-framework#AC11 — identisches Signal und identischer
+    Risiko-Score liefern zweimal exakt dasselbe (Signal,
+    sanity_cap_angewendet)-Ergebnis."""
+    erster_lauf = wende_risiko_sanity_cap_an("KAUF", risiko_score=2.5)
+    zweiter_lauf = wende_risiko_sanity_cap_an("KAUF", risiko_score=2.5)
 
     assert erster_lauf == zweiter_lauf

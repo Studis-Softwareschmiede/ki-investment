@@ -1,16 +1,19 @@
-"""Tests für die Analyse-Framework-Verträge (Story S-009, Berechnungskern).
+"""Tests für die Analyse-Framework-Verträge (Storys S-009/S-010, Berechnungskern).
 
-Covers (analyse-framework): AC1, AC2, AC3, AC9
+Covers (analyse-framework): AC1, AC2, AC3, AC5, AC6, AC9
 
 `app.contracts.analyse_framework` bildet den Ausschnitt der Verträge aus
 `docs/specs/analyse-framework.md` ab, den der Berechnungskern
-(`app.domain.scoring.score_engine`) für diese Story benötigt. Diese Tests
+(`app.domain.scoring.score_engine`) für diese Storys benötigt. Diese Tests
 decken auf DTO-Ebene die Grenzfälle, die für die Berechnungslogik relevant
 sind (AC2: Ranking strukturell auf 1–10 begrenzt; Methodenscore bewusst
 NICHT begrenzt, siehe `MethodeEingabe`-Docstring; AC3:
-Kategoriegewichte-Wertebereich; AC9: `KategorieScores`/`methodenscore`
-akzeptieren fehlende Werte als `None`). Die eigentliche Formel-Berechnung
-(AC1/AC4/AC9/AC11) liegt in `tests/domain/scoring/test_score_engine.py`.
+Kategoriegewichte-Wertebereich; AC5/AC6: `ScoreSchwellen`-Defaults
+entsprechen den AC5-Werten, nicht gesetzte Felder fallen automatisch auf
+den Default zurück; AC9: `KategorieScores`/`methodenscore` akzeptieren
+fehlende Werte als `None`). Die eigentliche Formel-/Signal-Berechnung
+(AC1/AC4/AC5/AC6/AC7/AC9/AC11) liegt in
+`tests/domain/scoring/test_score_engine.py`.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from app.contracts.analyse_framework import (
     Kategoriegewichte,
     KategorieScores,
     MethodeEingabe,
+    ScoreSchwellen,
 )
 
 
@@ -86,3 +90,83 @@ def test_kategorie_scores_default_ist_ueberall_none() -> None:
     scores = KategorieScores()
     for kategorie in KATEGORIE_NAMEN:
         assert getattr(scores, kategorie) is None
+
+
+def test_score_schwellen_default_entspricht_ac5_werten() -> None:
+    """@trace analyse-framework#AC5 — `ScoreSchwellen()` ohne Angaben liefert
+    exakt die globalen Default-Schwellen aus AC5 (8.0/6.0/4.0/2.0)."""
+    schwellen = ScoreSchwellen()
+    assert schwellen.kauf == 8.0
+    assert schwellen.beobachten == 6.0
+    assert schwellen.halten == 4.0
+    assert schwellen.reduzieren == 2.0
+
+
+def test_score_schwellen_nicht_gesetztes_feld_faellt_auf_default_zurueck() -> None:
+    """@trace analyse-framework#AC6 — wird nur ein Feld einer Klassen-
+    spezifischen `ScoreSchwellen`-Instanz gesetzt, bleiben die übrigen
+    Felder auf dem AC5-Default ("ist keine klassenspezifische Schwelle
+    gesetzt, greifen die Default-Werte")."""
+    schwellen = ScoreSchwellen(kauf=9.0)
+    assert schwellen.kauf == 9.0
+    assert schwellen.beobachten == 6.0
+    assert schwellen.halten == 4.0
+    assert schwellen.reduzieren == 2.0
+
+
+@pytest.mark.parametrize("feld", ["kauf", "beobachten", "halten", "reduzieren"])
+def test_score_schwellen_lehnt_wert_ausserhalb_0_bis_10_ab(feld: str) -> None:
+    """@trace analyse-framework#AC5 — Score-Schwellen liegen strukturell im
+    Wertebereich des Gesamtscores (0–10), analog zu anderen Score-Feldern
+    der Verträge."""
+    with pytest.raises(ValidationError):
+        ScoreSchwellen(**{feld: 10.01})
+
+
+def test_score_schwellen_akzeptiert_gueltige_monotone_konfiguration() -> None:
+    """@trace analyse-framework#AC6 — eine vollständig gesetzte, monoton
+    fallende Klassen-Konfiguration (kauf ≥ beobachten ≥ halten ≥
+    reduzieren) wird akzeptiert, auch wenn sie von den AC5-Defaults
+    abweicht."""
+    schwellen = ScoreSchwellen(kauf=9.0, beobachten=7.0, halten=5.0, reduzieren=3.0)
+    assert schwellen.kauf == 9.0
+    assert schwellen.beobachten == 7.0
+    assert schwellen.halten == 5.0
+    assert schwellen.reduzieren == 3.0
+
+
+def test_score_schwellen_akzeptiert_gleiche_werte_an_der_grenze() -> None:
+    """@trace analyse-framework#AC6 — die Monotonie-Invariante ist `≥`
+    (nicht strikt `>`); gleiche Nachbarwerte sind zulässig."""
+    schwellen = ScoreSchwellen(kauf=8.0, beobachten=8.0, halten=4.0, reduzieren=4.0)
+    assert schwellen.kauf == schwellen.beobachten == 8.0
+    assert schwellen.halten == schwellen.reduzieren == 4.0
+
+
+def test_score_schwellen_teil_override_der_das_reduzieren_fenster_verschluckt_wird_abgelehnt() -> (
+    None
+):
+    """@trace analyse-framework#AC6 — Kern-Regressionstest des Review-
+    Befunds: wird nur `reduzieren` klassenspezifisch über den unveränderten
+    `halten`-Default (4.0) angehoben, würde ohne Validierung das
+    REDUZIEREN-Signal-Fenster still unerreichbar (ein Score wie 4.5 matcht
+    bereits bei `halten`, bevor `reduzieren` geprüft wird). Die Validierung
+    lehnt diese inkonsistente Teil-Override-Konfiguration ab."""
+    with pytest.raises(ValidationError, match="kauf >= beobachten >= halten >= reduzieren"):
+        ScoreSchwellen(reduzieren=5.0)
+
+
+@pytest.mark.parametrize(
+    "werte",
+    [
+        {"kauf": 5.0, "beobachten": 6.0},  # kauf < beobachten
+        {"beobachten": 3.0, "halten": 4.0},  # beobachten < halten
+        {"halten": 1.0, "reduzieren": 2.0},  # halten < reduzieren
+    ],
+)
+def test_score_schwellen_lehnt_nicht_monotone_direkte_werte_ab(werte: dict[str, float]) -> None:
+    """@trace analyse-framework#AC6 — auch bei direkt (nicht nur per
+    Teil-Override) widersprüchlich gesetzten Nachbar-Feldern greift die
+    Monotonie-Validierung."""
+    with pytest.raises(ValidationError):
+        ScoreSchwellen(**werte)

@@ -1,7 +1,7 @@
 id: S-010
 parent: F-006
 title: Signal-Ableitung, konfigurierbare Schwellen & Sanity-Cap
-status: To Do
+status: In Progress
 priority: P0
 spec: docs/specs/analyse-framework.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: 'Cold-Start: keine Referenz. Schwellen-Mapping (inklusive Untergr
   3 (AC7). Grenzfall-Tests an exakten Schwellen wichtig.'
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-010-signal-schwellen-sanity-cap
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:08:52Z'
-updated_at: '2026-07-12T10:08:53Z'
+updated_at: '2026-07-12T14:33:32Z'
 done_at: null
