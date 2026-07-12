@@ -232,7 +232,30 @@ erDiagram
 | quality_indicator | TEXT | (Socket-Qualitätsmetadatum) |
 | observed_at | TIMESTAMPTZ | NOT NULL (fachlicher Zeitpunkt der Datenquelle, Point-in-Time) |
 | ingested_at | TIMESTAMPTZ | NOT NULL DEFAULT now() (Aufnahmezeit — **Partitionsschlüssel**) |
-| — | — | **PK (id, ingested_at)** · UNIQUE (data_source_id, source_event_id) · **append-only**, kein UPDATE/DELETE (→ BR-121) |
+| — | — | **PK (id, ingested_at)** · **append-only**, kein UPDATE/DELETE (→ BR-121) |
+
+> **BR-122-Präzisierung (S-022, AC9/AC10):** `UNIQUE (data_source_id, source_event_id)` ist als
+> **physischer** Index NICHT umsetzbar — er würde AC10 (rückwirkende Revision erzeugt eine
+> zusätzliche Point-in-Time-Version statt Überschreiben) strukturell verhindern, und auf einer
+> `RANGE`-partitionierten Tabelle müsste jeder Unique-Index zusätzlich den Partitionsschlüssel
+> (`ingested_at`) enthalten — was die Duplikaterkennung selbst aushebeln würde (jede Zeile trägt
+> ein frisches `ingested_at`). Idempotenz (AC9) + Versionierung (AC10) werden daher zweischichtig
+> **verhaltensseitig** durchgesetzt statt über einen Unique-Constraint: App-Layer
+> (`app/db/bronze.py::record_observation` — identischer Inhalt zur zuletzt bekannten Version
+> derselben `(data_source_id, source_event_id)` → idempotenter No-Op; abweichender Inhalt → neue
+> Zeile) sowie ein DB-seitiger BEFORE-INSERT-Trigger als zweite Sicherung (Migration
+> `cfdd83ba9a2c_create_market_data_bronze_bronze_layer.py`), analog zum BR-101-Muster bei
+> `category_weight`. `(data_source_id, source_event_id)` bleibt eine **logische**
+> Ereignis-Identität über mehrere Versionen hinweg, kein physischer Unique-Key.
+>
+> **Nebenläufigkeits-Härtung (S-022, Iteration 2, empirisch gegen Postgres 17 gemessen):**
+> unter READ COMMITTED sehen zwei parallele, noch nicht committete Transaktionen sich
+> gegenseitig nicht — `record_observation()` erwirkt daher VOR der Lese-Prüfung eine
+> `pg_advisory_xact_lock` je Ereignis-Identität, die konkurrierende Aufrufe serialisiert.
+> Der DB-Trigger wirft bei einem trotzdem durchgeschlüpften Duplikat außerdem KEIN stilles
+> `RETURN NULL` mehr (ORM-inkompatibel, siehe `.claude/lessons/coder.md`), sondern eine
+> abfangbare Exception (SQLSTATE `unique_violation`), die `record_observation()` fängt und
+> die massgebliche Zeile frisch nachlädt statt ein verwaistes ORM-Objekt zurückzugeben.
 
 **Partitionierung:** deklarativ nach `RANGE (ingested_at)`, **monatliche** Partitionen (Zeitreihen, hohes Volumen). Partitionsschlüssel muss Teil von PK/Unique sein → daher `(id, ingested_at)`.
 
@@ -517,7 +540,7 @@ erDiagram
 | platform_asset_class | (asset_class_id) | Plattform-Kosten je Klasse |
 | instrument | (asset_class_id), (symbol) | Klassenfilter + Symbol-Lookup |
 | market_data_bronze | (data_source_id, ingested_at), (asset_class_tag, observed_at) | Replay + PIT je Klasse (je Partition) |
-| market_data_bronze | UNIQUE (data_source_id, source_event_id) | Idempotenz (→ BR-122) |
+| market_data_bronze | (data_source_id, source_event_id) — **nicht** UNIQUE | Ereignis-Lookup für App-/DB-Layer-Idempotenz (→ BR-122-Präzisierung §2) |
 | market_data_silver | (instrument_id, observed_at), (signal_type) | Signal-Bündel je Titel |
 | analysis_result | (instrument_id, created_at), (analyse_typ), (mode) | Analyse-Historie, Pfad-/Mode-Filter |
 | analysis_category_score | (analysis_result_id) | Scores je Analyse |
@@ -580,8 +603,8 @@ erDiagram
 | BR-118 | trial_registry | Append-only; jede getestete Variante bleibt (abgelehnte → archived=true), **nie löschen** — DSR-Validität | DB (kein Delete-Grant) + App |
 | BR-119 | gate_result.ampel | 🟢 nur wenn Stufe A **und** B bestanden (sample ≥ 100, WFE ≥ 0.5, PSR ≥ 0.95); 🟡 A ok/B läuft; 🔴 durchgefallen | App |
 | BR-120 | gate_result.min_trl | MinTRL bei jeder Auswertung berechnet und gespeichert/angezeigt | App |
-| BR-121 | market_data_bronze | Immutable/append-only: kein UPDATE/DELETE innerhalb Online-Retention; Point-in-Time via observed_at | DB (kein Update/Delete-Grant) + App |
-| BR-122 | market_data_bronze | Idempotenz: UNIQUE (data_source_id, source_event_id) — Doppelaufnahme verhindert | DB-UNIQUE |
+| BR-121 | market_data_bronze | Immutable/append-only: kein UPDATE/DELETE innerhalb Online-Retention; Point-in-Time via observed_at | DB (BEFORE-UPDATE/DELETE-Trigger, S-022) + App |
+| BR-122 | market_data_bronze | Idempotenz + AC10-Versionierung: identischer Inhalt zu (data_source_id, source_event_id) → No-Op, abweichender Inhalt → neue PIT-Version (kein physischer Unique-Index möglich, siehe §2-Präzisierung) | App (`app/db/bronze.py`) + DB-Trigger |
 | BR-123 | data_source / asset_class | Reddit-Sentiment (retail_social) nur bei retail_driven-Klassen (Aktien 1, Krypto 7) — nicht Obligationen/FX | App (Quellen-Matching) |
 | BR-124 | asset_class.aktiv | Inaktive Klasse → keine Datenabfrage, keine Analyse, keine Datenkosten (Toggle in allen Modulen) | App |
 | BR-125 | asset_class.aktiv / position | Deaktivierte Klasse mit offenen Positionen: keine neuen Käufe, aber Überwachung + Exits bleiben aktiv | App |
