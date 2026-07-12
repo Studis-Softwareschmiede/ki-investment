@@ -1,0 +1,10 @@
+# Scaffold-Standard der Softwareschmiede — Secrets-Subsystem.
+# Erlaubt NUR den verschlüsselten .env.gpg-Blob. Klartext bleibt scharf (security/R01).
+[extend]
+useDefault = true   # alle eingebauten gitleaks-Regeln bleiben aktiv
+
+[allowlist]
+description = "Verschlüsselte Secret-Datei (GPG symmetric AES256) — bewusst committet"
+paths = [
+  '''^\.env\.gpg$''',   # NUR exakt .env.gpg — NICHT .env, NICHT .env.*
+]

@@ -1,0 +1,17 @@
+# Plaintext-Secrets — NIE committen (nur .env.gpg ist versioniert)
+.env
+.env.*
+!.env.example
+!.env.db.example
+!.env.redis.example
+!.env.gpg
+*.plain
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+# Node (Playwright-Regression-Runner)
+node_modules/
+# Playwright Regression-Test-Artefakte (nicht versioniert; Testdefinitionen bleiben im Git)
+test-results/
+playwright-report/

@@ -1,0 +1,104 @@
+# --- db-postgres (source: templates/_shared/db-postgres/compose.fragment.yml) ---
+# compose.fragment.yml — db-postgres template (Welle 2, Spec §5 + §6 + §16-R4)
+#
+# Kein vollständiger compose-file — nur die Postgres-Service-Blöcke, die
+# beim Scaffold (/new-project, /adopt) ans Projekt-`docker-compose.yml`
+# angehängt werden. Das Projekt-Default-Netzwerk (compose-implicit) wird
+# benutzt; die App-Services müssen im selben Compose-Projekt liegen, um
+# `db` per DNS aufzulösen.
+#
+# Pflicht-Felder (Spec §5):
+#   - restart: unless-stopped
+#   - healthcheck via pg_isready
+#   - eindeutiges named volume `db_data`
+#   - Port-Mapping via env (Preview-Konflikt-Vermeidung)
+#   - Passwort via env_file (NIE hardkodiert; .env.gpg ist Source of Truth)
+#
+# Migrations-Service (Spec §16-R4):
+#   - separates one-shot Image (gleicher postgres:17-alpine-Tag → image-reuse)
+#   - bringt psql mit, ohne dass die App-Images einen DB-Client backen müssen
+#   - läuft NACH `db: service_healthy`, BEVOR App-Services starten
+
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: ${PROJECT_NAME:-app}_db
+    restart: unless-stopped
+    env_file:
+      - .env.db
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-app}\" -d \"${POSTGRES_DB:-app}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # ports:
+    #   - "${DB_PORT:-5432}:5432"
+    # ^ Preview/Dev nur. In Production ENTFERNEN (Spec §15-R7).
+
+  migrations:
+    image: postgres:17-alpine
+    container_name: ${PROJECT_NAME:-app}_migrations
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env.db
+    environment:
+      DB_HOST: db
+    entrypoint: ["/db_scripts/run-migrations.sh"]
+    volumes:
+      - ./db_scripts:/db_scripts:ro
+
+volumes:
+  db_data: {}
+
+# --- companion-redis (source: templates/_shared/companion-redis/compose.fragment.yml) ---
+# compose.fragment.yml — companion-redis template (Spec §17)
+#
+# Companion-Service: Cache / Queue / Sessions / Pub-Sub.
+# Kein DBA, keine Migrations, kein Backup-Runner.
+#
+# Scope-Lock (Spec §17):
+#   - Companions sind stateful Sidecars OHNE Schema-Evolution.
+#   - Kein `migrations`-Service, kein `_schema_migrations`-Marker, keine
+#     `db_scripts/`-Konvention — wer Schema/Migrations/Backup braucht,
+#     gehört ins DB-Subsystem (§5/§6/§7), nicht in den Companion-Pfad.
+#   - Detection beeinflusst `profile.db_dialect` NICHT — Companions
+#     leben in `profile.companions: [...]` (Spec §2 + §17).
+#
+# Pflicht-Felder (analog §5):
+#   - restart: unless-stopped
+#   - healthcheck via `redis-cli ping`
+#   - eindeutiges named volume `redis_data` (AOF/RDB-Snapshots)
+#   - KEIN Port-Mapping — Redis ist nur intern (über das compose-
+#     Default-Network) erreichbar; Apps verbinden via Service-DNS `redis`.
+#     Für Dev-Inspektion gezielt `docker compose exec redis redis-cli`
+#     statt host-Port-Exposure (Security-Floor).
+#
+# Production-Hinweis: Default-Container hat KEIN Passwort (intern-only
+# reicht im SMB-Setup). Wenn Password-Auth nötig (Multi-Tenant-VPS,
+# Cross-Network-Access), siehe README „Production" — Setup via
+# `--requirepass` + `REDIS_PASSWORD` env in der App.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ${PROJECT_NAME:-app}_redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # ports:
+    #   - "${REDIS_PORT:-6379}:6379"
+    # ^ NICHT aktivieren. Redis ist Companion = intern-only. Dev-Inspektion
+    #   via `docker compose exec redis redis-cli` (Spec §17 Scope-Lock).
+
+volumes:
+  redis_data: {}

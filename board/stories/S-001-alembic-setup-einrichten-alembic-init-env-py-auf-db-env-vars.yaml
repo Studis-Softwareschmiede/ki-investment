@@ -1,0 +1,25 @@
+id: S-001
+parent: F-001
+title: Alembic-Setup einrichten (alembic init, env.py auf DB-Env-Vars, erste Migration)
+status: To Do
+priority: P1
+spec: docs/architecture.md
+implements:
+- AC1
+depends: null
+labels:
+- db
+- setup
+size_est: null
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: null
+confidence: null
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-12T09:13:44Z'
+updated_at: '2026-07-12T09:13:44Z'
+done_at: null

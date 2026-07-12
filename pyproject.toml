@@ -1,0 +1,34 @@
+# pyproject.toml — Softwareschmiede Python-Scaffold-Default (uv-Konventionen).
+# new-project füllt <…> aus. FastAPI/uvicorn kommen projekt-spezifisch dazu
+# (auskommentiertes Beispiel unten). uv.lock wird von `uv sync`/`uv lock` erzeugt.
+[project]
+name = "ki-investment"
+version = "0.1.0"
+description = "KI-gestuetzte vollautomatische Investment-App (Analyse, Scoring, Sizing, Order-Ausfuehrung)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+]
+
+# Dev-/Test-Werkzeuge — via `uv sync` ins venv, nicht ins Runtime-Image nötig.
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8",
+    "ruff>=0.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+# Standard-Regelset; projekt-spezifisch erweitern (z.B. "I" für Import-Sortierung).
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]

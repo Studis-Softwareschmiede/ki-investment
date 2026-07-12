@@ -1,0 +1,24 @@
+# Dependabot — Claude-freie, kontinuierliche Überwachung von Dependency- und
+# GitHub-Actions-Verwundbarkeiten (queriert die GitHub Advisory DB laufend, öffnet
+# automatisch Update-/Security-PRs). Von new-project nach .github/dependabot.yml kopiert.
+# new-project ergänzt das passende Sprach-Ökosystem (s. auskommentierte Beispiele).
+version: 2
+updates:
+  # Immer: hält die Action-Versionen in den Workflows aktuell/sicher.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Sprach-Ökosystem — von new-project je nach profile.language gesetzt, z. B.:
+  # - package-ecosystem: "npm"     # js / angular
+  #   directory: "/"
+  #   schedule: { interval: "weekly" }
+  # - package-ecosystem: "pub"     # flutter
+  # - package-ecosystem: "maven"   # java  (oder "gradle")
+  # (html/statisch: keins — nur github-actions oben)
+
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
