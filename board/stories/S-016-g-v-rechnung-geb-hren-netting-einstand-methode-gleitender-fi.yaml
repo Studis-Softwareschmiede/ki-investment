@@ -5,6 +5,7 @@ status: To Do
 priority: P0
 spec: docs/specs/depot.md
 implements:
+- AC12
 - AC2
 - AC3
 - AC5
