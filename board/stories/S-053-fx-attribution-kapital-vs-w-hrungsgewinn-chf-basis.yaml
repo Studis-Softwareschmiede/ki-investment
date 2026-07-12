@@ -1,7 +1,7 @@
 id: S-053
 parent: F-011
 title: FX-Attribution (Kapital- vs. Währungsgewinn, CHF-Basis)
-status: To Do
+status: In Progress
 priority: P2
 spec: docs/specs/depot.md
 implements:
@@ -19,9 +19,9 @@ estimate_note: Cold-Start; FX-Zerlegung mit Unsicherheit bei Rundung/Kursbezug, 
   dünne Pipeline nicht kritisch (Ausbau).
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-053-fx-attribution
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:34Z'
-updated_at: '2026-07-12T10:10:36Z'
+updated_at: '2026-07-12T23:05:03Z'
 done_at: null

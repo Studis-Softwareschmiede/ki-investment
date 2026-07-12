@@ -1,6 +1,7 @@
-"""Tests für die Positions-Fortschreibung (Story S-016 + DBA-Zweit-Review).
+"""Tests für die Positions-Fortschreibung (Story S-016 + DBA-Zweit-Review
++ S-053).
 
-Covers (depot): AC2, AC3, AC5, AC4, AC7
+Covers (depot): AC2, AC3, AC5, AC4, AC7, AC6
 
 `app.domain.portfolio.position_booking` verbucht einen bereits über
 `pruefe_fill` (S-015) als "gebucht" geprüften Fill gegen den Positions-
@@ -44,6 +45,16 @@ S-035 (AC4/AC7) ergänzt `_FakeRepository.schreibe_transaktion`/
 dass `verbuche_fill` NACH jeder erfolgreichen Buchung (Kauf/Verkauf) genau
 einen Transaktionshistorie-Eintrag schreibt — aber NICHT bei
 `bereits_verbucht=True` (Dedup-Kurzschluss, ADR-011).
+
+S-053 (AC6, FX-Attribution) ergänzt `_Lot.einstand_fx_rate` +
+`_FakeRepository.lege_position_an`/`aktualisiere_kauf`/`schreibe_transaktion`
+(nehmen/reichen den FX-Kurs bzw. den aggregierten FX-Split durch) sowie
+Tests, die belegen: (a) ein Fremdwährungs-Erstkauf setzt den Lot-FX-Kurs,
+(b) ein Nachkauf mittelt ihn mengen-gewichtet, (c) FIFO legt ihn je Lot
+unabhängig fest, (d) ein Fremdwährungs-Verkauf berechnet
+`fx_split_gesamt` (aggregiert über alle verbrauchten Lots) und übergibt
+ihn an `schreibe_transaktion`, (e) ein CHF-Fill bleibt ohne jede
+FX-Attribution (`None`).
 """
 
 from __future__ import annotations
@@ -56,6 +67,7 @@ from decimal import Decimal
 import pytest
 
 from app.contracts.depot import ExitRegeln, FillInput
+from app.domain.portfolio.fx_attribution import FxSplit
 from app.domain.portfolio.ports import OffenePosition, TransaktionsEintrag
 from app.domain.portfolio.position_booking import (
     UnzureichenderBestandFehler,
@@ -86,6 +98,7 @@ class _Lot:
     mode: str = "simuliert"
     status: str = "offen"
     realisierter_gv: Decimal = Decimal("0")
+    einstand_fx_rate: Decimal | None = None
 
 
 @dataclass
@@ -97,6 +110,7 @@ class _FakeRepository:
     lots: dict[str, _Lot] = field(default_factory=dict)
     verbuchte_client_order_ids: set[str] = field(default_factory=set)
     transaktionen: list[tuple[FillInput, str | None]] = field(default_factory=list)
+    fx_splits: list[FxSplit | None] = field(default_factory=list)
     _naechste_id: int = 0
     _naechster_zeitpunkt: datetime = field(default_factory=lambda: datetime(2026, 1, 1, tzinfo=UTC))
 
@@ -114,6 +128,7 @@ class _FakeRepository:
                 einstand_preis=lot.einstand_preis,
                 einstand_methode=lot.einstand_methode,
                 opened_at=lot.opened_at,
+                einstand_fx_rate=lot.einstand_fx_rate,
             )
             for pid, lot in self.lots.items()
             if lot.status == "offen" and lot.mode == mode
@@ -121,7 +136,12 @@ class _FakeRepository:
         return sorted(eintraege, key=lambda e: e.opened_at)
 
     def lege_position_an(
-        self, fill: FillInput, *, einstand_preis: Decimal, einstand_methode: str
+        self,
+        fill: FillInput,
+        *,
+        einstand_preis: Decimal,
+        einstand_methode: str,
+        einstand_fx_rate: Decimal | None = None,
     ) -> str:
         self._naechste_id += 1
         pid = f"lot-{self._naechste_id}"
@@ -133,15 +153,22 @@ class _FakeRepository:
             einstand_methode=einstand_methode,
             opened_at=opened_at,
             mode=fill.mode,
+            einstand_fx_rate=einstand_fx_rate,
         )
         return pid
 
     def aktualisiere_kauf(
-        self, position_id: str, *, neue_menge: Decimal, neuer_einstand_preis: Decimal
+        self,
+        position_id: str,
+        *,
+        neue_menge: Decimal,
+        neuer_einstand_preis: Decimal,
+        einstand_fx_rate: Decimal | None = None,
     ) -> None:
         lot = self.lots[position_id]
         lot.menge = neue_menge
         lot.einstand_preis = neuer_einstand_preis
+        lot.einstand_fx_rate = einstand_fx_rate
 
     def verbuche_verkauf_lot(
         self, position_id: str, *, neue_menge: Decimal, realisierter_gv_delta: Decimal
@@ -158,8 +185,11 @@ class _FakeRepository:
         self.verbuchte_client_order_ids.add(client_order_id)
         return True
 
-    def schreibe_transaktion(self, fill: FillInput, *, position_id: str | None) -> None:
+    def schreibe_transaktion(
+        self, fill: FillInput, *, position_id: str | None, fx_split: FxSplit | None = None
+    ) -> None:
         self.transaktionen.append((fill, position_id))
+        self.fx_splits.append(fx_split)
 
     def historie_je_titel(self, titel_id: str, *, mode: str) -> list[TransaktionsEintrag]:
         return [
@@ -740,3 +770,242 @@ def test_verbuche_fill_historie_eintrag_traegt_arrival_price_und_slippage() -> N
     assert historie[0].arrival_price == Decimal("100")
     assert historie[0].fill_preis == Decimal("101.5")
     assert historie[0].slippage == Decimal("1.5")
+
+
+# --- S-053: FX-Attribution (AC6, deckt A3) --------------------------------
+
+
+def test_verbuche_kauf_chf_fill_lot_bleibt_ohne_fx_kurs() -> None:
+    """@trace depot#AC6 — ein CHF-Fill (`fx_rate=None`) legt einen Lot OHNE
+    FX-Kurs an — keine Attribution nötig (BR-129)."""
+    repository = _FakeRepository()
+    ergebnis = verbuche_fill(
+        _kauf(menge=Decimal("10"), fill_preis=Decimal("100"), kosten=Decimal("10")),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    assert repository.lots[ergebnis.position_id].einstand_fx_rate is None
+
+
+def test_verbuche_kauf_fremdwaehrung_erstkauf_setzt_lot_fx_kurs() -> None:
+    """@trace depot#AC6 — ein Fremdwährungs-Erstkauf setzt den FX-Kurs des
+    Fills unverändert als Ø-Einstands-FX-Kurs des neuen Lots."""
+    repository = _FakeRepository()
+    ergebnis = verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("100"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("0.90"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    assert repository.lots[ergebnis.position_id].einstand_fx_rate == Decimal("0.90")
+
+
+def test_verbuche_kauf_fremdwaehrung_nachkauf_mittelt_lot_fx_kurs_gewichtet() -> None:
+    """@trace depot#AC6 — ein Nachkauf (gleitender Durchschnitt) mittelt
+    den Ø-Einstands-FX-Kurs mengen-gewichtet mit dem bisherigen Lot-Kurs."""
+    repository = _FakeRepository()
+    erster = verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("100"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("0.90"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("120"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("1.00"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    # (10*0.90 + 10*1.00) / 20 = 0.95
+    assert repository.lots[erster.position_id].einstand_fx_rate == Decimal("0.95")
+
+
+def test_verbuche_kauf_fremdwaehrung_nachkauf_rundet_einstand_fx_rate_an_schreibgrenze() -> None:
+    """@trace depot#AC6 — Reviewer-Befund (Iteration 2, Important): der
+    gemittelte Ø-Einstands-FX-Kurs wird VOR der Übergabe an
+    `repository.aktualisiere_kauf` auf 8 Nachkommastellen gerundet
+    (NUMERIC(20,8), P7/ADR-010) — analog zu `neuer_einstand`. Eine
+    Mittelung mit einem nicht glatt teilbaren Mengenverhältnis (1:2, /3)
+    ergibt ungerundet mehr als 8 Nachkommastellen (0.9666666666...)."""
+    repository = _FakeRepository()
+    erster = verbuche_fill(
+        _kauf(
+            menge=Decimal("1"),
+            fill_preis=Decimal("100"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("0.9"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    verbuche_fill(
+        _kauf(
+            menge=Decimal("2"),
+            fill_preis=Decimal("120"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("1.0"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    # (1*0.9 + 2*1.0) / 3 = 0.96666666666...  → gerundet 0.96666667
+    assert repository.lots[erster.position_id].einstand_fx_rate == Decimal("0.96666667")
+
+
+def test_verbuche_kauf_fifo_jeder_lot_traegt_eigenen_fx_kurs() -> None:
+    """@trace depot#AC6 — bei FIFO legt jeder Kauf einen eigenen Lot mit
+    seinem EIGENEN FX-Kurs an, keine Mittelung über Lots hinweg."""
+    repository = _FakeRepository()
+    erster = verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("100"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("0.90"),
+        ),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+    zweiter = verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("120"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("1.00"),
+        ),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+    assert repository.lots[erster.position_id].einstand_fx_rate == Decimal("0.90")
+    assert repository.lots[zweiter.position_id].einstand_fx_rate == Decimal("1.00")
+
+
+def test_verbuche_verkauf_chf_hat_keinen_fx_split() -> None:
+    """@trace depot#AC6 — ein CHF-Verkauf berechnet keinen FX-Split
+    (`fx_split_gesamt=None`) — keine Attribution nötig."""
+    repository = _FakeRepository()
+    verbuche_fill(
+        _kauf(menge=Decimal("10"), fill_preis=Decimal("100"), kosten=Decimal("10")),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    ergebnis = verbuche_fill(
+        _verkauf(menge=Decimal("5"), fill_preis=Decimal("120"), kosten=Decimal("5")),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    assert ergebnis.fx_split_gesamt is None
+    assert repository.fx_splits[-1] is None
+
+
+def test_verbuche_verkauf_fremdwaehrung_berechnet_fx_split_gesamt() -> None:
+    """@trace depot#AC6 — ein Fremdwährungs-Verkauf (einzelner Lot,
+    gleitender Durchschnitt) berechnet den realisierten FX-Split und
+    übergibt ihn unverändert an `schreibe_transaktion`."""
+    repository = _FakeRepository()
+    verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("100"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("0.90"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+    ergebnis = verbuche_fill(
+        _verkauf(
+            menge=Decimal("5"),
+            fill_preis=Decimal("120"),
+            kosten=Decimal("5"),
+            waehrung="USD",
+            fx_rate=Decimal("0.95"),
+        ),
+        repository=repository,
+        einstand_methode_default="gleitender_durchschnitt",
+    )
+
+    assert ergebnis.fx_split_gesamt is not None
+    assert ergebnis.lot_buchungen[0].fx_split == ergebnis.fx_split_gesamt
+    assert repository.fx_splits[-1] == ergebnis.fx_split_gesamt
+
+    # Ø-Einstand nach Kauf-Netting: (10*100 + 10) / 10 = 101.
+    einstand_preis_genettet = (Decimal("10") * Decimal("100") + Decimal("10")) / Decimal("10")
+    erloes_netto = Decimal("5") * Decimal("120") - Decimal("5")
+    erwarteter_kapital_gv = (erloes_netto - einstand_preis_genettet * Decimal("5")) * Decimal(
+        "0.90"
+    )
+    erwartete_waehrungs_gv = erloes_netto * (Decimal("0.95") - Decimal("0.90"))
+    assert ergebnis.fx_split_gesamt.kapital_gv_chf == erwarteter_kapital_gv
+    assert ergebnis.fx_split_gesamt.waehrungs_gv_chf == erwartete_waehrungs_gv
+
+
+def test_verbuche_verkauf_fifo_multi_lot_aggregiert_fx_split_ueber_lots() -> None:
+    """@trace depot#AC6 — ein FIFO-Verkauf über mehrere, unterschiedlich
+    FX-datierte Lots (A2) aggregiert den FX-Split je Lot zu
+    `fx_split_gesamt` (Summe, nicht nur der erste/letzte Lot-Anteil)."""
+    repository = _FakeRepository()
+    verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("100"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("0.90"),
+        ),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+    verbuche_fill(
+        _kauf(
+            menge=Decimal("10"),
+            fill_preis=Decimal("120"),
+            kosten=Decimal("10"),
+            waehrung="USD",
+            fx_rate=Decimal("1.00"),
+        ),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+    ergebnis = verbuche_fill(
+        _verkauf(
+            menge=Decimal("15"),
+            fill_preis=Decimal("150"),
+            kosten=Decimal("15"),
+            waehrung="USD",
+            fx_rate=Decimal("1.10"),
+        ),
+        repository=repository,
+        einstand_methode_default="fifo",
+    )
+
+    assert len(ergebnis.lot_buchungen) == 2
+    assert all(b.fx_split is not None for b in ergebnis.lot_buchungen)
+    erwartete_summe_kapital = sum(
+        (b.fx_split.kapital_gv_chf for b in ergebnis.lot_buchungen), Decimal("0")
+    )
+    erwartete_summe_waehrung = sum(
+        (b.fx_split.waehrungs_gv_chf for b in ergebnis.lot_buchungen), Decimal("0")
+    )
+    assert ergebnis.fx_split_gesamt.kapital_gv_chf == erwartete_summe_kapital
+    assert ergebnis.fx_split_gesamt.waehrungs_gv_chf == erwartete_summe_waehrung

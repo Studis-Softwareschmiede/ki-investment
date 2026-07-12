@@ -1,6 +1,7 @@
-"""Tests für den Depot-Fill-Vertrag (Story S-015 + S-016 DBA-Zweit-Review).
+"""Tests für den Depot-Fill-Vertrag (Story S-015 + S-016 DBA-Zweit-Review
++ S-053).
 
-Covers (depot): AC1, AC10
+Covers (depot): AC1, AC10, AC6
 
 `app.contracts.depot.FillInput` bildet den Fill-Input-Vertrag aus
 `docs/specs/depot.md` ab. Diese Tests decken AC10 (universelle
@@ -12,6 +13,10 @@ DBA-Zweit-Review von S-016 (Critical + Suggestion, ADR-011) ergänzt
 `client_order_id` als neues universelles Pflichtfeld (Dedup-Schlüssel) in
 der bestehenden AC10-Pflichtfeld-Parametrisierung sowie einen Ablehnungstest
 für `menge <= 0` (Erst-Review-Suggestion, `gt=0`).
+
+S-053 (AC6, FX-Attribution) ergänzt `fx_rate`: Pflicht bei
+`waehrung != "CHF"` (sonst "unvollstaendig", AC10/E1), optional/`None` bei
+CHF; ein gesetzter `fx_rate` muss positiv sein (`gt=0`).
 """
 
 from __future__ import annotations
@@ -162,3 +167,39 @@ def test_fill_input_is_immutable() -> None:
     fill = FillInput(**VALID_VERKAUF_KWARGS)
     with pytest.raises(ValidationError):
         fill.menge = Decimal("999")
+
+
+# --- AC6: FX-Attribution (fx_rate-Pflicht bei Fremdwährung, S-053) -------
+
+
+def test_accepts_chf_fill_without_fx_rate() -> None:
+    """@trace depot#AC6 — bei `waehrung == "CHF"` bleibt `fx_rate`
+    unangegeben (`None`) zulässig — keine Attribution nötig (BR-129)."""
+    fill = FillInput(**VALID_VERKAUF_KWARGS)
+    assert fill.waehrung == "CHF"
+    assert fill.fx_rate is None
+
+
+def test_accepts_fremdwaehrung_fill_mit_fx_rate() -> None:
+    """@trace depot#AC6 — ein Fremdwährungs-Fill mit gesetztem `fx_rate`
+    wird gebaut."""
+    fill = FillInput(**dict(VALID_VERKAUF_KWARGS, waehrung="USD", fx_rate=Decimal("0.90")))
+    assert fill.waehrung == "USD"
+    assert fill.fx_rate == Decimal("0.90")
+
+
+def test_rejects_fremdwaehrung_fill_ohne_fx_rate() -> None:
+    """@trace depot#AC6 — fehlt `fx_rate` bei `waehrung != "CHF"`,
+    verweigert pydantic die Instanziierung (AC10/E1-Ablehnungskategorie
+    "unvollstaendig", da ohne FX-Kurs keine Attribution möglich ist,
+    → BR-129)."""
+    with pytest.raises(ValidationError):
+        FillInput(**dict(VALID_VERKAUF_KWARGS, waehrung="USD"))
+
+
+@pytest.mark.parametrize("ungueltiger_fx_rate", [Decimal("0"), Decimal("-1")])
+def test_rejects_fx_rate_kleiner_gleich_null(ungueltiger_fx_rate: Decimal) -> None:
+    """@trace depot#AC6 — ein `fx_rate` <= 0 ist strukturell ungültig
+    (`gt=0`, analog zur Menge)."""
+    with pytest.raises(ValidationError):
+        FillInput(**dict(VALID_VERKAUF_KWARGS, waehrung="USD", fx_rate=ungueltiger_fx_rate))

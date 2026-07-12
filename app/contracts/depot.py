@@ -41,7 +41,15 @@ Nicht Teil dieser Story (andere Storys/Nicht-Ziele):
 - Keine Exit-Regel-Interpretation/-Persistenz (Stop-Trigger-Kategorien,
   ATR-Multiplikator etc. → `strategie-exit-regeln`, S-037/S-038); S-016
   legt beim ersten Kauf eines Titels nur die `position`-Zeile selbst an.
-"""
+
+**S-053 (AC6, FX-Attribution)** ergänzt `FillInput.fx_rate` — den Kurs zur
+CHF-Basiswährung (C-002) zum Zeitpunkt des Fills, Pflicht bei
+`waehrung != "CHF"` (geprüft im `model_validator`
+`_pruefe_fx_rate_bei_fremdwaehrung`, gleiche Ablehnungs-Kategorie
+"unvollstaendig" wie die übrigen Pflichtfelder, AC10/E1). Ohne ihn kann
+`app.domain.portfolio.fx_attribution` den Gewinn/Verlust nicht in Kapital-
+und Währungskomponente zerlegen (→ BR-129). Bei `waehrung == "CHF"` bleibt
+das Feld `None` (keine Attribution nötig)."""
 
 from __future__ import annotations
 
@@ -120,6 +128,13 @@ class FillInput(BaseModel):
     zeitstempel: datetime
     mode: Modus
 
+    # FX-Attribution (AC6, S-053): Kurs zur CHF-Basiswährung (C-002) zum
+    # Zeitpunkt des Fills (`preis_chf = <lokaler Preis> * fx_rate`). Nur bei
+    # `waehrung != "CHF"` Pflicht (siehe `_pruefe_fx_rate_bei_fremdwaehrung`
+    # unten) — bei CHF bleibt das Feld `None` (keine Attribution nötig,
+    # → BR-129).
+    fx_rate: Decimal | None = Field(default=None, gt=0)
+
     # Nur bei Kauf Pflicht (AC1) — bei Verkauf `None` zulässig (BR-010: beim
     # ursprünglichen Kauf bereits fixiert, hier nicht erneut nötig).
     strategie: str | None = None
@@ -139,6 +154,18 @@ class FillInput(BaseModel):
             ]
             if fehlend:
                 raise ValueError("Bei Kauf fehlende Pflichtfelder (AC1): " + ", ".join(fehlend))
+        return self
+
+    @model_validator(mode="after")
+    def _pruefe_fx_rate_bei_fremdwaehrung(self) -> "FillInput":
+        """AC6/BR-129 (S-053): bei einer Fremdwährungs-Handelswährung
+        (`waehrung != "CHF"`, C-002 Basiswährung) ist `fx_rate` Pflicht —
+        ohne ihn kann `app.domain.portfolio.fx_attribution` keinen
+        Kapital-/Währungsgewinn in CHF berechnen. Fehlt er, verweigert
+        pydantic die Instanziierung (gleiche Ablehnungs-Kategorie
+        "unvollstaendig" wie die übrigen Pflichtfelder, AC10/E1)."""
+        if self.waehrung != "CHF" and self.fx_rate is None:
+            raise ValueError("Bei Fremdwährungs-Fill (waehrung != CHF) fehlt fx_rate (AC6/BR-129).")
         return self
 
 
