@@ -40,7 +40,7 @@ Die Score-Engine bewertet einen Titel über die 5 Analysekategorien (Fundamental
 - **AC1** — Der Kategorie-Score wird berechnet als `Σ(Methodenscore × Ranking) / Σ(Ranking)` über alle Methoden der Kategorie **mit vorhandenem Methodenscore**; das Ergebnis liegt im Bereich 0–10.
 - **AC2** — Der Methodenscore ist je Analyse ein Wert im Bereich 1–10 und wird bei jeder Analyse neu vergeben; das Ranking ist der klassenspezifische, feste Gewichtungswert der Methode (Bezug aus [[anlageklassen-config]]) und ändert sich nicht je Analyse.
 - **AC3** — Der Gesamtscore wird berechnet als `Σ(Kategorie-Score × Kategoriegewicht der Klasse)` über die 5 Kategorien (Kategoriegewichte aus [[anlageklassen-config]], Summe 100 %); das Ergebnis liegt im Bereich 0–10.
-- **AC4** — Referenz-Verifikation der Kategorie-Score-Formel: Für Fundamental mit DCF (Methodenscore 8, Ranking 9), KGV (7, 7) und KBV (5, 6) ergibt sich `(8×9 + 7×7 + 5×6) / (9+7+6) = 131/22 = 6.86` (auf 2 Dezimalstellen).
+- **AC4** — Referenz-Verifikation der Kategorie-Score-Formel: Für Fundamental mit DCF (Methodenscore 8, Ranking 9), KGV (7, 7) und KBV (5, 6) ergibt sich `(8×9 + 7×7 + 5×6) / (9+7+6) = 151/22 = 6.86` (auf 2 Dezimalstellen).
 - **AC5** — Aus dem Gesamtscore wird das Signal nach folgenden Schwellen abgeleitet: **≥ 8.0 → KAUF**, **6.0–7.9 → BEOBACHTEN**, **4.0–5.9 → HALTEN**, **2.0–3.9 → REDUZIEREN**, **< 2.0 → VERKAUF**. Die Grenzwerte sind inklusiv an der Untergrenze (z. B. Gesamtscore genau 8.0 → KAUF, genau 6.0 → BEOBACHTEN, genau 2.0 → REDUZIEREN).
 - **AC6** — Die Score-Schwellen sind je Anlageklasse konfigurierbar; die in AC5 genannten Werte gelten als globale **Default-Schwellen (provisorisch)** und werden je Anlageklasse noch kalibriert. Ist keine klassenspezifische Schwelle gesetzt, greifen die Default-Werte.
 - **AC7** — Risiko-Sanity-Cap: Ist der Kategorie-Score „Risiko & Quantitativ" **< 3**, wird das Gesamtsignal auf höchstens **HALTEN** begrenzt; ein rechnerisches KAUF oder BEOBACHTEN wird auf HALTEN gedeckelt, während REDUZIEREN und VERKAUF unverändert bleiben (deckt A1). Der Cap-Schwellwert 3 ist konfigurierbar.
@@ -57,7 +57,7 @@ Die Score-Engine bewertet einen Titel über die 5 Analysekategorien (Fundamental
 
 **Input (je Titel):**
 `{ titel, anlageklasse: 1–11, kategorien: [ { kategorie, methoden: [ { methoden_id, ranking: 1–10, methodenscore: 1–10 | fehlt } ] } ], kategoriegewichte, score_schwellen? }`
-— Rankings und Kategoriegewichte stammen aus [[anlageklassen-config]]; die Methodenscores werden je Analyse geliefert (geerdet gem. [[llm-grounding]]).
+— Rankings und Kategoriegewichte stammen aus [[anlageklassen-config]]; die Methodenscores werden je Analyse geliefert (geerdet gem. [[llm-grounding]]). Kategoriegewichte werden als Prozentwerte 0–100 übergeben (analog `category_weight.weight_pct` in [[anlageklassen-config]]); die AC3-Formel normalisiert entsprechend: `Σ(Kategorie-Score × Kategoriegewicht) / 100`.
 
 **Output:**
 `{ kategorie_scores: { fundamental, technisch, qualitativ, makro, risiko: 0–10 }, gesamtscore: 0–10, signal: KAUF | BEOBACHTEN | HALTEN | REDUZIEREN | VERKAUF, sanity_cap_angewendet: bool, spinnennetz: { achsen: 5×(0–10), historischer_durchschnitt?: 5×(0–10) }, uebersprungen?: { grund: "no-evidence", kategorie } }`
