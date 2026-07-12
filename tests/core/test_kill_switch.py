@@ -1,6 +1,6 @@
-"""Tests für den Kill-Switch «flatten & halt» (Story S-007).
+"""Tests für den Kill-Switch «flatten & halt» (Story S-007, S-026).
 
-Covers (betriebssicherung): AC1, AC3, AC11
+Covers (betriebssicherung): AC1, AC3, AC7, AC11
 
 `app.core.kill_switch` implementiert die manuell auslösbare
 Zustandsmaschine (`normal` → `angehalten`, AC1/AC3) und das unveränderliche
@@ -9,8 +9,10 @@ erlaubt()` wird `False`, AC1), das simulierte Flatten (Paper-Modus, AC1),
 den Zustand `angehalten` nach Auslösung (AC3), die AUSSCHLIESSLICH manuelle
 Rückkehr über `freigeben()` (AC3 — nie automatisch), die Idempotenz einer
 Mehrfach-Auslösung im `angehalten`-Zustand (Edge-Case: kein doppeltes
-Flatten, kein Zustandssprung) sowie das vollständige, unveränderliche
-Protokoll jeder Auslösung inkl. Auslöser/Zeitpunkt/Grund (AC11).
+Flatten, kein Zustandssprung), das vollständige, unveränderliche Protokoll
+jeder Auslösung inkl. Auslöser/Zeitpunkt/Grund (AC11) sowie (S-026) den
+`Alert(typ="kill")`, den JEDE Auslösung zusätzlich über den
+Benachrichtigungskanal meldet (AC7).
 """
 
 from __future__ import annotations
@@ -21,17 +23,20 @@ from decimal import Decimal
 import pytest
 
 from app.contracts.betriebssicherung import KillSwitchAusloeser
-from app.core import kill_switch
+from app.core import alerts, kill_switch
 
 _ZEITSTEMPEL = datetime(2026, 7, 12, 9, 30, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
 def _kill_switch_isolieren():
-    """Isoliert Zustand und Ereignis-Historie zwischen Testfällen."""
+    """Isoliert Zustand, Ereignis-Historie und Alert-Historie zwischen
+    Testfällen."""
     kill_switch.reset_fuer_tests()
+    alerts.reset_fuer_tests()
     yield
     kill_switch.reset_fuer_tests()
+    alerts.reset_fuer_tests()
 
 
 def _ausloeser(**overrides: object) -> KillSwitchAusloeser:
@@ -208,3 +213,44 @@ def test_erneute_ausloesung_nach_freigabe_haelt_wieder_sofort_an() -> None:
     assert status.grund == "Zweiter Vorfall"
     # Zwei getrennte Vorfälle → zwei separate Protokolleinträge (AC11).
     assert len(kill_switch.alle_ereignisse()) == 2
+
+
+def test_ausloesen_meldet_kill_alert_ueber_den_benachrichtigungskanal() -> None:
+    """@trace betriebssicherung#AC7 — jede Kill-Switch-Auslösung wird
+    zusätzlich zum AC11-Protokoll als `Alert(typ="kill")` über
+    `app.core.alerts.melde()` gemeldet (Andockstelle des künftigen
+    Benachrichtigungskanals)."""
+    kill_switch.ausloesen(_ausloeser(grund="Owner hat Notaus gedrückt"))
+
+    (alert,) = alerts.alle_alerts()
+    assert alert.typ == "kill"
+    assert alert.schwere == "critical"
+    assert "Owner hat Notaus gedrückt" in alert.nachricht
+    assert alert.zeitstempel == _ZEITSTEMPEL
+
+
+def test_idempotente_mehrfachausloesung_meldet_ebenfalls_einen_kill_alert() -> None:
+    """@trace betriebssicherung#AC7 — AC11 fordert, dass JEDE Auslösung
+    protokolliert wird, nicht nur die erste; dieselbe Regel gilt für die
+    Benachrichtigung (AC7): auch eine idempotente Mehrfach-Auslösung
+    erzeugt einen eigenen Kill-Alert."""
+    kill_switch.ausloesen(_ausloeser(grund="Erste Auslösung"))
+    zweiter_zeitstempel = datetime(2026, 7, 12, 10, 0, tzinfo=UTC)
+    kill_switch.ausloesen(_ausloeser(grund="Zweite Auslösung", zeitstempel=zweiter_zeitstempel))
+
+    alle = alerts.alle_alerts()
+    assert len(alle) == 2
+    assert all(alert.typ == "kill" for alert in alle)
+    assert "Erste Auslösung" in alle[0].nachricht
+    assert "Zweite Auslösung" in alle[1].nachricht
+
+
+def test_freigeben_meldet_keinen_zusaetzlichen_alert() -> None:
+    """@trace betriebssicherung#AC7 — analog zu AC11 (`freigeben()` erzeugt
+    keinen `KillSwitchEreignis`-Eintrag) meldet eine Freigabe ebenfalls
+    keinen `Alert` — die Spec kennt für die Freigabe keinen eigenen
+    Alert-Typ."""
+    kill_switch.ausloesen(_ausloeser())
+    kill_switch.freigeben()
+
+    assert len(alerts.alle_alerts()) == 1

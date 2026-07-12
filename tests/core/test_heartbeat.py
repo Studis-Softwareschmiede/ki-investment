@@ -82,7 +82,10 @@ def test_pruefe_ausfaelle_erkennt_keinen_ausfall_innerhalb_des_intervalls() -> N
 
 def test_pruefe_ausfaelle_erkennt_ausfall_strikt_ueber_dem_intervall() -> None:
     """@trace betriebssicherung#AC4 — überschreitet die Lücke das Intervall
-    STRIKT (`>`), wird ein Ausfall erkannt und ein Alert erzeugt."""
+    STRIKT (`>`), wird ein Ausfall erkannt und ein Alert erzeugt. Da
+    `ingest-fred` (Default `kritisch=True`) zusätzlich den Kill-Switch
+    auslöst, meldet dieser (S-026, AC7) einen ZWEITEN Alert (`typ="kill"`)
+    — insgesamt zwei Alerts für dieses eine Ausfall-Ereignis."""
     heartbeat.registriere_modul("ingest-fred", timedelta(minutes=5), jetzt=_T0)
 
     ergebnis = heartbeat.pruefe_ausfaelle(jetzt=_T0 + timedelta(minutes=5, seconds=1))
@@ -90,7 +93,9 @@ def test_pruefe_ausfaelle_erkennt_ausfall_strikt_ueber_dem_intervall() -> None:
     assert len(ergebnis) == 1
     assert ergebnis[0].typ == "heartbeat"
     assert "ingest-fred" in ergebnis[0].nachricht
-    assert len(alerts.alle_alerts()) == 1
+    alle = alerts.alle_alerts()
+    assert len(alle) == 2
+    assert {alert.typ for alert in alle} == {"heartbeat", "kill"}
 
 
 def test_pruefe_ausfaelle_kritisches_modul_loest_kill_switch_aus() -> None:
