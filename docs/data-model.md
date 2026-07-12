@@ -41,7 +41,7 @@ erDiagram
 
     trading_platform ||--o{ platform_asset_class : "bepreist"
 
-    instrument ||--o{ market_data_silver : "hat Signale"
+    instrument ||--o{ market_data_silver : "hat Signale (Ziel-Relation nach Folge-Story — instrument_id noch nicht umgesetzt, S-024-Präzisierung §2)"
     instrument ||--|| instrument_signal_bundle : "aktuelles Bündel"
     instrument ||--o{ analysis_result : "wird analysiert"
     instrument ||--o{ position : "gehalten als"
@@ -259,18 +259,41 @@ erDiagram
 
 **Partitionierung:** deklarativ nach `RANGE (ingested_at)`, **monatliche** Partitionen (Zeitreihen, hohes Volumen). Partitionsschlüssel muss Teil von PK/Unique sein → daher `(id, ingested_at)`.
 
-### `market_data_silver` — normalisierte Signale, einheitliches Bündel (C-009, Datenquellen-Abfrage)
+### `market_data_silver` — normalisierte, Corporate-Actions-adjustierte Werte (C-009, C-019; `docs/specs/datenqualitaet.md` AC3/AC6)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | Teil PK |
-| bronze_id | UUID | Referenz auf Bronze-Ursprung (Replay-Kette) |
-| instrument_id | UUID | FK → instrument.id |
-| signal_type | TEXT | NOT NULL (z.B. sentiment, insider, flow, macro) |
-| raw_value | NUMERIC(20,8) | |
-| z_score | NUMERIC(8,4) | CHECK `-3 ≤ z_score ≤ 3` (robuster z-Score, gekappt ±3; → BR-131) |
-| decay_gewicht | NUMERIC(6,4) | Aktualitäts-/Sentiment-Decay-Faktor |
-| observed_at | TIMESTAMPTZ | NOT NULL (Partitionsschlüssel) |
-| — | — | **PK (id, observed_at)**, RANGE-partitioniert monatlich |
+| bronze_id | UUID | Teil zusammengesetzter FK → `market_data_bronze(id, ingested_at)` — Referenz auf Bronze-Ursprung (Replay-Kette, Vertragsfeld `abgeleitet_aus: bronze_version`) |
+| bronze_ingested_at | TIMESTAMPTZ | Teil derselben zusammengesetzten FK (Partitionsschlüssel-Pflicht bei FK auf partitionierte Tabelle) |
+| data_source_id | UUID | FK → `data_source.id`, NOT NULL — denormalisiert aus der Bronze-Zeile (Iteration 2, Reviewer-Befund): `source_event_id` ist laut BR-122 nur gemeinsam mit `data_source_id` eine eindeutige Ereignis-Identität; ohne diese Spalte kann ein Rebuild/Delete-Scoping für eine Quelle silent Silver-Zeilen einer anderen Quelle löschen |
+| source_event_id | TEXT | NOT NULL — Vertragsfeld `event_id`, aus der Bronze-Zeile übernommen (denormalisiert, vermeidet Partitions-übergreifenden Join für einfache Lookups) |
+| symbol | TEXT | aus der Bronze-Zeile übernommen; fachlich nötig, um die passende Corporate-Actions-Historie je Titel zuzuordnen (AC6) — Ersatz für `instrument_id`, siehe Präzisierung unten |
+| normalisierter_wert | NUMERIC(20,8) | NOT NULL — Vertragsfeld `normalisierter_wert` |
+| einheit | TEXT | NOT NULL — Vertragsfeld `einheit` (AC3, einheitliches Format) |
+| adjustierungs_info | JSONB | Vertragsfeld `adjustierungs_info` (AC6): JSON-Objekt mit angewandten Corporate-Actions (Typ, Wirksamkeitsdatum, Faktor je Aktion) + kumuliertem Faktor; `NULL`, wenn keine Adjustierung nötig war |
+| observed_at | TIMESTAMPTZ | NOT NULL (Partitionsschlüssel, aus der Bronze-Zeile übernommen) |
+| — | — | **PK (id, observed_at)**, RANGE-partitioniert monatlich. **UNIQUE (bronze_id, bronze_ingested_at, observed_at)** (`uq_market_data_silver_bronze_version`, Iteration 2): physisch möglich, weil `observed_at` für dieselbe Bronze-Version deterministisch identisch ist — schliesst zusammen mit einer App-seitigen Advisory-Lock (`app/db/silver.py`) die Nebenläufigkeits-Lücke bei `record_silver_observation()`. **Nicht** append-only (Unterschied zu Bronze/BR-121): bei einer rückwirkend gemeldeten Corporate Action wird die betroffene historische Reihe für Symbol/Quelle vollständig neu abgeleitet (bestehende Zeilen gelöscht, neu berechnete Zeilen eingefügt) — Bronze bleibt dabei unverändert (AC6-Edge-Case). |
+
+> **Vertrag-Präzisierung (S-024, AC3/AC6):** Das ursprünglich hier notierte Schema
+> (`instrument_id`, `signal_type`, `raw_value`, `z_score`, `decay_gewicht`) war auf die
+> Sentiment-/Signal-Bündel-Nutzung der Datenquellen-Abfrage (`[[dateneingang]]`/S-021)
+> zugeschnitten und deckte den in `docs/specs/datenqualitaet.md` definierten
+> Silver-Datensatz-Vertrag (`{ event_id, normalisierter_wert, einheit, adjustierungs_info,
+> abgeleitet_aus: bronze_version }`, AC3/AC6 — normalisierte, Corporate-Actions-
+> adjustierte Werte) strukturell nicht ab (u.a. fehlten `einheit`/`adjustierungs_info`
+> vollständig). Diese Story präzisiert die Tabelle auf den tatsächlichen Vertrag; die
+> Signal-Bündel-Spalten (`signal_type`/`raw_value`/`z_score`/`decay_gewicht`) sind NICHT
+> Teil von AC3/AC6 und werden hier nicht gebaut — eine Folge-Story für die
+> Datenquellen-Abfrage-Signalaggregation kann sie bei Bedarf ergänzen (eigene Migration,
+> gleiche Tabelle oder eigene Tabelle — DBA-Entscheidung zu diesem Zeitpunkt).
+>
+> **`instrument_id` bewusst (noch) nicht umgesetzt:** die `instrument`-Tabelle existiert
+> in dieser Codebasis noch nicht (keine bisherige Story hat sie angelegt — `market_data_
+> bronze` hat aus demselben Grund bereits `symbol`/`asset_class_tag` statt `instrument_id`
+> verwendet, S-022). Silver folgt demselben, bereits etablierten Muster: `symbol` statt
+> `instrument_id`. Eine physische FK auf eine nicht existierende Tabelle ist nicht baubar;
+> das Nachrüsten von `instrument_id` (inkl. FK, sobald `instrument` existiert) ist eine
+> Folge-Story (SPEC-LÜCKE, siehe Coder-Handoff S-024).
 
 ### `instrument_signal_bundle` — Gold: angereichertes Signal-Bündel je Titel (C-009, Datenquellen-Abfrage)
 | Feld | Typ | Constraint |
@@ -541,7 +564,7 @@ erDiagram
 | instrument | (asset_class_id), (symbol) | Klassenfilter + Symbol-Lookup |
 | market_data_bronze | (data_source_id, ingested_at), (asset_class_tag, observed_at) | Replay + PIT je Klasse (je Partition) |
 | market_data_bronze | (data_source_id, source_event_id) — **nicht** UNIQUE | Ereignis-Lookup für App-/DB-Layer-Idempotenz (→ BR-122-Präzisierung §2) |
-| market_data_silver | (instrument_id, observed_at), (signal_type) | Signal-Bündel je Titel |
+| market_data_silver | (symbol, observed_at), (source_event_id), (bronze_id, bronze_ingested_at), (data_source_id, symbol) | Corporate-Actions-Adjustierung je Titel/Zeit, Event-Lookup, Bronze-Rückverfolgung, Quellen-korrektes Rebuild-/Delete-Scoping (Iteration 2) |
 | analysis_result | (instrument_id, created_at), (analyse_typ), (mode) | Analyse-Historie, Pfad-/Mode-Filter |
 | analysis_category_score | (analysis_result_id) | Scores je Analyse |
 | analysis_fact | (analysis_result_id), (source_id) | Fakten je Analyse, Quellen-Join |
@@ -613,7 +636,7 @@ erDiagram
 | BR-128 | instrument.gics_sector | Für Positionen handelbarer Klassen Pflicht (Depotstrategie-Sektorprüfung) | App |
 | BR-129 | transaction | Bei currency ≠ CHF: kapital_gv_chf und waehrungs_gv_chf getrennt ausgewiesen (FX-Attribution) | App |
 | BR-130 | mode (alle transaktionalen Entitäten) | echt- und simuliert-Daten in Aggregaten/Snapshots nie vermischt | App + Filter |
-| BR-131 | market_data_silver.z_score | Robuster z-Score gekappt auf ±3 | DB-CHECK + App |
+| BR-131 | (verschoben — Folge-Story) | Robuster z-Score gekappt auf ±3. `market_data_silver.z_score` war Teil des ursprünglichen (Signal-Bündel-)Zuschnitts der Tabelle; die S-024-Präzisierung (§2) hat diese Spalte entfernt, da sie nicht Teil des AC3/AC6-Silver-Datensatz-Vertrags ist — die Regel gilt für eine künftige Datenquellen-Abfrage-Signalaggregations-Story (z-Score-Feld dort neu einzuführen) | App (Folge-Story) |
 
 ---
 

@@ -76,8 +76,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.bronze import _als_utc_naiv
 from app.db.models import MarketDataBronze
+from app.db.utils import als_utc_naiv
 
 logger = logging.getLogger(__name__)
 
@@ -211,5 +211,5 @@ def _hat_abweichende_beobachtung(
         .all()
     )
 
-    ziel = _als_utc_naiv(beobachtungs_zeitpunkt)
-    return any(_als_utc_naiv(vorhanden) != ziel for vorhanden in bestehende_beobachtungszeitpunkte)
+    ziel = als_utc_naiv(beobachtungs_zeitpunkt)
+    return any(als_utc_naiv(vorhanden) != ziel for vorhanden in bestehende_beobachtungszeitpunkte)
