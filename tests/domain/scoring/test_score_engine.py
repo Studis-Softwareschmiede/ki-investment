@@ -1,14 +1,16 @@
-"""Tests für die Score-Engine — Berechnungskern (Storys S-009/S-010).
+"""Tests für die Score-Engine — Berechnungskern (Storys S-009/S-010/S-011).
 
-Covers (analyse-framework): AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC9, AC11
+Covers (analyse-framework): AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, AC11
 
 `app.domain.scoring.score_engine` deckt den Berechnungskern dieser Storys:
 Kategorie-Score (AC1/AC2, inkl. Ausschluss fehlender/ungültiger
 Methodenscores AC9), die AC4-Referenz-Verifikation, den Gesamtscore (AC3),
 die Signal-Ableitung nach (je Anlageklasse konfigurierbaren) Score-
-Schwellen (AC5/AC6), den Risiko-Sanity-Cap (AC7) und Determinismus (AC11).
-No-Evidence-No-Trade-Skip (AC8) und Spinnennetz (AC10) sind Nicht-Ziel
-dieser Story (S-011) und werden hier nicht getestet.
+Schwellen (AC5/AC6), den Risiko-Sanity-Cap (AC7), Determinismus (AC11),
+die No-Evidence-No-Trade-Skip-Entscheidung (AC8, S-011) und den
+Spinnennetz-Datenoutput (AC10, S-011) — inklusive des vollen
+Analyse-Durchlaufs `fuehre_analyse_durch`, der beide Entscheidungen mit
+den bereits vorhandenen S-009/S-010-Bausteinen verdrahtet.
 """
 
 from __future__ import annotations
@@ -21,11 +23,15 @@ from app.contracts.analyse_framework import (
     KategorieScores,
     MethodeEingabe,
     ScoreSchwellen,
+    SpinnennetzAchsen,
 )
 from app.domain.scoring.score_engine import (
+    baue_spinnennetz,
     berechne_gesamtscore,
     berechne_kategorie_score,
     berechne_kategorie_scores,
+    ermittle_fehlende_kategorie,
+    fuehre_analyse_durch,
     leite_signal_ab,
     wende_risiko_sanity_cap_an,
 )
@@ -106,7 +112,8 @@ def test_kategorie_ohne_jeden_vorhandenen_methodenscore_liefert_none() -> None:
     theoretisch alle Rankings 0" aus der Spec manifestiert sich hier
     dadurch, dass keine Methode einen gültigen Score beisteuert (derselbe
     Code-Pfad, dasselbe Ergebnis `None`). Der Skip-Entscheid für den ganzen
-    Titel (No-Evidence-No-Trade, AC8) ist Nicht-Ziel dieser Story."""
+    Titel (No-Evidence-No-Trade, AC8) baut auf genau diesem `None` auf,
+    siehe `ermittle_fehlende_kategorie` weiter unten."""
     methoden = (_methode("a", 9, None), _methode("b", 7, None))
     assert berechne_kategorie_score(methoden) is None
 
@@ -162,7 +169,7 @@ def test_ac3_gesamtscore_lehnt_fehlende_kategorie_ab() -> None:
     """@trace analyse-framework#AC3 — fehlt einer der 5 Kategorie-Scores
     (`None`, keine Evidenz), verweigert `berechne_gesamtscore` die
     Berechnung; der Aufrufer muss den Titel vorher überspringen
-    (No-Evidence-No-Trade, AC8 — Nicht-Ziel dieser Story, aber die
+    (No-Evidence-No-Trade, AC8, `ermittle_fehlende_kategorie`) — die
     Kernfunktion darf keinen falschen Gesamtscore vortäuschen)."""
     kategorie_scores = KategorieScores(
         fundamental=None, technisch=6, qualitativ=7, makro=5, risiko=9
@@ -336,3 +343,203 @@ def test_ac11_determinismus_sanity_cap() -> None:
     zweiter_lauf = wende_risiko_sanity_cap_an("KAUF", risiko_score=2.5)
 
     assert erster_lauf == zweiter_lauf
+
+
+# --- AC8: No-Evidence-No-Trade ---------------------------------------------
+
+
+def test_ac8_ermittle_fehlende_kategorie_findet_kategorie_ohne_score() -> None:
+    """@trace analyse-framework#AC8 — fehlt einer Kategorie jeder
+    Methodenscore (`None`), meldet `ermittle_fehlende_kategorie` genau
+    diese Kategorie."""
+    kategorie_scores = KategorieScores(
+        fundamental=8.0, technisch=6.0, qualitativ=None, makro=5.0, risiko=9.0
+    )
+    assert ermittle_fehlende_kategorie(kategorie_scores) == "qualitativ"
+
+
+def test_ac8_ermittle_fehlende_kategorie_liefert_none_bei_vollstaendigen_scores() -> None:
+    """@trace analyse-framework#AC8 — haben alle 5 Kategorien einen Score,
+    liefert `ermittle_fehlende_kategorie` `None` (kein Skip nötig)."""
+    kategorie_scores = KategorieScores(
+        fundamental=8.0, technisch=6.0, qualitativ=7.0, makro=5.0, risiko=9.0
+    )
+    assert ermittle_fehlende_kategorie(kategorie_scores) is None
+
+
+def test_ac8_fuehre_analyse_durch_uebersprings_titel_bei_fehlender_kategorie() -> None:
+    """@trace analyse-framework#AC8 — fehlt für eine ganze Analysekategorie
+    (hier: qualitativ) jeder Methodenscore, wird der Titel übersprungen:
+    `uebersprungen` ist gesetzt (`grund="no-evidence"`, betroffene
+    Kategorie), `gesamtscore`/`signal`/`spinnennetz` bleiben `None` — kein
+    Schätzen, kein 0-Ersatz (deckt E1)."""
+    kategorien = (
+        KategorieEingabe(kategorie="fundamental", methoden=(_methode("dcf", 9, 8),)),
+        KategorieEingabe(kategorie="technisch", methoden=(_methode("rsi", 5, 6),)),
+        KategorieEingabe(kategorie="makro", methoden=(_methode("zins", 9, 5),)),
+        KategorieEingabe(kategorie="risiko", methoden=(_methode("var", 8, 9),)),
+    )
+    gewichte = Kategoriegewichte(fundamental=35, technisch=15, qualitativ=20, makro=10, risiko=20)
+
+    ergebnis = fuehre_analyse_durch(kategorien, gewichte)
+
+    assert ergebnis.uebersprungen is not None
+    assert ergebnis.uebersprungen.grund == "no-evidence"
+    assert ergebnis.uebersprungen.kategorie == "qualitativ"
+    assert ergebnis.gesamtscore is None
+    assert ergebnis.signal is None
+    assert ergebnis.spinnennetz is None
+    assert ergebnis.sanity_cap_angewendet is False
+    # Die vorhandenen Kategorie-Scores bleiben im Ergebnis sichtbar.
+    assert ergebnis.kategorie_scores.fundamental == 8.0
+    assert ergebnis.kategorie_scores.qualitativ is None
+
+
+def test_ac8_fuehre_analyse_durch_uebersprings_bei_komplett_leerer_methodenliste() -> None:
+    """@trace analyse-framework#AC8 — eine ganz ohne Kategorien übergebene
+    Eingabe (keine einzige Kategorie mit Evidenz) wird ebenfalls
+    übersprungen (erste fehlende Kategorie in `KATEGORIE_NAMEN`-Reihenfolge:
+    fundamental)."""
+    gewichte = Kategoriegewichte(fundamental=35, technisch=15, qualitativ=20, makro=10, risiko=20)
+
+    ergebnis = fuehre_analyse_durch((), gewichte)
+
+    assert ergebnis.uebersprungen is not None
+    assert ergebnis.uebersprungen.kategorie == "fundamental"
+    assert ergebnis.gesamtscore is None
+    assert ergebnis.signal is None
+
+
+def test_ac11_determinismus_no_evidence_entscheidung() -> None:
+    """@trace analyse-framework#AC11 — identische Eingaben liefern
+    zweimal exakt dieselbe No-Evidence-Entscheidung (dieselbe fehlende
+    Kategorie)."""
+    kategorie_scores = KategorieScores(
+        fundamental=8.0, technisch=6.0, qualitativ=None, makro=5.0, risiko=9.0
+    )
+    assert ermittle_fehlende_kategorie(kategorie_scores) == ermittle_fehlende_kategorie(
+        kategorie_scores
+    )
+
+
+# --- AC10: Spinnennetz-Datenoutput ------------------------------------------
+
+
+def test_ac10_baue_spinnennetz_liefert_5_achsen_aus_kategorie_scores() -> None:
+    """@trace analyse-framework#AC10 — für eine vollständige Analyse werden
+    die 5 Kategorie-Scores unverändert als Achsenwerte (0–10) übernommen,
+    eine Achse je Kategorie."""
+    kategorie_scores = KategorieScores(
+        fundamental=8.0, technisch=6.0, qualitativ=7.0, makro=5.0, risiko=9.0
+    )
+
+    spinnennetz = baue_spinnennetz(kategorie_scores)
+
+    assert spinnennetz.achsen.fundamental == 8.0
+    assert spinnennetz.achsen.technisch == 6.0
+    assert spinnennetz.achsen.qualitativ == 7.0
+    assert spinnennetz.achsen.makro == 5.0
+    assert spinnennetz.achsen.risiko == 9.0
+    assert spinnennetz.historischer_durchschnitt is None
+
+
+def test_ac10_baue_spinnennetz_mit_historischem_durchschnitt_als_zweite_datenreihe() -> None:
+    """@trace analyse-framework#AC10 — wird ein historischer Durchschnitt
+    übergeben, erscheint er unverändert als zweite Datenreihe neben den
+    aktuellen Achsenwerten."""
+    kategorie_scores = KategorieScores(
+        fundamental=8.0, technisch=6.0, qualitativ=7.0, makro=5.0, risiko=9.0
+    )
+    historisch = SpinnennetzAchsen(
+        fundamental=7.0, technisch=6.5, qualitativ=6.0, makro=4.5, risiko=8.0
+    )
+
+    spinnennetz = baue_spinnennetz(kategorie_scores, historisch)
+
+    assert spinnennetz.historischer_durchschnitt is not None
+    assert spinnennetz.historischer_durchschnitt.fundamental == 7.0
+    assert spinnennetz.historischer_durchschnitt.risiko == 8.0
+    # Die aktuelle Datenreihe bleibt davon unberührt.
+    assert spinnennetz.achsen.fundamental == 8.0
+
+
+def test_ac10_baue_spinnennetz_lehnt_unvollstaendige_kategorie_scores_ab() -> None:
+    """@trace analyse-framework#AC10 — "für jede vollständige Analyse":
+    fehlt eine Kategorie (`None`), verweigert `baue_spinnennetz` die
+    Berechnung, statt eine unvollständige Achsenreihe zu liefern."""
+    kategorie_scores = KategorieScores(
+        fundamental=8.0, technisch=6.0, qualitativ=None, makro=5.0, risiko=9.0
+    )
+
+    with pytest.raises(ValueError, match="qualitativ"):
+        baue_spinnennetz(kategorie_scores)
+
+
+def test_ac10_fuehre_analyse_durch_liefert_spinnennetz_bei_vollstaendiger_analyse() -> None:
+    """@trace analyse-framework#AC10 — für eine vollständige Analyse (alle
+    5 Kategorien haben Evidenz) liefert `fuehre_analyse_durch` neben
+    Gesamtscore und Signal auch die Spinnennetz-Achsen; `uebersprungen`
+    bleibt `None`."""
+    kategorien = (
+        KategorieEingabe(kategorie="fundamental", methoden=(_methode("dcf", 9, 8),)),
+        KategorieEingabe(kategorie="technisch", methoden=(_methode("rsi", 5, 6),)),
+        KategorieEingabe(kategorie="qualitativ", methoden=(_methode("mgmt", 8, 7),)),
+        KategorieEingabe(kategorie="makro", methoden=(_methode("zins", 9, 5),)),
+        KategorieEingabe(kategorie="risiko", methoden=(_methode("var", 8, 9),)),
+    )
+    gewichte = Kategoriegewichte(fundamental=35, technisch=15, qualitativ=20, makro=10, risiko=20)
+
+    ergebnis = fuehre_analyse_durch(kategorien, gewichte)
+
+    assert ergebnis.uebersprungen is None
+    assert ergebnis.gesamtscore is not None
+    assert ergebnis.signal is not None
+    assert ergebnis.spinnennetz is not None
+    assert ergebnis.spinnennetz.achsen.fundamental == 8.0
+    assert ergebnis.spinnennetz.achsen.risiko == 9.0
+    assert ergebnis.spinnennetz.historischer_durchschnitt is None
+
+
+def test_ac10_fuehre_analyse_durch_reicht_historischen_durchschnitt_durch() -> None:
+    """@trace analyse-framework#AC10 — ein an `fuehre_analyse_durch`
+    übergebener historischer Durchschnitt landet unverändert im
+    Spinnennetz-Output der vollständigen Analyse."""
+    kategorien = (
+        KategorieEingabe(kategorie="fundamental", methoden=(_methode("dcf", 9, 8),)),
+        KategorieEingabe(kategorie="technisch", methoden=(_methode("rsi", 5, 6),)),
+        KategorieEingabe(kategorie="qualitativ", methoden=(_methode("mgmt", 8, 7),)),
+        KategorieEingabe(kategorie="makro", methoden=(_methode("zins", 9, 5),)),
+        KategorieEingabe(kategorie="risiko", methoden=(_methode("var", 8, 9),)),
+    )
+    gewichte = Kategoriegewichte(fundamental=35, technisch=15, qualitativ=20, makro=10, risiko=20)
+    historisch = SpinnennetzAchsen(
+        fundamental=7.0, technisch=6.5, qualitativ=6.0, makro=4.5, risiko=8.0
+    )
+
+    ergebnis = fuehre_analyse_durch(kategorien, gewichte, historischer_durchschnitt=historisch)
+
+    assert ergebnis.spinnennetz is not None
+    assert ergebnis.spinnennetz.historischer_durchschnitt is not None
+    assert ergebnis.spinnennetz.historischer_durchschnitt.fundamental == 7.0
+
+
+def test_ac7_fuehre_analyse_durch_wendet_risiko_sanity_cap_an() -> None:
+    """@trace analyse-framework#AC7,AC10 — auch im vollen Analyse-Durchlauf
+    deckelt ein Risiko-Score < 3 ein rechnerisches KAUF/BEOBACHTEN auf
+    HALTEN; das Spinnennetz zeigt trotzdem den ungedeckelten
+    Risiko-Kategorie-Score (rohe Kategorie-Scores, keine Signal-Werte)."""
+    kategorien = (
+        KategorieEingabe(kategorie="fundamental", methoden=(_methode("dcf", 9, 10),)),
+        KategorieEingabe(kategorie="technisch", methoden=(_methode("rsi", 5, 10),)),
+        KategorieEingabe(kategorie="qualitativ", methoden=(_methode("mgmt", 8, 10),)),
+        KategorieEingabe(kategorie="makro", methoden=(_methode("zins", 9, 10),)),
+        KategorieEingabe(kategorie="risiko", methoden=(_methode("var", 8, 1),)),
+    )
+    gewichte = Kategoriegewichte(fundamental=35, technisch=15, qualitativ=20, makro=10, risiko=20)
+
+    ergebnis = fuehre_analyse_durch(kategorien, gewichte)
+
+    assert ergebnis.signal == "HALTEN"
+    assert ergebnis.sanity_cap_angewendet is True
+    assert ergebnis.spinnennetz is not None
+    assert ergebnis.spinnennetz.achsen.risiko == 1.0

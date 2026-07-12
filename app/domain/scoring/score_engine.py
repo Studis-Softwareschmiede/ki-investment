@@ -1,8 +1,8 @@
-"""Score-Engine — Berechnungskern des Analyse-Frameworks (C-007, S-009/S-010).
+"""Score-Engine — Berechnungskern des Analyse-Frameworks (C-007, S-009/S-010/S-011).
 
 Reiner Domain-Kern (architecture.md §4 P1/P3): keine I/O, kein LLM, kein
 FastAPI, kein SQLAlchemy. Deckt aus `docs/specs/analyse-framework.md` den
-Berechnungskern dieser Storys:
+Berechnungskern:
 
 - **AC1/AC2** — Kategorie-Score als Ranking-gewichtetes Mittel der
   vorhandenen Methodenscores: `Σ(Methodenscore × Ranking) / Σ(Ranking)`.
@@ -15,14 +15,18 @@ Berechnungskern dieser Storys:
 - **AC7** — Risiko-Sanity-Cap: Kategorie-Score "Risiko & Quantitativ" < 3
   (Schwellwert konfigurierbar) deckelt ein rechnerisches KAUF/BEOBACHTEN
   auf HALTEN.
+- **AC8** (deckt E1, S-011) — No-Evidence-No-Trade: fehlt einer ganzen
+  Kategorie jeder Methodenscore (`berechne_kategorie_scores` liefert dafür
+  `None`), wird der Titel übersprungen — kein Gesamtscore, kein Signal.
+- **AC10** (S-011) — Spinnennetz-Datenoutput: die 5 Kategorie-Scores einer
+  vollständigen Analyse als Achsenwerte (0–10), optional ergänzt um den
+  historischen Durchschnitt je Achse.
 - **AC11** — reine Funktionen ohne Seiteneffekte, ohne Zeit-/Zufalls-
   abhängigkeit: identische Eingaben liefern identische Ergebnisse.
 
-NICHT Teil dieser Story (Nicht-Ziele/Folge-Story S-011): die
-No-Evidence-No-Trade-Skip-Entscheidung (AC8) und der Spinnennetz-Output
-(AC10). `berechne_kategorie_score`/`berechne_kategorie_scores` liefern
-dafür bereits den nötigen Hook: `None`, wenn eine Kategorie keine
-verwertbare Evidenz hat (Edge-Cases der Spec).
+`fuehre_analyse_durch` verdrahtet die o.g. reinen Bausteine (AC1–AC7) mit
+der No-Evidence-Entscheidung (AC8) und dem Spinnennetz-Output (AC10) zum
+vollen Output-Vertrag der Spec (`AnalyseErgebnis`).
 """
 
 from __future__ import annotations
@@ -31,12 +35,17 @@ from collections.abc import Sequence
 
 from app.contracts.analyse_framework import (
     KATEGORIE_NAMEN,
+    AnalyseErgebnis,
     KategorieEingabe,
     Kategoriegewichte,
+    KategorieName,
     KategorieScores,
     MethodeEingabe,
     ScoreSchwellen,
     Signal,
+    Spinnennetz,
+    SpinnennetzAchsen,
+    Uebersprungen,
 )
 
 #: NFR: Kategorie-Score und Gesamtscore sind auf 2 Dezimalstellen
@@ -76,8 +85,8 @@ def berechne_kategorie_score(methoden: Sequence[MethodeEingabe]) -> float | None
     - Bleibt keine gültige Methode übrig — inklusive des Sonderfalls
       Σ(Ranking) = 0 über die gültige Teilmenge — gilt die Kategorie als
       ohne verwertbare Evidenz: Rückgabe `None` (Edge-Cases; die
-      Entscheidung, einen Titel deswegen zu überspringen, ist AC8 und
-      Nicht-Ziel dieser Story).
+      Entscheidung, einen Titel deswegen zu überspringen, trifft
+      `ermittle_fehlende_kategorie`/`fuehre_analyse_durch`, AC8).
     """
     zaehler = 0.0
     nenner = 0.0
@@ -118,8 +127,9 @@ def berechne_gesamtscore(
 
     Setzt voraus, dass ALLE 5 Kategorie-Scores vorhanden sind (kein
     `None`) — die No-Evidence-No-Trade-Skip-Entscheidung bei einer
-    fehlenden Kategorie (AC8) liegt vor diesem Aufruf, in einer Folge-Story
-    (S-011).
+    fehlenden Kategorie (AC8, `ermittle_fehlende_kategorie`) liegt vor
+    diesem Aufruf; `fuehre_analyse_durch` ruft diese Funktion nur auf,
+    wenn keine Kategorie fehlt.
 
     Raises:
         ValueError: wenn mindestens eine Kategorie keinen Score hat
@@ -185,8 +195,106 @@ def wende_risiko_sanity_cap_an(
     nach `berechne_gesamtscore`, das bereits voraussetzt, dass alle 5
     Kategorie-Scores (inkl. Risiko) vorhanden sind — eine fehlende
     Risiko-Kategorie hätte den Titel vorher über No-Evidence-No-Trade
-    (AC8, Nicht-Ziel dieser Story) aus dem Flow genommen.
+    (AC8, `ermittle_fehlende_kategorie`) aus dem Flow genommen.
     """
     if risiko_score < cap_schwelle and signal in _DURCH_SANITY_CAP_GEDECKELTE_SIGNALE:
         return "HALTEN", True
     return signal, False
+
+
+def ermittle_fehlende_kategorie(kategorie_scores: KategorieScores) -> KategorieName | None:
+    """AC8 (deckt E1): liefert den Namen der ersten Analysekategorie ohne
+    verwertbare Evidenz (`None`-Score), oder `None`, wenn alle 5
+    Kategorien einen Score haben.
+
+    Iteriert in der festen Reihenfolge `KATEGORIE_NAMEN` (deterministisch,
+    AC11): bei mehreren fehlenden Kategorien wird die erste in dieser
+    Reihenfolge gemeldet — die Spec unterscheidet keinen Vorrang zwischen
+    mehreren fehlenden Kategorien, es reicht laut AC8, dass **eine** ganze
+    Kategorie ohne Evidenz den Titel überspringt.
+    """
+    for kategorie in KATEGORIE_NAMEN:
+        if getattr(kategorie_scores, kategorie) is None:
+            return kategorie
+    return None
+
+
+def baue_spinnennetz(
+    kategorie_scores: KategorieScores,
+    historischer_durchschnitt: SpinnennetzAchsen | None = None,
+) -> Spinnennetz:
+    """AC10: baut die Spinnennetz-Datenbasis einer vollständigen Analyse —
+    die 5 Kategorie-Scores als Achsenwerte (0–10, eine Achse je Kategorie),
+    optional ergänzt um den historischen Durchschnitt je Achse als zweite
+    Datenreihe ("Historischer Durchschnitt nicht vorhanden (neuer Titel)
+    → Spinnennetz nur mit aktueller Datenreihe", Edge-Cases der Spec).
+
+    Setzt wie `berechne_gesamtscore` voraus, dass ALLE 5 Kategorie-Scores
+    vorhanden sind ("für jede vollständige Analyse", AC10) — bei einer
+    fehlenden Kategorie hätte `ermittle_fehlende_kategorie`/
+    `fuehre_analyse_durch` den Titel vorher übersprungen (AC8).
+
+    Raises:
+        ValueError: wenn mindestens eine Kategorie keinen Score hat
+            (`None`) — der Aufrufer hätte den Titel vorher überspringen
+            müssen (AC8).
+    """
+    fehlende_kategorie = ermittle_fehlende_kategorie(kategorie_scores)
+    if fehlende_kategorie is not None:
+        raise ValueError(
+            "Spinnennetz nicht berechenbar: Kategorie "
+            f"'{fehlende_kategorie}' hat keinen Score (fehlende Evidenz — "
+            "die No-Evidence-No-Trade-Entscheidung, AC8, muss vor diesem "
+            "Aufruf getroffen werden)."
+        )
+
+    achsen = SpinnennetzAchsen(
+        **{kategorie: getattr(kategorie_scores, kategorie) for kategorie in KATEGORIE_NAMEN}
+    )
+    return Spinnennetz(achsen=achsen, historischer_durchschnitt=historischer_durchschnitt)
+
+
+def fuehre_analyse_durch(
+    kategorien: Sequence[KategorieEingabe],
+    kategoriegewichte: Kategoriegewichte,
+    schwellen: ScoreSchwellen | None = None,
+    risiko_cap_schwelle: float = _RISIKO_CAP_SCHWELLE_DEFAULT,
+    historischer_durchschnitt: SpinnennetzAchsen | None = None,
+) -> AnalyseErgebnis:
+    """Voller Analyse-Durchlauf (Main Success Scenario der Spec, Schritte
+    1–6): verdrahtet die Kategorie-/Gesamtscore-Berechnung (AC1–AC3), die
+    Signal-Ableitung (AC5/AC6) und den Risiko-Sanity-Cap (AC7) mit der
+    No-Evidence-No-Trade-Entscheidung (AC8) und dem Spinnennetz-Output
+    (AC10) zum vollen Output-Vertrag der Spec.
+
+    - Fehlt einer ganzen Analysekategorie jeder Methodenscore (AC8, deckt
+      E1), wird der Titel übersprungen: das Ergebnis trägt `uebersprungen`
+      (`grund="no-evidence"`, betroffene Kategorie), `gesamtscore`/
+      `signal`/`spinnennetz` bleiben `None` — kein Schätzen, kein
+      0-Ersatz (Edge-Cases der Spec).
+    - Andernfalls (vollständige Analyse) werden Gesamtscore, Signal (nach
+      dem Risiko-Sanity-Cap) und die Spinnennetz-Achsen berechnet.
+    """
+    kategorie_scores = berechne_kategorie_scores(kategorien)
+
+    fehlende_kategorie = ermittle_fehlende_kategorie(kategorie_scores)
+    if fehlende_kategorie is not None:
+        return AnalyseErgebnis(
+            kategorie_scores=kategorie_scores,
+            uebersprungen=Uebersprungen(kategorie=fehlende_kategorie),
+        )
+
+    gesamtscore = berechne_gesamtscore(kategorie_scores, kategoriegewichte)
+    signal_vor_cap = leite_signal_ab(gesamtscore, schwellen)
+    signal, sanity_cap_angewendet = wende_risiko_sanity_cap_an(
+        signal_vor_cap, kategorie_scores.risiko, risiko_cap_schwelle
+    )
+    spinnennetz = baue_spinnennetz(kategorie_scores, historischer_durchschnitt)
+
+    return AnalyseErgebnis(
+        kategorie_scores=kategorie_scores,
+        gesamtscore=gesamtscore,
+        signal=signal,
+        sanity_cap_angewendet=sanity_cap_angewendet,
+        spinnennetz=spinnennetz,
+    )
