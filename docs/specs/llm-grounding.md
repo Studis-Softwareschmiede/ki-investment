@@ -60,7 +60,8 @@ Querschnitts-Sicherung, die verhindert, dass LLM-Halluzinationen (erfundene Fakt
 **Analyse-Input (an das LLM):** `{ titel, anlageklasse, fakten: [ { kennzahl_typ, wert, quellen_id, timestamp } ] }` — alle Zahlen strukturiert und geerdet.
 
 **Analyse-Output (JSON-Schema, Validierung als AC3):**
-`{ scores: { fundamental, technisch, qualitativ, makro, risiko: 0–10 | fehlt }, fakten: [ { kennzahl_typ, wert, quellen_id, timestamp } ], begruendung: text }`
+`{ scores: { fundamental, technisch, qualitativ, makro, risiko: je 0–10 | fehlt }, fakten: [ { kennzahl_typ, wert, quellen_id, timestamp } ], begruendung: text }`
+— `0–10 | fehlt` gilt für **alle fünf** Score-Kategorien (nicht nur `risiko`); der Platzhalter `fehlt` ist die geteilte No-Evidence-Regel mit AC6/[[analyse-framework]].
 
 **Cross-Check-Modul (deterministisch):**
 Input `{ output_fakten, originalquellen, toleranz_config: je Kennzahl-Typ }` → Output `{ status: geerdet | verworfen, abweichungen: [ { kennzahl_typ, wert_output, wert_quelle, abweichung, toleranz } ], protokoll_eintrag }`.

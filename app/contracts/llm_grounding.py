@@ -29,9 +29,10 @@ Mapping, welches Finanz-Plugin welche Kategorie erdet.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 #: Score je Analysekategorie: 0–10 oder der Platzhalter "fehlt" (Verträge,
 #: Spec `llm-grounding` — der Umgang mit "fehlt", No-Evidence-No-Trade, ist
@@ -46,12 +47,18 @@ class AnalyseFakt(BaseModel):
     `quellen_id` und `timestamp` sind Pflicht (AC1) — fehlt eines von
     beiden, verweigert pydantic die Instanziierung; ein Analyse-Output mit
     einem solchen Fakt wird dadurch strukturell abgelehnt.
+
+    `wert` ist `Decimal`, nicht `float` (architecture.md P7): über
+    `kennzahl_typ` laufen absehbar auch Geldwerte (Kurs, Marktkapitalisierung),
+    und der Cross-Check-Toleranzvergleich (AC4, Folge-Story) darf keine
+    Float-Rundungsdrift erben. Scores bleiben davon unberührt (`AnalyseScores`,
+    P7-Ausnahme für Statistik).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kennzahl_typ: str = Field(min_length=1)
-    wert: float
+    wert: Decimal
     quellen_id: str = Field(min_length=1)
     timestamp: datetime
 
@@ -117,3 +124,14 @@ class GroundingErgebnis(BaseModel):
     grund: GroundingAblehnungsgrund | None = None
     detail: str | None = None
     output: AnalyseOutput | None = None
+
+    @model_validator(mode="after")
+    def _status_invariante(self) -> GroundingErgebnis:
+        """geerdet ⇔ output gesetzt und kein grund; abgelehnt ⇔ grund gesetzt
+        und kein output — unabhängig von der Aufrufer-Disziplin in
+        `pruefe_grounding` (Folge-Stories docken an `grund`/`output` an)."""
+        if self.status == "geerdet" and (self.output is None or self.grund is not None):
+            raise ValueError("status 'geerdet' verlangt output und verbietet grund")
+        if self.status == "abgelehnt" and (self.grund is None or self.output is not None):
+            raise ValueError("status 'abgelehnt' verlangt grund und verbietet output")
+        return self
