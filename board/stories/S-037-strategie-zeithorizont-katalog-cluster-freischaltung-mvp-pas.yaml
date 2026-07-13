@@ -1,7 +1,7 @@
 id: S-037
 parent: F-012
 title: 'Strategie- & Zeithorizont-Katalog + Cluster-Freischaltung (MVP: Passiv/Regelbasiert)'
-status: To Do
+status: In Progress
 priority: P1
 spec: docs/specs/strategie-exit-regeln.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: Cold-Start; 18 Strategien/4 Cluster + 9 Horizonte als Seed-/Konfi
   Cluster-Gate + unabhängige Dimensionen, überwiegend Datenmodell + Validierung.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-037-strategie-katalog
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:41Z'
-updated_at: '2026-07-12T10:09:44Z'
+updated_at: '2026-07-13T00:00:58Z'
 done_at: null

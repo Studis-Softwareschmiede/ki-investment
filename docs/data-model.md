@@ -53,6 +53,7 @@ erDiagram
     risk_profile ||--o{ portfolio_strategy : "prägt"
     portfolio_strategy ||--o{ portfolio_class_limit : "je Klasse"
 
+    strategy_cluster ||--o{ strategy : "Cluster-Freischaltung"
     strategy ||--o{ position : "Strategie je Titel"
     time_horizon ||--o{ position : "Horizont je Titel"
 
@@ -195,20 +196,32 @@ erDiagram
 | max_klasse_pct | NUMERIC(6,3) | NOT NULL (z.B. Krypto 5–15 %) |
 | — | — | PK (portfolio_strategy_id, asset_class_id) |
 
+### `strategy_cluster` — Strategie-Cluster + App-Stufen-Freischaltung (C-014, S-037-Präzisierung)
+| Feld | Typ | Constraint |
+|---|---|---|
+| code | TEXT | PK, CHECK ∈ {passiv_regelbasiert, aktiv_fundamental, aktiv_technisch_makro, professionell_algo} |
+| name | TEXT | NOT NULL, UNIQUE |
+| freigeschaltet | BOOLEAN | NOT NULL, Spalten-Default `false`; die Differenzierung je Cluster (nur `passiv_regelbasiert` → `true`) erfolgt ausschliesslich über die Seed-INSERT-Werte, nicht über den Spalten-Default — **Konfigurationsdatum** (provisorischer, konfigurierbarer Default, zur Laufzeit per UPDATE änderbar ohne Code-/Migrations-Änderung), MVP-Seed deckt Spec-AC2 (nur Passiv/Regelbasiert freigeschaltet) |
+
+> **S-037-Präzisierung:** `docs/specs/strategie-exit-regeln.md` AC2 verlangt eine "Cluster-Freischaltung je App-Stufe" als "Konfigurationsdatum (provisorischer, konfigurierbarer Default — NFR: zur Laufzeit konfigurierbar)". Die ursprüngliche Modellierung (nur `strategy.cluster` als CHECK-Wertemenge) bildete das nicht ab — analog zum bestehenden Boolean-Toggle-Muster (`asset_class.aktiv`, `data_source.aktiv`) wird die Freischaltung hier als eigene, laufzeit-updatebare Stammdatentabelle geführt statt als Codekonstante.
+
 ### `strategy` — Anlagestrategie (C-014, 18 Strategien / 4 Cluster)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
 | name | TEXT | NOT NULL, UNIQUE |
-| cluster | TEXT | CHECK ∈ {passiv_regelbasiert, aktiv_fundamental, aktiv_technisch_makro, professionell_algo} |
-| stufe | TEXT | CHECK ∈ {MVP, Stufe2, Stufe3, Stufe4} |
+| cluster | TEXT | NOT NULL, FK → strategy_cluster.code (ersetzt die vormalige eigenständige CHECK-Wertemenge — Werte bleiben identisch: passiv_regelbasiert, aktiv_fundamental, aktiv_technisch_makro, professionell_algo) |
+| stufe | TEXT | NOT NULL, CHECK ∈ {MVP, Stufe2, Stufe3, Stufe4} |
 
 ### `time_horizon` — Zeithorizont (C-014, 9 Stufen)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | SMALLINT | PK, CHECK 1–9 (Hochfrequenz … Generationell) |
 | name | TEXT | NOT NULL, UNIQUE |
-| break_even_hinweis | TEXT | Transaktionskosten-Relevanz |
+| transaktionskosten_relevanz | TEXT | NOT NULL — Transaktionskosten-Relevanz je Stufe (z.B. KRITISCH, HOCH, MITTEL, NIEDRIG, MINIMAL), 1:1 aus Konzept-Notiz "KI Investment – Zeithorizonte" |
+| break_even_anforderung | TEXT | NOT NULL — Break-Even-Anforderung je Stufe (z.B. "0,5–1 % pro Trade"), 1:1 aus derselben Notiz |
+
+> **S-037-Präzisierung:** AC3 verlangt explizit zwei separate Attribute ("Transaktionskosten-Relevanz und Break-Even-Anforderung") statt des vormaligen einzelnen `break_even_hinweis`-Feldes — dieses Feld war noch in keiner Migration umgesetzt (greenfield), daher reine Präzisierung ohne Migrationspfad für einen bereits existierenden Spaltennamen.
 
 ### `system_setting` — globale Systemeinstellungen (C-016)
 | Feld | Typ | Constraint |
@@ -580,6 +593,7 @@ erDiagram
 
 | Tabelle | Index | Zweck |
 |---|---|---|
+| strategy | — (kein dedizierter Index auf `cluster`) | FK-Spalte `cluster` bewusst ohne Index: `strategy_cluster` hat nur 4 Zeilen, `strategy` nur 18 (S-037) — ein Full-Table-Scan auf `cluster` ist bei dieser Kardinalität günstiger als ein zusätzlicher Index (sql/R05-Ausnahme, analog `risk_profile`/`portfolio_class_limit`-Stammdatentabellen) |
 | analysis_method | (asset_class_id, category_code) | Methodentabelle je Klasse/Kategorie laden |
 | data_source_asset_class | (asset_class_id) | Quellen je Klasse (Datenquellen-Abfrage-Matching) |
 | platform_asset_class | (asset_class_id) | Plattform-Kosten je Klasse |
@@ -661,6 +675,7 @@ erDiagram
 | BR-129 | transaction | Bei currency ≠ CHF: kapital_gv_chf und waehrungs_gv_chf getrennt ausgewiesen (FX-Attribution) | App |
 | BR-130 | mode (alle transaktionalen Entitäten) | echt- und simuliert-Daten in Aggregaten/Snapshots nie vermischt | App + Filter |
 | BR-131 | (verschoben — Folge-Story) | Robuster z-Score gekappt auf ±3. `market_data_silver.z_score` war Teil des ursprünglichen (Signal-Bündel-)Zuschnitts der Tabelle; die S-024-Präzisierung (§2) hat diese Spalte entfernt, da sie nicht Teil des AC3/AC6-Silver-Datensatz-Vertrags ist — die Regel gilt für eine künftige Datenquellen-Abfrage-Signalaggregations-Story (z-Score-Feld dort neu einzuführen) | App (Folge-Story) |
+| BR-132 | strategy.cluster / strategy_cluster.freigeschaltet | Eine Strategie-Zuordnung ausserhalb des freigeschalteten Clusters wird abgelehnt (MVP: nur passiv_regelbasiert); deterministisch, ohne LLM-Beteiligung (`docs/specs/strategie-exit-regeln.md` AC2/E2, S-037) | App |
 
 ---
 
@@ -668,7 +683,7 @@ erDiagram
 
 Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 
-1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
+1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy_cluster` → `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
 2. **Konfig mit FK auf Basis:** `category_weight`, `analysis_method`, `data_source`, `data_source_asset_class`, `trading_platform`, `platform_asset_class`, `portfolio_strategy`, `portfolio_class_limit`.
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
