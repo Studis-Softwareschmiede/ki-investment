@@ -1,7 +1,7 @@
 id: S-028
 parent: F-008
 title: Buy-Pfad (neue Titel) → Buy-Signal an Sizing
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/analyse-pipelines.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: 'Cold-Start: verdrahtet Score-Engine + Grounding zu einem determi
   von Framework-Signal- und Grounding-Schema-Story.'
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-028-buy-pfad-sizing
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/33
 blocked_reason: null
 created_at: '2026-07-12T10:09:20Z'
-updated_at: '2026-07-12T10:09:23Z'
-done_at: null
+updated_at: '2026-07-12T23:46:39Z'
+done_at: '2026-07-12T23:46:38Z'
