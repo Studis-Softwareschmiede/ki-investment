@@ -50,7 +50,14 @@ def _engine():
 
 def _seed_stammdaten(session: Session):
     session.add(AssetClass(id=1, name="Aktien", prio_stufe="MVP", aktiv=True, retail_driven=True))
-    session.add(TimeHorizon(id=8, name="Buy-and-Hold"))
+    session.add(
+        TimeHorizon(
+            id=8,
+            name="Buy-and-Hold",
+            transaktionskosten_relevanz="MINIMAL",
+            break_even_anforderung="Jahresrendite nach Kosten",
+        )
+    )
     strategy = Strategy(id=uuid.uuid4(), name="Index", cluster="passiv_regelbasiert", stufe="MVP")
     session.add(strategy)
     instrument = Instrument(
@@ -200,19 +207,25 @@ def test_time_horizon_rejects_id_outside_1_9() -> None:
     `position.time_horizon_id`; Katalog-Inhalt selbst ist S-037)."""
     engine = _engine()
     with Session(engine) as session:
-        session.add(TimeHorizon(id=10, name="Ungültig"))
+        session.add(
+            TimeHorizon(
+                id=10,
+                name="Ungültig",
+                transaktionskosten_relevanz="MINIMAL",
+                break_even_anforderung="n/a",
+            )
+        )
         with pytest.raises(IntegrityError):
             session.commit()
 
 
-def test_strategy_rejects_invalid_cluster() -> None:
-    """@trace depot#AC1 — nur die 4 definierten Cluster sind gültig
-    (Voraussetzung für `position.strategy_id`; Katalog-Inhalt ist S-037)."""
-    engine = _engine()
-    with Session(engine) as session:
-        session.add(Strategy(id=uuid.uuid4(), name="X", cluster="ungueltig"))
-        with pytest.raises(IntegrityError):
-            session.commit()
+# Kein `test_strategy_rejects_invalid_cluster` mehr hier: seit dem Merge von
+# S-037 (Migration `ddaf9dcc6216`) ist `strategy.cluster` ein FK auf
+# `strategy_cluster.code` (kein eigenständiges CHECK auf `strategy` mehr) —
+# unter SQLite ohne aktiviertes `PRAGMA foreign_keys=ON` greift diese
+# Ablehnung hier nicht. Die äquivalente, korrekt mit FK-Pragma aufgesetzte
+# Prüfung lebt bereits in `tests/db/test_strategie_katalog_migration.py`
+# (`test_model_rejects_strategy_with_unknown_cluster_fk`).
 
 
 def test_position_fx_attribution_spalten_sind_nullable_und_default_none() -> None:

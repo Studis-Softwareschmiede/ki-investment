@@ -80,8 +80,15 @@ def _seed_stammdaten(session: Session) -> tuple[uuid.UUID, uuid.UUID]:
     # `id`-Spalten (UUID) tragen `server_default=gen_random_uuid()` (nur
     # unter Postgres verfügbar) — unter SQLite (In-Memory) daher explizit.
     session.add(AssetClass(id=1, name="Aktien", prio_stufe="MVP", aktiv=True, retail_driven=True))
-    session.add(TimeHorizon(id=8, name="Buy-and-Hold"))
-    strategy = Strategy(id=uuid.uuid4(), name="Index")
+    session.add(
+        TimeHorizon(
+            id=8,
+            name="Buy-and-Hold",
+            transaktionskosten_relevanz="MINIMAL",
+            break_even_anforderung="Jahresrendite nach Kosten",
+        )
+    )
+    strategy = Strategy(id=uuid.uuid4(), name="Index", cluster="passiv_regelbasiert", stufe="MVP")
     session.add(strategy)
     instrument = Instrument(
         id=uuid.uuid4(), symbol="ACME", name="Acme Corp", asset_class_id=1, currency="CHF"

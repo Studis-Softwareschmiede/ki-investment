@@ -1,18 +1,20 @@
-"""create position grundgeruest (instrument, strategy, time_horizon, position, exit_rule)
+"""create position grundgeruest (instrument, position, exit_rule)
 
 Covers (depot): AC1, AC10
 
-Quelle: docs/data-model.md §1 `instrument`/`strategy`/`time_horizon`, §4
-`position`/`exit_rule`; Spec `docs/specs/depot.md` (Story S-015).
+Quelle: docs/data-model.md §1 `instrument`, §4 `position`/`exit_rule`; Spec
+`docs/specs/depot.md` (Story S-015).
 
 data-model.md §11 (Migrations-Reihenfolge) ordnet `strategy`/`time_horizon`
 der Stammdaten-Basis (Schritt 1) und `instrument` Schritt 3 zu, beide harte
-FK-Voraussetzungen für `position` (Schritt 6). Keine andere Story legt sie
-aktuell an (S-037 seedet `strategy`/`time_horizon` erst inhaltlich, AC2/AC3;
-kein Board-Item legt `instrument` an) — analog zur `analysis_category`-
-Voraussetzung aus S-004 (Migration `2da446925bbc`) werden sie hier als
-**leere** FK-Voraussetzungen mitgezogen, OHNE die jeweils eigenständigen ACs
-dieser anderen Storys umzusetzen (kein Seed, keine Katalog-/Cluster-Logik).
+FK-Voraussetzungen für `position` (Schritt 6). `strategy`/`time_horizon`
+kommen seit dem Merge von S-037 (Migration
+`ddaf9dcc6216_create_strategy_cluster_strategy_and_.py`, `down_revision`
+dieser Migration) bereits vollständig samt Katalog-Seed — diese Migration
+legt sie daher NICHT mehr selbst (leer) an; nur `instrument` bleibt hier als
+harte, noch von keiner anderen Story angelegte FK-Voraussetzung mitgezogen
+(analog zur `analysis_category`-Voraussetzung aus S-004, Migration
+`2da446925bbc`, kein Seed, kein Board-Item legt `instrument` an).
 
 `position`/`exit_rule` selbst sind das "Positions-Grundgerüst" dieser Story
 (AC1: mindestens Titel-Identität, Menge, Einstandspreis, Anlageklasse,
@@ -26,7 +28,7 @@ die die Attribut-Bündel-Fixierung umsetzt (S-040), nicht dieses
 Positions-Grundgerüsts.
 
 Revision ID: 36e7c473f4aa
-Revises: ea80c97626ee
+Revises: ddaf9dcc6216
 Create Date: 2026-07-12 15:30:00.000000
 
 """
@@ -39,43 +41,14 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 # revision identifiers, used by Alembic.
 revision: str = "36e7c473f4aa"
-down_revision: Union[str, Sequence[str], None] = "ea80c97626ee"
+down_revision: Union[str, Sequence[str], None] = "ddaf9dcc6216"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # --- Stammdaten-/FK-Voraussetzungen (leer, kein Seed — siehe Docstring) ---
-    op.create_table(
-        "strategy",
-        sa.Column(
-            "id",
-            PGUUID(as_uuid=True),
-            primary_key=True,
-            server_default=sa.text("gen_random_uuid()"),
-        ),
-        sa.Column("name", sa.String(), nullable=False, unique=True),
-        sa.Column("cluster", sa.String(), nullable=True),
-        sa.Column("stufe", sa.String(), nullable=True),
-        sa.CheckConstraint(
-            "cluster IN ('passiv_regelbasiert', 'aktiv_fundamental', "
-            "'aktiv_technisch_makro', 'professionell_algo')",
-            name="ck_strategy_cluster",
-        ),
-        sa.CheckConstraint(
-            "stufe IN ('MVP', 'Stufe2', 'Stufe3', 'Stufe4')", name="ck_strategy_stufe"
-        ),
-    )
-
-    op.create_table(
-        "time_horizon",
-        sa.Column("id", sa.SmallInteger(), primary_key=True, autoincrement=False),
-        sa.Column("name", sa.String(), nullable=False, unique=True),
-        sa.Column("break_even_hinweis", sa.String(), nullable=True),
-        sa.CheckConstraint("id BETWEEN 1 AND 9", name="ck_time_horizon_id_range"),
-    )
-
+    # --- Stammdaten-/FK-Voraussetzung (leer, kein Seed — siehe Docstring) ---
     op.create_table(
         "instrument",
         sa.Column(
@@ -203,5 +176,3 @@ def downgrade() -> None:
     op.drop_index("ix_instrument_symbol", table_name="instrument")
     op.drop_index("ix_instrument_asset_class_id", table_name="instrument")
     op.drop_table("instrument")
-    op.drop_table("time_horizon")
-    op.drop_table("strategy")

@@ -54,21 +54,29 @@ DATA_SOURCE_QUALITAET_VALUES = ("niedrig", "mittel", "mittel_hoch", "hoch", "seh
 DATA_SOURCE_FREQUENZ_MIN_SECONDS = 30
 DATA_SOURCE_FREQUENZ_MAX_SECONDS = 86400
 
-# data-model.md §4 `strategy`: CHECK cluster ∈ {...} (C-014, 18 Strategien/4 Cluster).
-# Seed der 18 Strategien je Cluster ist NICHT Teil dieser Story (S-015) —
-# das Depotmodul zieht `strategy`/`time_horizon` hier nur als leere
-# FK-Voraussetzung für `position` mit (analog zur `analysis_category`-
-# Voraussetzung aus S-004/2da446925bbc); Katalog-Inhalt + Cluster-Gate sind
-# S-037 (Spec `strategie-exit-regeln`, AC2/AC3).
+# data-model.md §1 `strategy_cluster`/`strategy`: CHECK cluster-code ∈ {...}
+# (C-014, 4 Cluster) — einzige Quelle fuer den CHECK-Constraint unten (kein
+# separates hartkodiertes SQL-Duplikat). Katalog-Inhalt (18 Strategien/4
+# Cluster) + Cluster-Gate sind S-037 (Spec `strategie-exit-regeln`,
+# AC2/AC3); `position` referenziert `strategy`/`time_horizon` bereits ab
+# S-015 als FK-Voraussetzung (analog zur `analysis_category`-Voraussetzung
+# aus S-004/2da446925bbc).
 STRATEGY_CLUSTER_VALUES = (
     "passiv_regelbasiert",
     "aktiv_fundamental",
     "aktiv_technisch_makro",
     "professionell_algo",
 )
+_STRATEGY_CLUSTER_VALUES_SQL = ", ".join(repr(code) for code in STRATEGY_CLUSTER_VALUES)
 
-# data-model.md §4 `strategy`: CHECK stufe ∈ {...}
+# data-model.md §1 `strategy`: CHECK stufe ∈ {...} (C-014) — einzige Quelle
+# fuer den CHECK-Constraint unten.
 STRATEGY_STUFE_VALUES = ("MVP", "Stufe2", "Stufe3", "Stufe4")
+_STRATEGY_STUFE_VALUES_SQL = ", ".join(repr(stufe) for stufe in STRATEGY_STUFE_VALUES)
+
+# data-model.md §1 `time_horizon`: CHECK id ∈ 1..9 (C-014, 9 Stufen)
+TIME_HORIZON_MIN_ID = 1
+TIME_HORIZON_MAX_ID = 9
 
 # data-model.md §4 `position`: CHECK einstand_methode ∈ {...}, DEFAULT
 # gleitender_durchschnitt (CH-Default, → BR-112). Die eigentliche
@@ -400,6 +408,95 @@ class DataSourceAssetClass(Base):
             f"DataSourceAssetClass(data_source_id={self.data_source_id!r}, "
             f"asset_class_id={self.asset_class_id!r})"
         )
+
+
+class StrategyCluster(Base):
+    """Strategie-Cluster + App-Stufen-Freischaltung (data-model.md
+    `strategy_cluster`, C-014, S-037-Präzisierung).
+
+    `freigeschaltet` ist das Konfigurationsdatum aus Spec-AC2
+    (`docs/specs/strategie-exit-regeln.md`) — ein zur Laufzeit per UPDATE
+    änderbarer Toggle (analog `AssetClass.aktiv`/`DataSource.aktiv`), MVP-Default
+    ist ausschliesslich `passiv_regelbasiert` freigeschaltet (BR-135).
+    """
+
+    __tablename__ = "strategy_cluster"
+    __table_args__ = (
+        CheckConstraint(
+            f"code IN ({_STRATEGY_CLUSTER_VALUES_SQL})",
+            name="ck_strategy_cluster_code",
+        ),
+    )
+
+    code: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    freigeschaltet: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"StrategyCluster(code={self.code!r}, freigeschaltet={self.freigeschaltet!r})"
+
+
+class Strategy(Base):
+    """Anlagestrategie (data-model.md `strategy`, C-014, 18 Strategien in
+    4 Clustern, Spec `docs/specs/strategie-exit-regeln.md` AC2).
+
+    `cluster` ist eine FK auf `strategy_cluster.code` (S-037-Präzisierung,
+    ersetzt die vormalige eigenständige CHECK-Wertemenge — Werte identisch)
+    — die tatsächliche Freischaltungsprüfung (BR-135, E2) erfolgt über
+    `app.db.strategie_katalog.pruefe_cluster_freischaltung()`.
+    """
+
+    __tablename__ = "strategy"
+    __table_args__ = (
+        CheckConstraint(
+            f"stufe IN ({_STRATEGY_STUFE_VALUES_SQL})",
+            name="ck_strategy_stufe",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    cluster: Mapped[str] = mapped_column(
+        String, ForeignKey("strategy_cluster.code"), nullable=False
+    )
+    stufe: Mapped[str] = mapped_column(String, nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"Strategy(name={self.name!r}, cluster={self.cluster!r}, stufe={self.stufe!r})"
+
+
+class TimeHorizon(Base):
+    """Zeithorizont (data-model.md `time_horizon`, C-014, 9 Stufen, Spec
+    `docs/specs/strategie-exit-regeln.md` AC3).
+
+    `transaktionskosten_relevanz` + `break_even_anforderung` sind die zwei
+    laut AC3 geforderten Attribute je Stufe (S-037-Präzisierung — ersetzt das
+    vormalige einzelne `break_even_hinweis`-Feld, das noch in keiner
+    Migration umgesetzt war).
+    """
+
+    __tablename__ = "time_horizon"
+    __table_args__ = (
+        CheckConstraint(
+            f"id BETWEEN {TIME_HORIZON_MIN_ID} AND {TIME_HORIZON_MAX_ID}",
+            name="ck_time_horizon_id_range",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    transaktionskosten_relevanz: Mapped[str] = mapped_column(String, nullable=False)
+    break_even_anforderung: Mapped[str] = mapped_column(String, nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"TimeHorizon(id={self.id!r}, name={self.name!r})"
 
 
 class MarketDataBronze(Base):
@@ -796,57 +893,6 @@ class Instrument(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"Instrument(symbol={self.symbol!r}, asset_class_id={self.asset_class_id!r})"
-
-
-class Strategy(Base):
-    """Anlagestrategie (data-model.md §1 `strategy`, C-014, 18 Strategien in
-    4 Clustern).
-
-    **Leeres** Schema als FK-Voraussetzung für `Position.strategy_id`
-    (S-015, Begründung analog zu `Instrument` oben) — der 18er-Katalog samt
-    Cluster-Freischaltung (MVP nur „Passiv/Regelbasiert") ist S-037 (Spec
-    `strategie-exit-regeln`, AC2), NICHT Teil dieser Story.
-    """
-
-    __tablename__ = "strategy"
-    __table_args__ = (
-        CheckConstraint(
-            "cluster IN ('passiv_regelbasiert', 'aktiv_fundamental', "
-            "'aktiv_technisch_makro', 'professionell_algo')",
-            name="ck_strategy_cluster",
-        ),
-        CheckConstraint("stufe IN ('MVP', 'Stufe2', 'Stufe3', 'Stufe4')", name="ck_strategy_stufe"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
-    )
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    cluster: Mapped[str | None] = mapped_column(String, nullable=True)
-    stufe: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
-        return f"Strategy(name={self.name!r}, cluster={self.cluster!r})"
-
-
-class TimeHorizon(Base):
-    """Zeithorizont (data-model.md §1 `time_horizon`, C-014, 9 Stufen).
-
-    **Leeres** Schema als FK-Voraussetzung für `Position.time_horizon_id`
-    (S-015, Begründung analog zu `Instrument`/`Strategy` oben) — die 9
-    Stufen samt Break-Even-Hinweis sind S-037 (Spec `strategie-exit-regeln`,
-    AC3), NICHT Teil dieser Story.
-    """
-
-    __tablename__ = "time_horizon"
-    __table_args__ = (CheckConstraint("id BETWEEN 1 AND 9", name="ck_time_horizon_id_range"),)
-
-    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
-    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    break_even_hinweis: Mapped[str | None] = mapped_column(String, nullable=True)
-
-    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
-        return f"TimeHorizon(id={self.id!r}, name={self.name!r})"
 
 
 class Position(Base):

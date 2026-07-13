@@ -53,6 +53,7 @@ erDiagram
     risk_profile ||--o{ portfolio_strategy : "prägt"
     portfolio_strategy ||--o{ portfolio_class_limit : "je Klasse"
 
+    strategy_cluster ||--o{ strategy : "Cluster-Freischaltung"
     strategy ||--o{ position : "Strategie je Titel"
     time_horizon ||--o{ position : "Horizont je Titel"
 
@@ -224,20 +225,32 @@ erDiagram
 | max_klasse_pct | NUMERIC(6,3) | NOT NULL (z.B. Krypto 5–15 %) |
 | — | — | PK (portfolio_strategy_id, asset_class_id) |
 
+### `strategy_cluster` — Strategie-Cluster + App-Stufen-Freischaltung (C-014, S-037-Präzisierung)
+| Feld | Typ | Constraint |
+|---|---|---|
+| code | TEXT | PK, CHECK ∈ {passiv_regelbasiert, aktiv_fundamental, aktiv_technisch_makro, professionell_algo} |
+| name | TEXT | NOT NULL, UNIQUE |
+| freigeschaltet | BOOLEAN | NOT NULL, Spalten-Default `false`; die Differenzierung je Cluster (nur `passiv_regelbasiert` → `true`) erfolgt ausschliesslich über die Seed-INSERT-Werte, nicht über den Spalten-Default — **Konfigurationsdatum** (provisorischer, konfigurierbarer Default, zur Laufzeit per UPDATE änderbar ohne Code-/Migrations-Änderung), MVP-Seed deckt Spec-AC2 (nur Passiv/Regelbasiert freigeschaltet) |
+
+> **S-037-Präzisierung:** `docs/specs/strategie-exit-regeln.md` AC2 verlangt eine "Cluster-Freischaltung je App-Stufe" als "Konfigurationsdatum (provisorischer, konfigurierbarer Default — NFR: zur Laufzeit konfigurierbar)". Die ursprüngliche Modellierung (nur `strategy.cluster` als CHECK-Wertemenge) bildete das nicht ab — analog zum bestehenden Boolean-Toggle-Muster (`asset_class.aktiv`, `data_source.aktiv`) wird die Freischaltung hier als eigene, laufzeit-updatebare Stammdatentabelle geführt statt als Codekonstante.
+
 ### `strategy` — Anlagestrategie (C-014, 18 Strategien / 4 Cluster)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
 | name | TEXT | NOT NULL, UNIQUE |
-| cluster | TEXT | CHECK ∈ {passiv_regelbasiert, aktiv_fundamental, aktiv_technisch_makro, professionell_algo} |
-| stufe | TEXT | CHECK ∈ {MVP, Stufe2, Stufe3, Stufe4} |
+| cluster | TEXT | NOT NULL, FK → strategy_cluster.code (ersetzt die vormalige eigenständige CHECK-Wertemenge — Werte bleiben identisch: passiv_regelbasiert, aktiv_fundamental, aktiv_technisch_makro, professionell_algo) |
+| stufe | TEXT | NOT NULL, CHECK ∈ {MVP, Stufe2, Stufe3, Stufe4} |
 
 ### `time_horizon` — Zeithorizont (C-014, 9 Stufen)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | SMALLINT | PK, CHECK 1–9 (Hochfrequenz … Generationell) |
 | name | TEXT | NOT NULL, UNIQUE |
-| break_even_hinweis | TEXT | Transaktionskosten-Relevanz |
+| transaktionskosten_relevanz | TEXT | NOT NULL — Transaktionskosten-Relevanz je Stufe (z.B. KRITISCH, HOCH, MITTEL, NIEDRIG, MINIMAL), 1:1 aus Konzept-Notiz "KI Investment – Zeithorizonte" |
+| break_even_anforderung | TEXT | NOT NULL — Break-Even-Anforderung je Stufe (z.B. "0,5–1 % pro Trade"), 1:1 aus derselben Notiz |
+
+> **S-037-Präzisierung:** AC3 verlangt explizit zwei separate Attribute ("Transaktionskosten-Relevanz und Break-Even-Anforderung") statt des vormaligen einzelnen `break_even_hinweis`-Feldes — dieses Feld war noch in keiner Migration umgesetzt (greenfield), daher reine Präzisierung ohne Migrationspfad für einen bereits existierenden Spaltennamen.
 
 ### `system_setting` — globale Systemeinstellungen (C-016)
 | Feld | Typ | Constraint |
@@ -671,6 +684,7 @@ bislang nicht führte).
 | analysis_method_version | UNIQUE partiell `WHERE is_current` | genau eine aktuell gültige Methodentabellen-Version (→ BR-133) |
 | category_weight | (config_version_id) | Alle Gewichte einer Version laden (Versions-Snapshot) |
 | category_weight_version | UNIQUE partiell `WHERE is_current` | genau eine aktuell gültige Kategoriegewicht-Version (→ BR-133) |
+| strategy | — (kein dedizierter Index auf `cluster`) | FK-Spalte `cluster` bewusst ohne Index: `strategy_cluster` hat nur 4 Zeilen, `strategy` nur 18 (S-037) — ein Full-Table-Scan auf `cluster` ist bei dieser Kardinalität günstiger als ein zusätzlicher Index (sql/R05-Ausnahme, analog `risk_profile`/`portfolio_class_limit`-Stammdatentabellen) |
 | data_source_asset_class | (asset_class_id) | Quellen je Klasse (Datenquellen-Abfrage-Matching) |
 | platform_asset_class | (asset_class_id) | Plattform-Kosten je Klasse |
 | instrument | (asset_class_id), (symbol) | Klassenfilter + Symbol-Lookup |
@@ -755,6 +769,7 @@ bislang nicht führte).
 | BR-132 | analysis_method.last_reviewed_at | Quartalshinweis (AC11): liegt `last_reviewed_at` ≥ ~1 Quartal (90 Tage) zurück, gilt die Methode als review-fällig (Erinnerung/Kennzeichnung) — **kein** automatisches Ändern von `ranking` | App (`app/db/analysis_method_review.py`) |
 | BR-133 | category_weight_version / analysis_method_version | Genau eine Zeile mit `is_current = true` je Versionsregister (AC10) | DB (partieller UNIQUE-Index `WHERE is_current`) |
 | BR-134 | depot_fill_dedup.client_order_id | Idempotenz: PK/UNIQUE auf `client_order_id` — ein Fill wird nie zweimal gegen den Bestand verbucht (ADR-011, P8, at-least-once). *(Beim Merge von F-011 von BR-132 auf BR-134 umnummeriert — BR-132/BR-133 waren parallel durch S-018 vergeben.)* | DB-UNIQUE + App |
+| BR-135 | strategy.cluster / strategy_cluster.freigeschaltet | Eine Strategie-Zuordnung ausserhalb des freigeschalteten Clusters wird abgelehnt (MVP: nur passiv_regelbasiert); deterministisch, ohne LLM-Beteiligung (`docs/specs/strategie-exit-regeln.md` AC2/E2, S-037). *(Beim Merge von F-012 von BR-132 auf BR-135 umnummeriert.)* | App |
 
 ---
 
@@ -762,7 +777,7 @@ bislang nicht führte).
 
 Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 
-1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
+1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy_cluster` → `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
 2. **Konfig mit FK auf Basis:** `category_weight_version` → `category_weight`, `analysis_method_version` → `analysis_method`, `data_source`, `data_source_asset_class`, `trading_platform`, `platform_asset_class`, `portfolio_strategy`, `portfolio_class_limit`. Die Versionsregister (`*_version`) haben keine FK-Abhängigkeit und werden jeweils vor der zugehörigen versionierten Tabelle angelegt.
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
