@@ -1,7 +1,7 @@
 id: S-020
 parent: F-003
 title: Scheduler mit Intervallen, Queue-of-Work/Token-Bucket, Backoff/DLQ, Toggle-Skip
-status: To Do
+status: In Progress
 priority: P1
 spec: docs/specs/dateneingang.md
 implements:
@@ -29,5 +29,5 @@ branch: feat/S-020-scheduler-queue-backoff
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:06Z'
-updated_at: '2026-07-13T01:43:23Z'
+updated_at: '2026-07-13T05:28:32Z'
 done_at: null
