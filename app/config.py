@@ -29,6 +29,18 @@ Umsetzung festzulegen", AC2) — provisorisch gewählt: **Alert bei 10 %,
 Kill bei 20 %** Rückgang vom laufenden Höchststand. Beide Werte sind ohne
 Codeänderung über `DRAWDOWN_ALERT_SCHWELLE`/`DRAWDOWN_KILL_SCHWELLE`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
+
+Aus S-020 (AC10/AC11, `docs/specs/dateneingang.md`) kommen die
+Scheduler-/Queue-Parameter hinzu (`app.scheduler.*`): Exponential-Backoff
+(Basis-Wartezeit + maximale Versuche vor Dead-Letter-Queue, AC10) und
+Token-Bucket je Quelle (Kapazität + Nachfüllrate, AC11). Beide Kriterien
+nennen ihre Defaults explizit "provisorisch, konfigurierbar" — hier ohne
+Codeänderung über `SCHEDULER_BACKOFF_BASIS_SEKUNDEN`/
+`SCHEDULER_MAX_VERSUCHE`/`SCHEDULER_TOKEN_BUCKET_CAPACITY`/
+`SCHEDULER_TOKEN_BUCKET_REFILL_PRO_SEKUNDE` überschreibbar (Muster von
+`DRAWDOWN_*` folgend). Das Abrufintervall selbst (AC4) ist bereits über
+die DB-Spalte `data_source.frequenz_sekunden` (S-006) ohne Codeänderung
+konfigurierbar — dafür braucht es kein zusätzliches `Settings`-Feld.
 """
 
 from __future__ import annotations
@@ -99,6 +111,32 @@ class Settings(BaseSettings):
     #: `"drawdown"`). Provisorischer Default 20 % (s. Modul-Docstring),
     #: ohne Codeänderung über `DRAWDOWN_KILL_SCHWELLE` überschreibbar.
     drawdown_kill_schwelle: float = Field(default=0.20, ge=0, le=1)
+
+    #: Exponential-Backoff-Basis (AC10, `app.scheduler.worker`): Wartezeit
+    #: vor dem ERSTEN Retry-Versuch eines transienten Quellenfehlers
+    #: (429/5xx/Timeout) in Sekunden; Folgeversuche verdoppeln sich je
+    #: Versuch (`basis * 2**(versuch-1)`). Provisorischer Default 1.0s,
+    #: ohne Codeänderung über `SCHEDULER_BACKOFF_BASIS_SEKUNDEN`
+    #: überschreibbar.
+    scheduler_backoff_basis_sekunden: float = Field(default=1.0, gt=0)
+
+    #: Maximale Anzahl Verarbeitungsversuche (AC10) — nach Erschöpfung
+    #: wandert das Arbeitselement in die Dead-Letter-Queue. Provisorischer
+    #: Default 5, ohne Codeänderung über `SCHEDULER_MAX_VERSUCHE`
+    #: überschreibbar.
+    scheduler_max_versuche: int = Field(default=5, ge=1)
+
+    #: Token-Bucket-Kapazität je Quelle (AC11) — maximale Anzahl sofort
+    #: verfügbarer Abruf-„Tokens" (Burst), bevor ein Worker warten muss.
+    #: Provisorischer Default 5, ohne Codeänderung über
+    #: `SCHEDULER_TOKEN_BUCKET_CAPACITY` überschreibbar.
+    scheduler_token_bucket_capacity: int = Field(default=5, ge=1)
+
+    #: Token-Bucket-Nachfüllrate je Quelle (AC11), Tokens pro Sekunde.
+    #: Provisorischer Default 1.0 (ein Abruf/Sekunde im Dauerbetrieb je
+    #: Quelle), ohne Codeänderung über
+    #: `SCHEDULER_TOKEN_BUCKET_REFILL_PRO_SEKUNDE` überschreibbar.
+    scheduler_token_bucket_refill_pro_sekunde: float = Field(default=1.0, gt=0)
 
 
 @lru_cache

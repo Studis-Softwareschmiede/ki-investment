@@ -657,3 +657,63 @@ class MarketDataGold(Base):
             f"symbol={self.symbol!r}, angereicherter_wert={self.angereicherter_wert!r}, "
             f"qualitaetsindikator={self.qualitaetsindikator!r})"
         )
+
+
+class IngestDeadLetter(Base):
+    """Dead-Letter-Queue dauerhaft fehlschlagender Abrufe (data-model.md §7
+    `ingest_dead_letter`, C-009; Spec `docs/specs/dateneingang.md` AC10,
+    S-020).
+
+    Eine Zeile entsteht, wenn ein `Arbeitselement` (`app.scheduler.queue`)
+    nach erschöpften Exponential-Backoff-Versuchen (transiente Fehler: HTTP
+    429, 5xx, Timeout) endgültig aufgegeben wird (`app.scheduler.worker`,
+    AC10 „... wird das Arbeitselement in eine Dead-Letter-Queue verschoben
+    und protokolliert, ohne andere Quellen zu blockieren"). Diese Tabelle
+    ist die dauerhafte, abfragbare Ablage (DLQ-Backlog-Monitoring,
+    data-model.md §8 `(data_source_id, created_at)`-Index) — die
+    transiente Redis-Queue-of-Work (`app.scheduler.queue.ArbeitsQueue`)
+    hält dieselbe Information nur bis zum jeweiligen Verarbeitungsversuch,
+    nicht darüber hinaus.
+
+    `payload`/`source_event_id` sind optional (`nullable=True`): ein
+    Arbeitselement kann bereits vor dem eigentlichen Quellen-Abruf
+    fehlschlagen (z. B. Verbindungsaufbau) und trägt dann noch keine
+    quellenspezifische Rohantwort/Ereignis-ID.
+    """
+
+    __tablename__ = "ingest_dead_letter"
+    __table_args__ = (
+        Index(
+            "ix_ingest_dead_letter_data_source_id_created_at",
+            "data_source_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_event_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    payload: Mapped[Any] = mapped_column(sa.JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    fehler: Mapped[str] = mapped_column(String, nullable=False)
+    retry_count: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=0, server_default=sa.text("0")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"IngestDeadLetter(data_source_id={self.data_source_id!r}, "
+            f"fehler={self.fehler!r}, retry_count={self.retry_count!r})"
+        )
