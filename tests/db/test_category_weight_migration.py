@@ -23,6 +23,15 @@ Covers (anlageklassen-config): AC6, AC7, AC8
 Die Seed-Konstanten werden direkt aus der Migrationsdatei importiert (statt
 dupliziert), damit ein kuenftiger Migrations-Edit ohne Test-Anpassung nicht
 unbemerkt divergiert (Konvention aus `test_asset_class_migration.py`).
+
+**S-018/AC10-Nachtrag:** die Folge-Migration `386f43ae972d` macht
+`config_version_id` zum dritten PK-Teil von `category_weight` (siehe
+`docs/data-model.md` `category_weight`-Notiz) — `test_model_rejects_weight_pct_outside_0_100`
+befüllt seither eine `CategoryWeightVersion`, damit die Ablehnung weiterhin
+eindeutig auf den `weight_pct`-CHECK zurückzuführen ist. Die AC10-spezifische
+Versionierungs-Mechanik selbst (append-only, `is_current`) ist in
+`tests/db/test_category_weight_version_migration.py` (Migration
+`386f43ae972d`) und `tests/db/test_config_versions.py` gedeckt.
 """
 
 from __future__ import annotations
@@ -37,7 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
-from app.db.models import AnalysisCategory, AssetClass, CategoryWeight
+from app.db.models import AnalysisCategory, AssetClass, CategoryWeight, CategoryWeightVersion
 
 MIGRATION_PATH = (
     Path(__file__).parents[2]
@@ -126,7 +135,11 @@ def test_model_rejects_weight_pct_outside_0_100() -> None:
     """@trace anlageklassen-config#AC7 — ein Gewicht ausserhalb 0-100 %
     (Zeilen-CHECK) wird als ungültig zurückgewiesen (Edge-Case, deckt E1
     strukturell auf Zeilenebene; die vollständige Σ=100-Ablehnung ist der
-    DB-Trigger, siehe Modul-Docstring + `test_category_weights_validation.py`)."""
+    DB-Trigger, siehe Modul-Docstring + `test_category_weights_validation.py`).
+
+    Seit S-018/AC10 (Migration `386f43ae972d`) ist `config_version_id` Teil
+    des PK — hier mit einer gültigen `CategoryWeightVersion` befüllt, damit
+    ausschliesslich der `weight_pct`-CHECK die Ablehnung auslöst."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
@@ -134,10 +147,17 @@ def test_model_rejects_weight_pct_outside_0_100() -> None:
             AssetClass(id=1, name="Aktien", prio_stufe="MVP", aktiv=True, retail_driven=True)
         )
         session.add(AnalysisCategory(code="fundamental", name="Fundamental", ist_risiko=False))
+        version = CategoryWeightVersion()
+        session.add(version)
         session.commit()
 
         session.add(
-            CategoryWeight(asset_class_id=1, category_code="fundamental", weight_pct=Decimal("150"))
+            CategoryWeight(
+                asset_class_id=1,
+                category_code="fundamental",
+                config_version_id=version.id,
+                weight_pct=Decimal("150"),
+            )
         )
         with pytest.raises(IntegrityError):
             session.commit()
