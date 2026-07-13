@@ -60,6 +60,7 @@ Die technische Anbindungsschicht (Socket) zapft alle externen Datenquellen einhe
 - **Datenquellen-Abfrage (eine Schnittstelle, drei Konsumenten):**
   - Input: Filterkriterien / Titel-Anfrage inkl. Anlageklasse; Konsumenten-Kontext (neu / bestehend / research).
   - Output: je Titel ein Signal-Bündel `{ titel, anlageklasse, signale[...], liquiditaet, volatilitaet, quellen_metadaten[...] }`.
+  - **Berechnung `liquiditaet`/`volatilitaet` (S-021, provisorischer Default, analog AC4/AC10/AC11/AC12):** solange weder eine dedizierte Volumen-/ADV-Quelle noch das für echte annualisierte Volatilität vorgesehene `domain/quant`-Modul (ADR-009) existieren, gilt: `liquiditaet` = Anzahl der Quellen, die für den Titel mindestens einen aggregierten Datenpunkt beigetragen haben (Datenverfügbarkeits-Proxy); `volatilitaet` = Populationsstandardabweichung aller aggregierten Werte über die passenden Quellen. Kein annualisiertes Mass, keine ADV/RVOL-Kennzahl (→ `docs/data-model.md` `instrument.liquiditaet`) — Kalibrierung/Ablösung durch eine echte Kennzahl ist Folgearbeit (`domain/quant`).
 - **Scheduler-Parameter je Quelle:** Abrufintervall, Retry-/Timeout-Verhalten, Aktiv/Inaktiv-Schalter — alle konfigurierbar.
 
 ## Edge-Cases & Fehlerverhalten
