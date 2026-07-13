@@ -1,7 +1,7 @@
 id: S-036
 parent: F-011
 title: Portfolio-Aggregate & Depot-Stand-/Exit-Regeln-Bereitstellung
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/depot.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Cold-Start; Aggregation je GICS-Branche/Klasse/Cash als Risiko-In
   aus Positionen reproduzierbar.
 confidence: medium
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-036-portfolio-aggregate
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/30
 blocked_reason: null
 created_at: '2026-07-12T10:09:38Z'
-updated_at: '2026-07-12T10:09:41Z'
-done_at: null
+updated_at: '2026-07-12T23:02:25Z'
+done_at: '2026-07-12T23:02:24Z'

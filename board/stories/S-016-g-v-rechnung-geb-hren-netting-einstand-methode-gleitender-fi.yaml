@@ -1,7 +1,7 @@
 id: S-016
 parent: F-011
 title: G/V-Rechnung, Gebühren-Netting & Einstand-Methode (gleitender Ø/FIFO, Teilverkauf)
-status: To Do
+status: Done
 priority: P0
 spec: docs/specs/depot.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Cold-Start; Decimal-Arithmetik (P7), Teilverkauf-Logik zwei Metho
   deterministisch testbar.
 confidence: medium
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-016-gv-netting-einstand
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/24
 blocked_reason: null
 created_at: '2026-07-12T10:09:00Z'
-updated_at: '2026-07-12T10:09:00Z'
-done_at: null
+updated_at: '2026-07-12T20:22:18Z'
+done_at: '2026-07-12T20:22:17Z'

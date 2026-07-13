@@ -8,7 +8,7 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -16,10 +16,12 @@ import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    Interval,
     Numeric,
     SmallInteger,
     String,
@@ -51,6 +53,41 @@ DATA_SOURCE_QUALITAET_VALUES = ("niedrig", "mittel", "mittel_hoch", "hoch", "seh
 # data-model.md §1 `data_source`: frequenz_sekunden-Bereich (Socket-Scheduling)
 DATA_SOURCE_FREQUENZ_MIN_SECONDS = 30
 DATA_SOURCE_FREQUENZ_MAX_SECONDS = 86400
+
+# data-model.md §4 `strategy`: CHECK cluster ∈ {...} (C-014, 18 Strategien/4 Cluster).
+# Seed der 18 Strategien je Cluster ist NICHT Teil dieser Story (S-015) —
+# das Depotmodul zieht `strategy`/`time_horizon` hier nur als leere
+# FK-Voraussetzung für `position` mit (analog zur `analysis_category`-
+# Voraussetzung aus S-004/2da446925bbc); Katalog-Inhalt + Cluster-Gate sind
+# S-037 (Spec `strategie-exit-regeln`, AC2/AC3).
+STRATEGY_CLUSTER_VALUES = (
+    "passiv_regelbasiert",
+    "aktiv_fundamental",
+    "aktiv_technisch_makro",
+    "professionell_algo",
+)
+
+# data-model.md §4 `strategy`: CHECK stufe ∈ {...}
+STRATEGY_STUFE_VALUES = ("MVP", "Stufe2", "Stufe3", "Stufe4")
+
+# data-model.md §4 `position`: CHECK einstand_methode ∈ {...}, DEFAULT
+# gleitender_durchschnitt (CH-Default, → BR-112). Die eigentliche
+# Berechnung nach dieser Methode ist S-016 (AC5) — hier nur die Spalte samt
+# Default/Constraint (Positions-Grundgerüst, S-015).
+EINSTAND_METHODE_VALUES = ("gleitender_durchschnitt", "fifo")
+EINSTAND_METHODE_DEFAULT = "gleitender_durchschnitt"
+
+# data-model.md §4 `position`: CHECK status ∈ {...}
+POSITION_STATUS_VALUES = ("offen", "geschlossen")
+
+# data-model.md §4 `position`/`order`/...: CHECK mode ∈ {...} (→ BR-130)
+MODE_VALUES = ("echt", "simuliert")
+
+# data-model.md §4 `exit_rule`: CHECK stop_typ ∈ {...}
+EXIT_RULE_STOP_TYP_VALUES = ("fix_pct", "atr_trailing", "fundamental", "keiner")
+
+# data-model.md §4 `transaction`: CHECK typ ∈ {...} (C-017, Story S-035)
+TRANSACTION_TYP_VALUES = ("buy", "sell", "dividend", "fee", "fx_adjust")
 
 
 class AssetClass(Base):
@@ -717,3 +754,339 @@ class IngestDeadLetter(Base):
             f"IngestDeadLetter(data_source_id={self.data_source_id!r}, "
             f"fehler={self.fehler!r}, retry_count={self.retry_count!r})"
         )
+
+
+class Instrument(Base):
+    """Titel / handelbares Instrument (data-model.md §1 `instrument`,
+    C-007, C-017).
+
+    Keine Story besitzt bislang die Erst-Anlage von `instrument`-Zeilen
+    (Kandidatensuche-/Analyse-Module, die einen Titel zuerst identifizieren,
+    sind noch nicht gebaut). Analog zur `analysis_category`-Voraussetzung
+    aus S-004 (Migration `2da446925bbc`) wird diese Tabelle hier als harte
+    FK-Voraussetzung für `Position.instrument_id` angelegt — **leeres**
+    Schema, **kein** Seed: anders als bei den 11 Anlageklassen gibt es keine
+    fixe, aufzählbare Titel-Liste. `app.domain.portfolio.fill_booking`
+    (S-015) legt selbst KEINE Instrument-Zeilen an; ein Fill referenziert
+    `titel_id` als bereits existierende `instrument.id` (angelegt von einem
+    vorgelagerten, hier noch nicht gebauten Modul).
+    """
+
+    __tablename__ = "instrument"
+    __table_args__ = (
+        Index("ix_instrument_asset_class_id", "asset_class_id"),
+        Index("ix_instrument_symbol", "symbol"),
+        sa.UniqueConstraint("symbol", "asset_class_id", name="uq_instrument_symbol_asset_class"),
+        CheckConstraint("length(currency) = 3", name="ck_instrument_currency_iso3"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    gics_sector: Mapped[str | None] = mapped_column(String, nullable=True)
+    gics_industry: Mapped[str | None] = mapped_column(String, nullable=True)
+    currency: Mapped[str] = mapped_column(String, nullable=False)
+    liquiditaet: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    volatilitaet: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"Instrument(symbol={self.symbol!r}, asset_class_id={self.asset_class_id!r})"
+
+
+class Strategy(Base):
+    """Anlagestrategie (data-model.md §1 `strategy`, C-014, 18 Strategien in
+    4 Clustern).
+
+    **Leeres** Schema als FK-Voraussetzung für `Position.strategy_id`
+    (S-015, Begründung analog zu `Instrument` oben) — der 18er-Katalog samt
+    Cluster-Freischaltung (MVP nur „Passiv/Regelbasiert") ist S-037 (Spec
+    `strategie-exit-regeln`, AC2), NICHT Teil dieser Story.
+    """
+
+    __tablename__ = "strategy"
+    __table_args__ = (
+        CheckConstraint(
+            "cluster IN ('passiv_regelbasiert', 'aktiv_fundamental', "
+            "'aktiv_technisch_makro', 'professionell_algo')",
+            name="ck_strategy_cluster",
+        ),
+        CheckConstraint("stufe IN ('MVP', 'Stufe2', 'Stufe3', 'Stufe4')", name="ck_strategy_stufe"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    cluster: Mapped[str | None] = mapped_column(String, nullable=True)
+    stufe: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"Strategy(name={self.name!r}, cluster={self.cluster!r})"
+
+
+class TimeHorizon(Base):
+    """Zeithorizont (data-model.md §1 `time_horizon`, C-014, 9 Stufen).
+
+    **Leeres** Schema als FK-Voraussetzung für `Position.time_horizon_id`
+    (S-015, Begründung analog zu `Instrument`/`Strategy` oben) — die 9
+    Stufen samt Break-Even-Hinweis sind S-037 (Spec `strategie-exit-regeln`,
+    AC3), NICHT Teil dieser Story.
+    """
+
+    __tablename__ = "time_horizon"
+    __table_args__ = (CheckConstraint("id BETWEEN 1 AND 9", name="ck_time_horizon_id_range"),)
+
+    id: Mapped[int] = mapped_column(SmallInteger, primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    break_even_hinweis: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"TimeHorizon(id={self.id!r}, name={self.name!r})"
+
+
+class Position(Base):
+    """Gehaltene Position — Positions-Grundgerüst (data-model.md §4
+    `position`, C-014, C-017; Spec `docs/specs/depot.md`, Story S-015,
+    AC1).
+
+    Trägt mindestens die von AC1 geforderten Attribute: Titel-Identität
+    (`instrument_id`), Menge, Einstandspreis, Anlageklasse
+    (`asset_class_id`), GICS-Branche (über `Instrument.gics_sector`),
+    Strategie (`strategy_id`), Zeithorizont (`time_horizon_id`),
+    Exit-Regeln (`ExitRule`, 1:1 über `position_id`) und die These
+    (`these`). „Aktuelle Bewertung" (ebenfalls in AC1 gefordert) ist
+    bewusst KEINE Spalte hier — sie wird live über den Socket-Live-Kurs-
+    Zugriff bezogen (Spec §Verträge „Bewertung"), nicht persistiert.
+
+    Diese Story (S-015) liefert nur das Schema plus den Buchungs-
+    Eintrittspunkt (`app.domain.portfolio.fill_booking.pruefe_fill`,
+    AC1/AC10) — das eigentliche Anlegen/Fortschreiben einer Positions-Zeile
+    (Ø-Einstand-Berechnung, Gebühren-Netting, G/V) ist S-016 (AC2/AC3/AC5).
+
+    **S-053 (AC6, FX-Attribution)** ergänzt drei Spalten:
+    `einstand_fx_rate` (Ø-Einstands-FX-Kurs, `None` bei CHF) wird
+    fortgeschrieben — analog zu `einstand_preis` — über
+    `app.adapters.repositories.position_repository
+    .SqlAlchemyPositionRepository.lege_position_an`/`aktualisiere_kauf`.
+    `fx_kapital_gv`/`fx_waehrungs_gv` (unrealisierte FX-Attribution) sind
+    dagegen — analog zu `unrealisierter_gv` (S-016) — reservierte Spalten
+    OHNE Schreibpfad: das Nachführen anhand des Live-Kurses ist die noch
+    nicht gebaute Bewertungs-Schleife (siehe `app.domain.portfolio
+    .fx_attribution.berechne_fx_split_unrealisiert`-Docstring), kein
+    Fill-getriebener Schreibpfad dieser Story.
+    """
+
+    __tablename__ = "position"
+    __table_args__ = (
+        Index("ix_position_instrument_id", "instrument_id"),
+        Index("ix_position_status", "status"),
+        Index("ix_position_mode", "mode"),
+        Index("ix_position_asset_class_id", "asset_class_id"),
+        CheckConstraint("menge >= 0", name="ck_position_menge_non_negative"),
+        CheckConstraint(
+            "einstand_methode IN ('gleitender_durchschnitt', 'fifo')",
+            name="ck_position_einstand_methode",
+        ),
+        CheckConstraint("status IN ('offen', 'geschlossen')", name="ck_position_status"),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_position_mode"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    strategy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("strategy.id"), nullable=False
+    )
+    time_horizon_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("time_horizon.id"), nullable=False
+    )
+    these: Mapped[str] = mapped_column(String, nullable=False)
+    menge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    einstand_preis: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    einstand_methode: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default=EINSTAND_METHODE_DEFAULT,
+        server_default=sa.text(f"'{EINSTAND_METHODE_DEFAULT}'"),
+    )
+    realisierter_gv: Mapped[Decimal] = mapped_column(
+        Numeric(20, 8), nullable=False, default=Decimal("0"), server_default=sa.text("0")
+    )
+    unrealisierter_gv: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    einstand_fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    fx_kapital_gv: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    fx_waehrungs_gv: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"Position(instrument_id={self.instrument_id!r}, menge={self.menge!r}, "
+            f"status={self.status!r})"
+        )
+
+
+class ExitRule(Base):
+    """Beim Kauf fixierte Exit-Regeln (data-model.md §4 `exit_rule`, C-011,
+    C-014; unveränderlich nach Kauf → BR-111).
+
+    1:1 zu `Position` über `position_id`. Diese Story (S-015) liefert nur
+    das Schema als Teil des Positions-Grundgerüsts (AC1 „Exit-Regeln" als
+    Position-Attribut) — die inhaltliche Ableitung der Werte (Default-
+    Exit-Set je Strategie/Klasse, ATR-Multiplikatoren) ist
+    `strategie-exit-regeln` (S-038, AC6-AC9); die BR-111-Unveränderlichkeit
+    (kein UPDATE nach Position-Open) durchzusetzen ist S-040
+    („Attribut-Bündel-Fixierung, Unveränderlichkeit") — hier NICHT
+    umgesetzt, um nicht in eine andere Story-Spec vorzugreifen.
+    """
+
+    __tablename__ = "exit_rule"
+    __table_args__ = (
+        CheckConstraint(
+            "stop_typ IN ('fix_pct', 'atr_trailing', 'fundamental', 'keiner')",
+            name="ck_exit_rule_stop_typ",
+        ),
+    )
+
+    position_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("position.id"), primary_key=True
+    )
+    stop_loss_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    take_profit_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    stop_typ: Mapped[str | None] = mapped_column(String, nullable=True)
+    atr_multiplikator: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    thesis_invalidation: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_box: Mapped[timedelta | None] = mapped_column(Interval, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"ExitRule(position_id={self.position_id!r}, stop_typ={self.stop_typ!r})"
+
+
+class Transaction(Base):
+    """Append-only Transaktionshistorie (data-model.md §4 `transaction`,
+    C-017; Spec `docs/specs/depot.md`, Story S-035, AC4/AC7; → BR-115).
+
+    Ein Insert je Fill (Kauf/Verkauf) — `typ` bildet `FillInput.richtung`
+    ab (`kauf`→`buy`, `verkauf`→`sell`); `dividend`/`fee`/`fx_adjust` sind
+    im CHECK-Constraint mitgeführt (data-model.md §4), aber von keiner
+    Story bisher befüllt (kein Schreibpfad für diese Typen existiert noch).
+
+    **Append-only-Durchsetzung (AC4/BR-115), zwei Schichten:**
+    - **DB:** die Migration (`create_transaction_historie`) legt unter
+      Postgres einen `BEFORE UPDATE OR DELETE`-Trigger an, der jede
+      Mutation/Löschung mit einer Exception verweigert (wirkungslos unter
+      SQLite/Struktur-Tests, analog zu `with_for_update()`,
+      `position_repository`-Konvention).
+    - **App:** `PositionRepository` (der einzige Zugriffspfad, P1) bietet
+      für diese Tabelle ausschliesslich `schreibe_transaktion` (Insert)
+      und `historie_je_titel` (Lesen) an — keine Update-/Delete-Methode
+      existiert im Port, es gibt also strukturell keinen Aufrufer-Pfad für
+      eine nachträgliche Änderung.
+
+    `position_id` ist NULLable: ein Verkauf-Fill, der bei FIFO mehrere
+    Lots verbraucht (A2), ist keinem einzelnen Lot eindeutig zuordenbar —
+    der Verträge-Vertrag der Transaktionshistorie selbst
+    (`docs/specs/depot.md` §Verträge) referenziert ohnehin nur `titel_id`,
+    keine `position_id`.
+
+    `arrival_price`/`slippage_abs` sind NULLable auf Schema-Ebene (nur bei
+    `typ ∈ {buy, sell}` sinnvoll), werden aber von
+    `app.adapters.repositories.position_repository
+    .SqlAlchemyPositionRepository.schreibe_transaktion` für jeden
+    Kauf-/Verkauf-Fill immer gesetzt (AC7): `slippage_abs = preis −
+    arrival_price`, identische Formel zu BR-114 (`trade_fill.slippage_abs`,
+    C-016), hier auf die Depot-eigene Historie angewandt (C-017).
+    """
+
+    __tablename__ = "transaction"
+    __table_args__ = (
+        Index("ix_transaction_position_id", "position_id"),
+        Index("ix_transaction_instrument_id", "instrument_id"),
+        Index("ix_transaction_booked_at", "booked_at"),
+        Index("ix_transaction_mode", "mode"),
+        CheckConstraint(
+            "typ IN ('buy', 'sell', 'dividend', 'fee', 'fx_adjust')", name="ck_transaction_typ"
+        ),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_transaction_mode"),
+        CheckConstraint("length(waehrung) = 3", name="ck_transaction_waehrung_iso3"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    position_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("position.id"), nullable=True
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    typ: Mapped[str] = mapped_column(String, nullable=False)
+    menge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    preis: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    kosten_chf: Mapped[Decimal] = mapped_column(
+        Numeric(20, 8), nullable=False, default=Decimal("0"), server_default=sa.text("0")
+    )
+    waehrung: Mapped[str] = mapped_column(String, nullable=False)
+    arrival_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    slippage_abs: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    fx_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    kapital_gv_chf: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    waehrungs_gv_chf: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    booked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"Transaction(instrument_id={self.instrument_id!r}, typ={self.typ!r}, "
+            f"menge={self.menge!r})"
+        )
+
+
+class DepotFillDedup(Base):
+    """Idempotenz-Ledger für die Fill→Depot-Fortschreibung (data-model.md §4
+    `depot_fill_dedup`, ADR-011, P8) — nachgezogen im DBA-Zweit-Review von
+    S-016 (Critical-Befund: ohne Dedup schreibt ein doppelt zugestellter
+    Fill (Redis-Queue, at-least-once) die Position doppelt fort).
+
+    Bewusst ein reiner Marker (`client_order_id` als PK, kein weiterer
+    fachlicher Inhalt) — **kein** Ersatz für die volle append-only
+    Transaktionshistorie (`transaction`, AC4/AC7 → S-035); diese Tabelle
+    beantwortet ausschliesslich die Frage „wurde dieser Fill schon einmal
+    verbucht?" (siehe `app.adapters.repositories.position_repository
+    .SqlAlchemyPositionRepository.markiere_fill_verbucht`).
+    """
+
+    __tablename__ = "depot_fill_dedup"
+    __table_args__ = (
+        Index("ix_depot_fill_dedup_instrument_id", "instrument_id"),
+        CheckConstraint("richtung IN ('kauf', 'verkauf')", name="ck_depot_fill_dedup_richtung"),
+    )
+
+    client_order_id: Mapped[str] = mapped_column(String, primary_key=True)
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    richtung: Mapped[str] = mapped_column(String, nullable=False)
+    verbucht_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"DepotFillDedup(client_order_id={self.client_order_id!r})"

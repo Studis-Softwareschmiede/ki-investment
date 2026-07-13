@@ -41,12 +41,20 @@ Codeänderung über `SCHEDULER_BACKOFF_BASIS_SEKUNDEN`/
 `DRAWDOWN_*` folgend). Das Abrufintervall selbst (AC4) ist bereits über
 die DB-Spalte `data_source.frequenz_sekunden` (S-006) ohne Codeänderung
 konfigurierbar — dafür braucht es kein zusätzliches `Settings`-Feld.
+Aus S-016 (AC5, BR-112) kommt `einstand_methode_default` hinzu: die
+systemweite Default-Einstand-Methode (`gleitender_durchschnitt` | `fifo`),
+die `app.domain.portfolio.position_booking.verbuche_fill` beim allerersten
+Kauf eines Titels heranzieht (bereits offene Lots tragen ihre Methode
+selbst, siehe `docs/data-model.md` §4 `position.einstand_methode`).
+Default CH-Kontext (BR-112), ohne Codeänderung über
+`EINSTAND_METHODE_DEFAULT` überschreibbar.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -137,6 +145,12 @@ class Settings(BaseSettings):
     #: Quelle), ohne Codeänderung über
     #: `SCHEDULER_TOKEN_BUCKET_REFILL_PRO_SEKUNDE` überschreibbar.
     scheduler_token_bucket_refill_pro_sekunde: float = Field(default=1.0, gt=0)
+    #: Default-Einstand-Methode (AC5, BR-112) für den allerersten Kauf
+    #: eines Titels — CH-Kontext, provisorisch. Ohne Codeänderung über
+    #: `EINSTAND_METHODE_DEFAULT` auf `"fifo"` umstellbar.
+    einstand_methode_default: Literal["gleitender_durchschnitt", "fifo"] = Field(
+        default="gleitender_durchschnitt"
+    )
 
 
 @lru_cache

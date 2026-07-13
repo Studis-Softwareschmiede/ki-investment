@@ -61,6 +61,7 @@ erDiagram
     position ||--o{ transaction : "bucht"
     position ||--o{ risk_check_log : "geprüft durch"
     order ||--o{ trade_fill : "gefüllt durch"
+    instrument ||--o{ depot_fill_dedup : "dedupliziert Fills für"
     market_data_bronze ||--o{ market_data_silver : "normalisiert zu"
     market_data_silver ||--o{ market_data_gold : "angereichert zu"
 
@@ -412,6 +413,18 @@ erDiagram
 ## 4 · Position, Order, Trade, Transaktion (C-013, C-014, C-016, C-017)
 
 ### `position` — gehaltene Position (C-014, C-017)
+
+Präzisiert in S-053 (AC6): `einstand_fx_rate`, `fx_kapital_gv`,
+`fx_waehrungs_gv` ergänzt — die Verträge-Sektion von `docs/specs/depot.md`
+verlangt für die Position bereits `fx_kapital_gv`/`fx_waehrungs_gv`
+(FX-Attribution), sie fehlten hier jedoch als Spalten;
+`einstand_fx_rate` ist die zur Berechnung nötige Zusatzspalte (Ø-Einstands-
+FX-Kurs, analog zu `einstand_preis`), in der ursprünglichen Verträge-Liste
+nicht namentlich geführt (Feldname-Lücke, S-053 präzisiert). `fx_kapital_gv`/
+`fx_waehrungs_gv` sind — wie `unrealisierter_gv` — reservierte Spalten ohne
+Schreibpfad (Bewertungsschleife ist eigene, künftige Story); `einstand_fx_rate`
+wird dagegen ab S-053 aktiv fortgeschrieben (Kauf/Nachkauf, → BR-129).
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
@@ -425,6 +438,9 @@ erDiagram
 | einstand_methode | TEXT | NOT NULL, CHECK ∈ {gleitender_durchschnitt, fifo}, DEFAULT `gleitender_durchschnitt` (CH-Default, → BR-112) |
 | realisierter_gv | NUMERIC(20,8) | NOT NULL DEFAULT 0 |
 | unrealisierter_gv | NUMERIC(20,8) | (berechnet bei Bewertung) |
+| einstand_fx_rate | NUMERIC(20,8) | Ø-Einstands-FX-Kurs (Kurs zur CHF-Basiswährung bei Einstand); NULL bei CHF-Positionen (→ AC6/BR-129) |
+| fx_kapital_gv | NUMERIC(20,8) | unrealisierter Kapitalgewinn-Anteil in CHF (FX-Attribution, berechnet bei Bewertung — noch kein Schreibpfad, analog `unrealisierter_gv`, → AC6/BR-129) |
+| fx_waehrungs_gv | NUMERIC(20,8) | unrealisierter Währungsgewinn-Anteil in CHF (FX-Attribution, berechnet bei Bewertung — noch kein Schreibpfad, analog `unrealisierter_gv`, → AC6/BR-129) |
 | status | TEXT | CHECK ∈ {offen, geschlossen} |
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
 | opened_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
@@ -474,21 +490,52 @@ erDiagram
 | executed_at | TIMESTAMPTZ | NOT NULL |
 
 ### `transaction` — volle Transaktionshistorie (C-017, Steuer + Dashboard; append-only → BR-115)
+
+Präzisiert in S-035 (AC4/AC7): `waehrung`, `arrival_price`, `slippage_abs`
+ergänzt — die Verträge-Sektion von `docs/specs/depot.md` verlangte diese
+drei Felder für die Transaktionshistorie bereits (Tupel `{ trade_id,
+titel_id, richtung, menge, fill_preis, arrival_price, slippage, kosten,
+waehrung, zeitstempel }`), sie fehlten hier jedoch als Spalten.
+
+`fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf` waren bereits vor S-053 als
+Spalten angelegt (Migration `a1c4e7f2b930`, S-035), aber unbefüllt (NULL,
+Docstring-Vermerk „das ist AC6/S-053, ausserhalb dieser Story"); S-053
+(AC6) verdrahtet sie: `fx_rate` wird bei jedem Fremdwährungs-Fill (Kauf
+UND Verkauf) aus `FillInput.fx_rate` übernommen, `kapital_gv_chf`/
+`waehrungs_gv_chf` nur bei einem Fremdwährungs-**Verkauf** über
+`app.domain.portfolio.fx_attribution.berechne_fx_split_realisiert`
+gesetzt (kein G/V auf einen Kauf). Ergänzt ausserdem `fx_rate,
+kapital_gv_chf, waehrungs_gv_chf` in der Verträge-Sektion von
+`docs/specs/depot.md` (Transaktionshistorie-Tupel, das diese drei Felder
+bislang nicht führte).
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
-| position_id | UUID | FK → position.id |
+| position_id | UUID | FK → position.id, NULLable (ein Verkauf-Fill, der bei FIFO mehrere Lots verbraucht, ist keinem einzelnen Lot eindeutig zuordenbar — der Verträge-Vertrag der Historie selbst referenziert ohnehin nur `titel_id`, keine `position_id`) |
 | instrument_id | UUID | FK → instrument.id, NOT NULL |
 | typ | TEXT | CHECK ∈ {buy, sell, dividend, fee, fx_adjust} |
 | menge | NUMERIC(20,8) | |
-| preis | NUMERIC(20,8) | |
+| preis | NUMERIC(20,8) | (Fill-Preis) |
 | kosten_chf | NUMERIC(20,8) | NOT NULL DEFAULT 0 (echte Kosten, in Kostenbasis genettet) |
+| waehrung | TEXT | NOT NULL, CHECK length = 3 (ISO-Code, AC4 — Handelswährung des Fills) |
+| arrival_price | NUMERIC(20,8) | Kurs bei Signal/Order-Auslösung (nur bei typ ∈ {buy, sell} gesetzt — TCA-Basis, → AC7/BR-114) |
+| slippage_abs | NUMERIC(20,8) | = preis − arrival_price (realisierte Slippage je Trade, TCA, → AC7/BR-114) |
 | fx_rate | NUMERIC(20,8) | (Kurs zur Basiswährung) |
 | kapital_gv_chf | NUMERIC(20,8) | (FX-Attribution: Kapitalgewinn, → BR-129) |
 | waehrungs_gv_chf | NUMERIC(20,8) | (FX-Attribution: Währungsgewinn, → BR-129) |
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
 | booked_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
-| — | — | **append-only** — kein UPDATE/DELETE (Steuer-Auditpfad, → BR-115) |
+| — | — | **append-only** — kein UPDATE/DELETE (Steuer-Auditpfad, → BR-115); S-035 setzt dies per Postgres-Trigger (`BEFORE UPDATE OR DELETE ... RAISE EXCEPTION`) durch, plus App-seitig dadurch, dass `PositionRepository` für diese Tabelle nur eine Schreib- (`schreibe_transaktion`, reines Insert) und eine Lese-Methode (`historie_je_titel`) anbietet — keine Update-/Delete-Methode existiert im Port |
+
+### `depot_fill_dedup` — Idempotenz-Ledger für Fill-Zustellung (ADR-011, P8; nachgezogen S-016 DBA-Zweit-Review)
+| Feld | Typ | Constraint |
+|---|---|---|
+| client_order_id | TEXT | PK (Dedup-Schlüssel aus der Order-Ausführung, ADR-011) |
+| instrument_id | UUID | FK → instrument.id, NOT NULL |
+| richtung | TEXT | CHECK ∈ {kauf, verkauf}, NOT NULL |
+| verbucht_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| — | — | **Nur Dedup-Marker** — KEIN Ersatz für die volle append-only Transaktionshistorie (`transaction`, AC4/AC7 → S-035); S-035 kann bei Bedarf einen eigenen UNIQUE-Constraint direkt auf `transaction.client_order_id` einführen und diese Tabelle ablösen, das entscheidet die jeweilige Story |
 
 ### `risk_check_log` — Risikomanagement-Entscheid beim Kauf (C-015)
 | Feld | Typ | Constraint |
@@ -504,6 +551,17 @@ erDiagram
 ---
 
 ## 5 · Depot-Aggregate (C-015, C-017)
+
+> **S-036 (AC8/AC9)** liefert die Portfolio-Aggregate (Gewichtung je GICS-
+> Branche/Anlageklasse, Cash-Quote) sowie den Depot-Stand/Titel-Strategie-
+> Exit-Regeln-Output als **live berechnete Domain-Funktion** aus den
+> offenen `position`-Zeilen (`app.domain.portfolio.portfolio_aggregate`),
+> NICHT aus den beiden folgenden Tabellen — konsistent mit der NFR
+> „Aggregate sind aus Positionen + Historie reproduzierbar (kein stiller
+> Zustand ohne Herleitung)". `portfolio_snapshot`/`portfolio_weight`
+> bleiben als Schema für eine spätere **Persistenz-/Historien-Story**
+> (Zeitreihen-Trend fürs Dashboard) reserviert und sind von S-036 nicht
+> migriert worden.
 
 ### `portfolio_snapshot` — Depot-Aggregat je Zeitpunkt
 | Feld | Typ | Constraint |
@@ -629,6 +687,7 @@ erDiagram
 | trade_fill | (order_id), (executed_at) | Fills je Order |
 | transaction | (position_id), (instrument_id), (booked_at), (mode) | Steuer-/Dashboard-Historie |
 | risk_check_log | (position_id), (created_at) | Risiko-Audit |
+| depot_fill_dedup | PK (client_order_id), (instrument_id) | Idempotenz-Lookup (ADR-011/BR-134) + Fills je Titel |
 | portfolio_weight | (snapshot_id) | Gewichtungen je Snapshot |
 | trial_registry | (hypothesis_id), UNIQUE (hypothesis_id, variant_hash) | DSR-Zählung |
 | gate_result | (trial_id), (ampel) | Gate-Auswertung |
@@ -676,7 +735,7 @@ erDiagram
 | BR-112 | position.einstand_methode | Default gleitender Durchschnitt (CH), FIFO optional | DB-DEFAULT + CHECK |
 | BR-113 | order.mode | mode ∈ {echt, simuliert}; muss zu Position-mode und globalem/Klassen-Modus passen | App + DB-CHECK |
 | BR-114 | trade_fill.slippage_abs | slippage_abs = fill_preis − arrival_price je Fill gespeichert (TCA) | App |
-| BR-115 | transaction | Append-only; kein UPDATE/DELETE (Steuer-Auditpfad) | DB (kein Update/Delete-Grant) + App |
+| BR-115 | transaction | Append-only; kein UPDATE/DELETE (Steuer-Auditpfad) | DB (Trigger: `BEFORE UPDATE OR DELETE` löst Exception aus, S-035) + App (Port bietet keine Update-/Delete-Methode) |
 | BR-116 | portfolio_weight | Σ weight_pct je (snapshot, dimension) = 100; cash_quote_pct konsistent | App |
 | BR-117 | portfolio_strategy / portfolio_class_limit | Grenzwerte: Einzelposition/Sektor/Klasse/Cash innerhalb Profil-Bandbreiten; genau **eine** aktive Depotstrategie | App + partieller UNIQUE-Index |
 | BR-118 | trial_registry | Append-only; jede getestete Variante bleibt (abgelehnte → archived=true), **nie löschen** — DSR-Validität | DB (kein Delete-Grant) + App |
@@ -695,6 +754,7 @@ erDiagram
 | BR-131 | (verschoben — Folge-Story) | Robuster z-Score gekappt auf ±3. `market_data_silver.z_score` war Teil des ursprünglichen (Signal-Bündel-)Zuschnitts der Tabelle; die S-024-Präzisierung (§2) hat diese Spalte entfernt, da sie nicht Teil des AC3/AC6-Silver-Datensatz-Vertrags ist — die Regel gilt für eine künftige Datenquellen-Abfrage-Signalaggregations-Story (z-Score-Feld dort neu einzuführen) | App (Folge-Story) |
 | BR-132 | analysis_method.last_reviewed_at | Quartalshinweis (AC11): liegt `last_reviewed_at` ≥ ~1 Quartal (90 Tage) zurück, gilt die Methode als review-fällig (Erinnerung/Kennzeichnung) — **kein** automatisches Ändern von `ranking` | App (`app/db/analysis_method_review.py`) |
 | BR-133 | category_weight_version / analysis_method_version | Genau eine Zeile mit `is_current = true` je Versionsregister (AC10) | DB (partieller UNIQUE-Index `WHERE is_current`) |
+| BR-134 | depot_fill_dedup.client_order_id | Idempotenz: PK/UNIQUE auf `client_order_id` — ein Fill wird nie zweimal gegen den Bestand verbucht (ADR-011, P8, at-least-once). *(Beim Merge von F-011 von BR-132 auf BR-134 umnummeriert — BR-132/BR-133 waren parallel durch S-018 vergeben.)* | DB-UNIQUE + App |
 
 ---
 
@@ -707,7 +767,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
 5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`. `analysis_result` referenziert bei Einführung zusätzlich `category_weight_version.id` und `analysis_method_version.id` (AC10 — welche Konfigurationsversion der Analyse zugrunde lag), sobald diese Story `analysis_result` anlegt.
-6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`.
+6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`.
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.

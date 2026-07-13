@@ -15,3 +15,5 @@ node_modules/
 # Playwright Regression-Test-Artefakte (nicht versioniert; Testdefinitionen bleiben im Git)
 test-results/
 playwright-report/
+# Feature-Drain Run-State (gehört untracked — Kollision mit Drain-Session-Erkennung, s. 0285e8b; notes.md bleibt versioniert)
+board/runs/*/state.yaml
