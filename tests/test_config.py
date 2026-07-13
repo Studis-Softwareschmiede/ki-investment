@@ -3,6 +3,7 @@ die Einstand-Methode-Default-Konfiguration (Story S-016).
 
 Covers (llm-grounding): AC5
 Covers (depot): AC5
+Covers (kandidatensuche): AC6, AC7, AC10
 
 `app.config.Settings.toleranz_config` trägt die konfigurierbaren
 Toleranzschwellen je Kennzahl-Typ (absolut/relativ) — provisorische
@@ -15,13 +16,21 @@ zwischen unterschiedlichen Env-Zuständen neu zu laden.
 die systemweite Default-Einstand-Methode für den allerersten Kauf eines
 Titels — Default `gleitender_durchschnitt` (CH-Kontext), per
 `EINSTAND_METHODE_DEFAULT` ohne Codeänderung auf `fifo` umstellbar.
+
+`app.config.Settings.kandidatensuche_liquiditaets_mindestschwelle`/
+`kandidatensuche_volatilitaets_fenster_min`/`_max` (S-029, AC6/AC10) tragen
+die Querschnitt-Filter-Schwellen; `kandidatensuche_profil_overrides` (S-029,
+AC7/AC10) trägt die je Anlageklasse gemergten Suchprofil-Overrides — alle
+ohne Codeänderung per Env-Variable überschreibbar.
 """
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
-from app.config import DEFAULT_TOLERANZEN, Settings, get_settings
+from app.config import DEFAULT_TOLERANZEN, Settings, get_settings, lade_querschnitt_filter
 
 
 @pytest.fixture(autouse=True)
@@ -86,3 +95,68 @@ def test_settings_ueberschreibt_einstand_methode_default_ohne_codeaenderung(
     settings = Settings(_env_file=None)
 
     assert settings.einstand_methode_default == "fifo"
+
+
+def test_settings_liefert_provisorische_querschnitt_filter_defaults_ohne_env() -> None:
+    """@trace kandidatensuche#AC6,AC10 — ohne Env-Override liefert
+    `Settings` die provisorischen, unkalibrierten Querschnitt-Filter-
+    Defaults."""
+    settings = Settings(_env_file=None)
+
+    assert settings.kandidatensuche_liquiditaets_mindestschwelle == Decimal("1")
+    assert settings.kandidatensuche_volatilitaets_fenster_min == Decimal("0")
+    assert settings.kandidatensuche_volatilitaets_fenster_max == Decimal("1000000")
+
+
+def test_settings_ueberschreibt_querschnitt_filter_schwellen_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace kandidatensuche#AC6,AC10 — die drei Querschnitt-Filter-
+    Schwellen sind je einzeln über eigene Umgebungsvariablen ersetzbar."""
+    monkeypatch.setenv("KANDIDATENSUCHE_LIQUIDITAETS_MINDESTSCHWELLE", "3")
+    monkeypatch.setenv("KANDIDATENSUCHE_VOLATILITAETS_FENSTER_MIN", "0.5")
+    monkeypatch.setenv("KANDIDATENSUCHE_VOLATILITAETS_FENSTER_MAX", "50")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.kandidatensuche_liquiditaets_mindestschwelle == Decimal("3")
+    assert settings.kandidatensuche_volatilitaets_fenster_min == Decimal("0.5")
+    assert settings.kandidatensuche_volatilitaets_fenster_max == Decimal("50")
+
+
+def test_lade_querschnitt_filter_baut_vertrag_aus_settings() -> None:
+    """@trace kandidatensuche#AC6,AC10 — `lade_querschnitt_filter` liefert
+    den `QuerschnittFilter`-Vertrag, befüllt aus den `Settings`-Schwellen."""
+    get_settings.cache_clear()
+    filter_ = lade_querschnitt_filter(Settings(_env_file=None))
+
+    assert filter_.liquiditaets_mindestschwelle == Decimal("1")
+    assert filter_.volatilitaets_fenster.min == Decimal("0")
+    assert filter_.volatilitaets_fenster.max == Decimal("1000000")
+
+
+def test_settings_liefert_leere_suchprofil_overrides_ohne_env() -> None:
+    """@trace kandidatensuche#AC7,AC10 — ohne Env-Override ist
+    `kandidatensuche_profil_overrides` leer (kein Profil wird
+    verändert)."""
+    settings = Settings(_env_file=None)
+
+    assert settings.kandidatensuche_profil_overrides == {}
+
+
+def test_settings_ueberschreibt_suchprofil_overrides_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace kandidatensuche#AC7,AC10 — `KANDIDATENSUCHE_PROFIL_OVERRIDES`
+    (JSON, Anlageklasse als String-Key) befüllt je Klasse einen Modus-
+    und/oder Schwellen-Override, ohne Codeänderung."""
+    monkeypatch.setenv(
+        "KANDIDATENSUCHE_PROFIL_OVERRIDES",
+        '{"1": {"modus": "periodisch", "schwellen": {"rvol_faktor": 2.5}}}',
+    )
+
+    settings = Settings(_env_file=None)
+
+    override = settings.kandidatensuche_profil_overrides[1]
+    assert override.modus == "periodisch"
+    assert override.schwellen == {"rvol_faktor": Decimal("2.5")}

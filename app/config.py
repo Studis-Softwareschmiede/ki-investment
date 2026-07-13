@@ -58,6 +58,28 @@ Folge-Story, S-049, und modelliert die tatsächliche Fill-Slippage, nicht die
 Pre-Trade-Schätzung dieser Story) — provisorisch gewählt: **5 Basispunkte
 (0.05 %)**, ohne Codeänderung über `ERWARTETE_SLIPPAGE_PCT_DEFAULT`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
+
+Aus S-029 (AC6/AC7/AC10, `docs/specs/kandidatensuche.md`) kommen die
+Kandidatensuche-Querschnitt-Filter-Schwellen +
+Suchprofil-Konfig-Overrides hinzu (`app.domain.kandidatensuche.*`):
+`kandidatensuche_liquiditaets_mindestschwelle` +
+`kandidatensuche_volatilitaets_fenster_min`/`_max` (AC6, "auf jeden
+Kandidaten angewandt" — Werte beziehen sich auf die bereits von
+`app.orchestration.datasource_query` gelieferten `SignalBuendel.liquiditaet`
+/`volatilitaet`-Proxys). Beide Schwellen sind laut Spec explizit
+"provisorische Defaults, noch nicht kalibriert" — hier bewusst WEIT
+gefasst gewählt (Liquidität ≥ 1 meldende Quelle, Volatilitäts-Fenster
+[0, 1'000'000]), damit der uncalibrierte Default keinen Kandidaten
+funktional ausschliesst ("Betrieb nur im Simulationsmodus sinnvoll", AC10)
+— ohne Codeänderung über `KANDIDATENSUCHE_LIQUIDITAETS_MINDESTSCHWELLE`/
+`KANDIDATENSUCHE_VOLATILITAETS_FENSTER_MIN`/`_MAX` überschreibbar.
+`kandidatensuche_profil_overrides` (AC7 `modus`, AC10 `schwellen`) erlaubt
+je Anlageklasse einen Konfig-Override eines registrierten `Suchprofil`
+(`app.domain.kandidatensuche.suchprofil.wende_override_an`) über die
+Umgebungsvariable `KANDIDATENSUCHE_PROFIL_OVERRIDES` (JSON-Mapping
+Anlageklasse (als String-Key) → `{"modus": ..., "schwellen": {...}}`,
+Muster von `TOLERANZ_CONFIG` folgend, hier aber pro Klasse gemerged statt
+vollständig ersetzt, siehe `SuchprofilOverride`-Docstring).
 """
 
 from __future__ import annotations
@@ -69,6 +91,11 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.contracts.kandidatensuche import (
+    QuerschnittFilter,
+    SuchprofilOverrides,
+    VolatilitaetsFenster,
+)
 from app.contracts.llm_grounding import ToleranzKonfig
 
 #: Provisorische Default-Toleranzen je Kennzahl-Typ (AC5 — "ihre konkrete
@@ -172,6 +199,28 @@ class Settings(BaseSettings):
     #: `ERWARTETE_SLIPPAGE_PCT_DEFAULT` überschreibbar.
     erwartete_slippage_pct_default: float = Field(default=0.05, ge=0)
 
+    #: Querschnitt-Filter-Liquiditätsmindestschwelle (AC6, S-029) — bewusst
+    #: weit gefasster, unkalibrierter Default (siehe Modul-Docstring), ohne
+    #: Codeänderung über `KANDIDATENSUCHE_LIQUIDITAETS_MINDESTSCHWELLE`
+    #: überschreibbar.
+    kandidatensuche_liquiditaets_mindestschwelle: Decimal = Field(default=Decimal("1"))
+
+    #: Querschnitt-Filter-Volatilitäts-Fenster Untergrenze (AC6, S-029),
+    #: ohne Codeänderung über `KANDIDATENSUCHE_VOLATILITAETS_FENSTER_MIN`
+    #: überschreibbar.
+    kandidatensuche_volatilitaets_fenster_min: Decimal = Field(default=Decimal("0"))
+
+    #: Querschnitt-Filter-Volatilitäts-Fenster Obergrenze (AC6, S-029),
+    #: ohne Codeänderung über `KANDIDATENSUCHE_VOLATILITAETS_FENSTER_MAX`
+    #: überschreibbar.
+    kandidatensuche_volatilitaets_fenster_max: Decimal = Field(default=Decimal("1000000"))
+
+    #: Suchprofil-Konfig-Overrides je Anlageklasse (AC7 `modus`, AC10
+    #: `schwellen`, S-029) — ohne Codeänderung über
+    #: `KANDIDATENSUCHE_PROFIL_OVERRIDES` überschreibbar (Default: kein
+    #: Override, jedes registrierte Profil behält seinen Default-Wert).
+    kandidatensuche_profil_overrides: SuchprofilOverrides = Field(default_factory=dict)
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -179,3 +228,17 @@ def get_settings() -> Settings:
     globaler Instanziierung, damit Tests sie via
     `get_settings.cache_clear()` (nach Env-Änderung) neu laden können."""
     return Settings()
+
+
+def lade_querschnitt_filter(settings: Settings | None = None) -> QuerschnittFilter:
+    """AC6/AC10: baut den Querschnitt-Filter aus den konfigurierten (ohne
+    Codeänderung überschreibbaren) `Settings`-Schwellen. `settings=None`
+    liest den `get_settings()`-Singleton."""
+    settings = settings or get_settings()
+    return QuerschnittFilter(
+        liquiditaets_mindestschwelle=settings.kandidatensuche_liquiditaets_mindestschwelle,
+        volatilitaets_fenster=VolatilitaetsFenster(
+            min=settings.kandidatensuche_volatilitaets_fenster_min,
+            max=settings.kandidatensuche_volatilitaets_fenster_max,
+        ),
+    )
