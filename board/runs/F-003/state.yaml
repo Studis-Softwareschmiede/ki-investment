@@ -1,0 +1,11 @@
+schema_version: 1
+feature_id: F-003
+phase: story
+current_story: null
+progress:
+  done: 3
+  total: 5
+round: 0
+started_at: '2026-07-13T01:43:20Z'
+updated_at: '2026-07-13T01:43:21Z'
+last_error: null
