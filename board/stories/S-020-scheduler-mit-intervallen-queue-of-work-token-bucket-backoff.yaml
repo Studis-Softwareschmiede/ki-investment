@@ -1,7 +1,7 @@
 id: S-020
 parent: F-003
 title: Scheduler mit Intervallen, Queue-of-Work/Token-Bucket, Backoff/DLQ, Toggle-Skip
-status: To Do
+status: In Progress
 priority: P1
 spec: docs/specs/dateneingang.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: Redis-Queue mit Token-Bucket je Quelle, konfigurierbare Intervall
   Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-020-scheduler-queue-backoff
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:06Z'
-updated_at: '2026-07-12T10:09:07Z'
+updated_at: '2026-07-13T01:20:40Z'
 done_at: null
