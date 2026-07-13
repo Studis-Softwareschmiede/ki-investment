@@ -1,7 +1,7 @@
 id: S-018
 parent: F-002
 title: Methodentabellen mit fixem Ranking, Versionierung & Quartals-Review-Hinweis
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/anlageklassen-config.md
 implements:
@@ -22,9 +22,9 @@ estimate_note: analysis_method-Seed je Klasse/Kategorie plus Versionierungs-Mech
   Aufwand, Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-018-methodentabellen
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/37
 blocked_reason: null
 created_at: '2026-07-12T10:09:03Z'
-updated_at: '2026-07-12T10:09:04Z'
-done_at: null
+updated_at: '2026-07-13T01:00:58Z'
+done_at: '2026-07-13T01:00:58Z'

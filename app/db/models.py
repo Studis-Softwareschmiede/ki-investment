@@ -106,21 +106,56 @@ class AnalysisCategory(Base):
         return f"AnalysisCategory(code={self.code!r}, name={self.name!r})"
 
 
+class CategoryWeightVersion(Base):
+    """Versionsregister für `category_weight` (data-model.md
+    `category_weight_version`, S-018/AC10) — löst die reine `config_version`-
+    Tag-Spalte aus S-004 ab. Eine Version ist ein vollständiger, append-only
+    Snapshot aller Kategoriegewichte; genau eine Version trägt
+    `is_current = True` (BR-133, DB-seitig durch einen partiellen
+    UNIQUE-Index erzwungen, siehe Migration).
+    """
+
+    __tablename__ = "category_weight_version"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true()
+    )
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"CategoryWeightVersion(id={self.id!r}, is_current={self.is_current!r})"
+
+
 class CategoryWeight(Base):
     """Kategoriegewicht je Anlageklasse (data-model.md `category_weight`,
     BR-101). Die fünf Gewichte einer Klasse müssen sich auf exakt 100 %
     summieren (AC6/AC7) — DB-seitig durch einen deferred Constraint-Trigger
-    durchgesetzt (siehe Migration `2da446925bbc_...py`), App-seitig durch
-    `app.db.category_weights.validate_category_weights`.
+    durchgesetzt (siehe Migration `2da446925bbc_...py` + Folge-Migration
+    S-018), App-seitig durch `app.db.category_weights.validate_category_weights`.
 
-    `config_version` ist eine Vorbereitung auf die versionierten
-    Konfigurationsdaten aus AC10 (voller Versionierungs-Workflow folgt in
-    einer eigenen Folge-Story) — Default 1, noch ohne History-Tracking.
+    `config_version_id` (S-018/AC10) ersetzt die vormalige `config_version
+    SMALLINT`-Tag-Spalte (S-004): jede Änderung legt eine neue
+    `CategoryWeightVersion`-Zeile an (append-only, siehe
+    `app.db.config_versions.erstelle_neue_category_weight_version`) statt
+    bestehende Zeilen zu überschreiben.
     """
 
     __tablename__ = "category_weight"
     __table_args__ = (
         CheckConstraint("weight_pct >= 0 AND weight_pct <= 100", name="ck_category_weight_range"),
+        Index("ix_category_weight_config_version_id", "config_version_id"),
     )
 
     asset_class_id: Mapped[int] = mapped_column(
@@ -129,15 +164,116 @@ class CategoryWeight(Base):
     category_code: Mapped[str] = mapped_column(
         String, ForeignKey("analysis_category.code"), primary_key=True
     )
-    weight_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
-    config_version: Mapped[int] = mapped_column(
-        SmallInteger, nullable=False, default=1, server_default=sa.text("1")
+    config_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("category_weight_version.id"),
+        primary_key=True,
     )
+    weight_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return (
             f"CategoryWeight(asset_class_id={self.asset_class_id!r}, "
-            f"category_code={self.category_code!r}, weight_pct={self.weight_pct!r})"
+            f"category_code={self.category_code!r}, "
+            f"config_version_id={self.config_version_id!r}, weight_pct={self.weight_pct!r})"
+        )
+
+
+class AnalysisMethodVersion(Base):
+    """Versionsregister für `analysis_method` (data-model.md
+    `analysis_method_version`, S-018/AC10) — unabhängig von
+    `CategoryWeightVersion` (kein gemeinsamer Versionszähler über beide
+    Konfig-Domänen). Genau eine Version trägt `is_current = True` (BR-133).
+    """
+
+    __tablename__ = "analysis_method_version"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+    is_current: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true()
+    )
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"AnalysisMethodVersion(id={self.id!r}, is_current={self.is_current!r})"
+
+
+class AnalysisMethod(Base):
+    """Methodentabelle je Anlageklasse/Analysekategorie (data-model.md
+    `analysis_method`, C-006/C-007/C-018, AC9/AC10/AC11).
+
+    `ranking` ist klassenspezifisch fix (1-10, DB-CHECK, BR-102) und ändert
+    sich nicht je Analyse (AC9). `config_version_id` versioniert die
+    Methodentabelle analog zu `CategoryWeight` (append-only, AC10).
+    `last_reviewed_at` trägt den AC11-Quartals-Review-Hinweis
+    (`app.db.analysis_method_review`) — ein Review aktualisiert nur diesen
+    Zeitstempel, niemals `ranking` selbst (Spec-Nicht-Ziel: kein
+    automatisches Anpassen von Rankings).
+    """
+
+    __tablename__ = "analysis_method"
+    __table_args__ = (
+        CheckConstraint("ranking >= 1 AND ranking <= 10", name="ck_analysis_method_ranking_range"),
+        CheckConstraint(
+            "automation_grade IS NULL OR automation_grade IN ('AUTO', 'TEIL', 'BUILD')",
+            name="ck_analysis_method_automation_grade",
+        ),
+        UniqueConstraint(
+            "asset_class_id", "code", "config_version_id", name="uq_analysis_method_code_version"
+        ),
+        Index(
+            "ix_analysis_method_asset_class_category_version",
+            "asset_class_id",
+            "category_code",
+            "config_version_id",
+        ),
+        Index("ix_analysis_method_config_version_id", "config_version_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    category_code: Mapped[str] = mapped_column(
+        String, ForeignKey("analysis_category.code"), nullable=False
+    )
+    config_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis_method_version.id"), nullable=False
+    )
+    code: Mapped[str] = mapped_column(String, nullable=False)
+    kurzbezeichnung: Mapped[str] = mapped_column(String, nullable=False)
+    beschreibung: Mapped[str | None] = mapped_column(String, nullable=True)
+    nutzen: Mapped[str | None] = mapped_column(String, nullable=True)
+    ranking: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    automation_grade: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_reviewed_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisMethod(asset_class_id={self.asset_class_id!r}, "
+            f"category_code={self.category_code!r}, code={self.code!r}, "
+            f"ranking={self.ranking!r})"
         )
 
 

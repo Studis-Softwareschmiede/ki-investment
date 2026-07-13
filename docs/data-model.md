@@ -90,28 +90,56 @@ erDiagram
 | name | TEXT | NOT NULL |
 | ist_risiko | BOOLEAN | NOT NULL, DEFAULT false (nur `risiko_quant` → true; Basis für Sanity-Cap BR-106) |
 
-### `category_weight` — Kategoriegewicht je Anlageklasse (C-006, C-007)
+### `category_weight_version` — Versionsregister Kategoriegewichte (C-006, AC10; S-018, löst den S-004-Platzhalter ab)
+| Feld | Typ | Constraint |
+|---|---|---|
+| id | UUID | PK |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() |
+| is_current | BOOLEAN | NOT NULL, DEFAULT true — Partial-UNIQUE-Index (`WHERE is_current`) erzwingt genau eine aktuell gültige Version (→ BR-133) |
+| note | TEXT | optionale Änderungsnotiz (NFR „nachvollziehbar auditierbar") |
+
+### `category_weight` — Kategoriegewicht je Anlageklasse (C-006, C-007; versioniert seit S-018/AC10)
 | Feld | Typ | Constraint |
 |---|---|---|
 | asset_class_id | SMALLINT | FK → asset_class.id |
 | category_code | TEXT | FK → analysis_category.code |
+| config_version_id | UUID | FK → category_weight_version.id, NOT NULL |
 | weight_pct | NUMERIC(6,3) | NOT NULL, CHECK `0 ≤ weight_pct ≤ 100` |
-| config_version | SMALLINT | NOT NULL, DEFAULT 1 — reine Tag-Spalte, **NICHT** Teil des PK und **NICHT** ausreichend für AC10 ("nachvollziehbar, welche Konfigurationsversion einer Analyse zugrunde lag"): ein künftiges Hochzählen per UPDATE überschreibt die Vorgänger-Gewichte in derselben Zeile, es entsteht **keine** Historie. Für AC10 fehlt noch — Folge-Story — entweder (a) eine separate Historien-/Snapshot-Tabelle je Version, oder (b) `config_version` als Teil eines erweiterten PK (`asset_class_id, category_code, config_version`) mit append-only-Zeilen + „aktuell gültig"-Zeiger; in beiden Fällen zusätzlich eine Referenz von `analysis_result` auf die tatsächlich genutzte Version |
-| — | — | PK (asset_class_id, category_code) · Σ je Klasse = 100 (→ BR-101) |
+| — | — | PK (asset_class_id, category_code, config_version_id) · Σ je (Klasse, Version) = 100 (→ BR-101, jetzt versions-scope) |
 
-### `analysis_method` — Methodentabelle je Klasse (C-006, C-007, C-018)
+> **S-018/AC10-Präzisierung:** die vormalige `config_version SMALLINT`-Tag-Spalte (S-004, reine Wert-Markierung ohne Historie, siehe Migration `2da446925bbc`) ist per Folge-Migration durch `config_version_id` (FK → `category_weight_version`) ersetzt — jede Änderung an den Gewichten legt eine **neue** `category_weight_version`-Zeile an; eine Version ist ein **vollständiger Snapshot** aller 11×5 Gewichte (append-only, alte Version bleibt unverändert erhalten, kein UPDATE bestehender Zeilen). „Aktuell gültig" = `category_weight_version.is_current = true`. Der deferred Σ=100-Constraint-Trigger (BR-101) prüft ab dieser Migration je `(asset_class_id, config_version_id)`, nicht mehr nur je `asset_class_id` (sonst würden mehrere Versionen gemeinsam summiert).
+
+### `analysis_method_version` — Versionsregister Methodentabellen (C-006, C-018, AC10; S-018)
+| Feld | Typ | Constraint |
+|---|---|---|
+| id | UUID | PK |
+| created_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() |
+| is_current | BOOLEAN | NOT NULL, DEFAULT true — Partial-UNIQUE-Index (`WHERE is_current`) erzwingt genau eine aktuell gültige Version (→ BR-133) |
+| note | TEXT | optionale Änderungsnotiz |
+
+> Versioniert unabhängig von `category_weight_version` (kein gemeinsamer Versionszähler über beide Konfig-Domänen — eine Methodentabellen-Änderung bumpt nicht automatisch die Kategoriegewicht-Version und umgekehrt). Eine künftige `analysis_result`-Zeile referenziert bei Bedarf beide IDs getrennt (Folge-Story, sobald `analysis_result` existiert, siehe §11).
+
+### `analysis_method` — Methodentabelle je Klasse (C-006, C-007, C-018; versioniert seit S-018/AC10, Review-Hinweis AC11)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
 | asset_class_id | SMALLINT | FK → asset_class.id, NOT NULL |
 | category_code | TEXT | FK → analysis_category.code, NOT NULL |
+| config_version_id | UUID | FK → analysis_method_version.id, NOT NULL |
 | code | TEXT | NOT NULL (z.B. F1, T1, Q1, M1, R1) |
 | kurzbezeichnung | TEXT | NOT NULL |
 | beschreibung | TEXT | |
 | nutzen | TEXT | |
 | ranking | SMALLINT | NOT NULL, CHECK `1 ≤ ranking ≤ 10` (fix je Klasse, quartalsweise Review; → BR-102) |
 | automation_grade | TEXT | CHECK ∈ {AUTO, TEIL, BUILD} (C-018 Plugin-Integrationsgrad) |
-| — | — | UNIQUE (asset_class_id, code) |
+| last_reviewed_at | TIMESTAMPTZ | NOT NULL, DEFAULT now() — Basis des AC11-Quartals-Hinweises (→ BR-132); ein Review aktualisiert **nur** diesen Zeitstempel, `ranking` bleibt unverändert (kein automatisches Anpassen, Spec-Nicht-Ziel) |
+| — | — | UNIQUE (asset_class_id, code, config_version_id) — append-only je Version |
+
+> **Seed (S-018 Iteration 2 — vollständig):** die Seed-Migration (`8f183aee9753`) befüllt ALLE 11 Klassen × (bis zu) 5 Analysekategorien mit 190 Methoden-Zeilen, 1:1 transkribiert aus der Konzept-Quelle "KI Investment – Anlageklassen.md" (Obsidian-Vault, C-006/C-007/C-018) — `docs/specs/anlageklassen-config.md` (Verträge) selbst nennt weiterhin nur das Aktien/Fundamental-Beispiel, die vollständigen Listen liegen ausschliesslich in der Konzept-Quelle. Zwei dokumentierte Mapping-Sonderfälle (kein Erfinden, keine stille Annahme):
+> - **Cash/Geldmarkt × Technisch:** die Konzept-Quelle führt dort keine Methodentabelle ("nicht anwendbar", 0 %-Gewicht laut AC8) — `(asset_class_id=3, category_code='technisch')` bleibt bewusst OHNE Seed-Zeilen; eine leere Methodentabelle für diese Kombination ist zulässig (kein Constraint verlangt ≥ 1 Zeile je (Klasse, Kategorie)).
+> - **Aktive Fonds:** die Quelle führt "Performance / Quantitativ (30 %)" (Codes P1-P5) als erste Kategorie — gemappt auf den kanonischen `fundamental`-Slot (5 kanonische Kategorien gelten unverändert, AC6; 30 % = exakt das Aktive-Fonds-Fundamental-Gewicht aus AC8).
+>
+> Ranking-Werte werden beim Migrations-Laden gegen 1–10 validiert (`_baue_analysis_method_seed()`); ein Quell-Wert ausserhalb löst einen harten Abbruch aus (kein stiller Clamp).
 
 ### `data_source` — Datenquellen-Registry (C-009, 12 Quellen in 5 Kategorien)
 | Feld | Typ | Constraint |
@@ -580,7 +608,11 @@ erDiagram
 
 | Tabelle | Index | Zweck |
 |---|---|---|
-| analysis_method | (asset_class_id, category_code) | Methodentabelle je Klasse/Kategorie laden |
+| analysis_method | (asset_class_id, category_code, config_version_id) | Methodentabelle je Klasse/Kategorie/Version laden |
+| analysis_method | (config_version_id) | Alle Methoden einer Version laden (Versions-Snapshot) |
+| analysis_method_version | UNIQUE partiell `WHERE is_current` | genau eine aktuell gültige Methodentabellen-Version (→ BR-133) |
+| category_weight | (config_version_id) | Alle Gewichte einer Version laden (Versions-Snapshot) |
+| category_weight_version | UNIQUE partiell `WHERE is_current` | genau eine aktuell gültige Kategoriegewicht-Version (→ BR-133) |
 | data_source_asset_class | (asset_class_id) | Quellen je Klasse (Datenquellen-Abfrage-Matching) |
 | platform_asset_class | (asset_class_id) | Plattform-Kosten je Klasse |
 | instrument | (asset_class_id), (symbol) | Klassenfilter + Symbol-Lookup |
@@ -630,7 +662,7 @@ erDiagram
 | BR-ID | Feld / Entität | Regel | Enforced by (Layer) |
 |---|---|---|---|
 | BR-100 | asset_class.id | Genau 11 Klassen, id ∈ 1…11, fachlich fix (keine synthetische ID) | DB-CHECK |
-| BR-101 | category_weight | Σ weight_pct je asset_class = 100 (±0.01) | App-Validierung + DB-Trigger/Deferred-Check |
+| BR-101 | category_weight | Σ weight_pct je (asset_class, config_version) = 100 (±0.01) | App-Validierung + DB-Trigger/Deferred-Check |
 | BR-102 | analysis_method.ranking | ranking ∈ 1…10 (fix je Klasse, quartalsweise Review) | DB-CHECK |
 | BR-103 | analysis_category_score.score | score ∈ 0.0…10.0 | DB-CHECK |
 | BR-104 | analysis_result.gesamtscore | gesamtscore ∈ 0.0…10.0 | DB-CHECK |
@@ -661,6 +693,8 @@ erDiagram
 | BR-129 | transaction | Bei currency ≠ CHF: kapital_gv_chf und waehrungs_gv_chf getrennt ausgewiesen (FX-Attribution) | App |
 | BR-130 | mode (alle transaktionalen Entitäten) | echt- und simuliert-Daten in Aggregaten/Snapshots nie vermischt | App + Filter |
 | BR-131 | (verschoben — Folge-Story) | Robuster z-Score gekappt auf ±3. `market_data_silver.z_score` war Teil des ursprünglichen (Signal-Bündel-)Zuschnitts der Tabelle; die S-024-Präzisierung (§2) hat diese Spalte entfernt, da sie nicht Teil des AC3/AC6-Silver-Datensatz-Vertrags ist — die Regel gilt für eine künftige Datenquellen-Abfrage-Signalaggregations-Story (z-Score-Feld dort neu einzuführen) | App (Folge-Story) |
+| BR-132 | analysis_method.last_reviewed_at | Quartalshinweis (AC11): liegt `last_reviewed_at` ≥ ~1 Quartal (90 Tage) zurück, gilt die Methode als review-fällig (Erinnerung/Kennzeichnung) — **kein** automatisches Ändern von `ranking` | App (`app/db/analysis_method_review.py`) |
+| BR-133 | category_weight_version / analysis_method_version | Genau eine Zeile mit `is_current = true` je Versionsregister (AC10) | DB (partieller UNIQUE-Index `WHERE is_current`) |
 
 ---
 
@@ -669,10 +703,10 @@ erDiagram
 Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 
 1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
-2. **Konfig mit FK auf Basis:** `category_weight`, `analysis_method`, `data_source`, `data_source_asset_class`, `trading_platform`, `platform_asset_class`, `portfolio_strategy`, `portfolio_class_limit`.
+2. **Konfig mit FK auf Basis:** `category_weight_version` → `category_weight`, `analysis_method_version` → `analysis_method`, `data_source`, `data_source_asset_class`, `trading_platform`, `platform_asset_class`, `portfolio_strategy`, `portfolio_class_limit`. Die Versionsregister (`*_version`) haben keine FK-Abhängigkeit und werden jeweils vor der zugehörigen versionierten Tabelle angelegt.
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
-5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`.
+5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`. `analysis_result` referenziert bei Einführung zusätzlich `category_weight_version.id` und `analysis_method_version.id` (AC10 — welche Konfigurationsversion der Analyse zugrunde lag), sobald diese Story `analysis_result` anlegt.
 6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`.
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
