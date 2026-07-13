@@ -229,6 +229,96 @@ class DataSourceAssetClass(Base):
         )
 
 
+class TradingPlatform(Base):
+    """Handelsplattform-Stammdaten (data-model.md §1 `trading_platform`,
+    C-016; Spec `docs/specs/ausfuehrung-paper.md` AC10/AC11, Story S-017).
+
+    Reine Referenzdaten-Registry — welche konkrete Plattform je Anlageklasse
+    zustaendig ist, ergibt sich aus `PlatformAssetClass` (M:N, `bevorzugt`-
+    Flag = Konfiguration der Zuordnung, siehe dortiger Docstring). Die
+    tatsaechliche Broker-Anbindung (IBKR-Paper-Adapter, AC5) ist Nicht-Ziel
+    dieser Story (S-046, Folge-Story) — `vault_ref` ist bereits hier
+    vorgesehen (analog `DataSource.vault_ref`, BR-126: nie Klartext-Credential
+    in der DB), bleibt aber bis zur Adapter-Story ungenutzt.
+
+    Diese Migration seedt bewusst KEINE konkreten Plattform-Zeilen: die
+    Spec/das Konzept nennen nur den Broker-Namen (Interactive Brokers), aber
+    keine konkreten Courtage-/Spread-/Mindestgebuehr-Zahlen je Anlageklasse
+    — deren Werte hier zu erfinden waere unbelegte Fabrikation. Die
+    Referenzdaten sind Konfiguration (NFR "alle ... Defaults konfigurierbar")
+    und werden ausserhalb dieser Story befuellt (Admin-Tooling/Migration
+    einer spaeteren Story mit tatsaechlich bekannten Konditionen).
+    """
+
+    __tablename__ = "trading_platform"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    gebuehrenmodell: Mapped[str | None] = mapped_column(String, nullable=True)
+    mindestgebuehr_chf: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2), nullable=False, default=Decimal("0"), server_default=sa.text("0")
+    )
+    api_handelbar: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true()
+    )
+    vault_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    paper_supported: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sa.true()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"TradingPlatform(name={self.name!r}, paper_supported={self.paper_supported!r})"
+
+
+class PlatformAssetClass(Base):
+    """Plattform ↔ Anlageklasse + Kosten (M:N, data-model.md §1
+    `platform_asset_class`, C-016; AC10/AC11).
+
+    `courtage_pct`/`typ_spread_pct` sind die Referenzdaten-Basis der
+    erwarteten Kosten (AC11), die `app.db.trading_platform.
+    berechne_erwartete_kosten()` an die (kuenftigen) Sizing-Module liefert.
+    `bevorzugt` ist die AC10-Konfiguration der Plattform-Zuordnung je
+    Anlageklasse ("Plattform-Zuordnung je Anlageklasse ist Konfiguration,
+    s. Spec «Verträge»") — `app.db.trading_platform.
+    waehle_plattform_fuer_anlageklasse()` liest ausschliesslich dieses Flag
+    (plus die Sonderregel "genau eine Plattform ohne Konkurrenz" fuer
+    Anlageklassen mit nur einem konfigurierten Kandidaten), es gibt keine
+    zusaetzliche Code-Priorisierung ausserhalb dieser Tabelle.
+
+    `ix_platform_asset_class_asset_class_id` (data-model.md §8: "Plattform-
+    Kosten je Klasse") deckt den Filter "welche Plattformen/Kosten fuer
+    Anlageklasse X" ab — der Composite-PK (platform_id, asset_class_id)
+    unterstuetzt einen reinen `asset_class_id`-Filter allein nicht (nicht
+    fuehrender Spaltenteil, analog `DataSourceAssetClass`-Praezedenzfall).
+    """
+
+    __tablename__ = "platform_asset_class"
+    __table_args__ = (Index("ix_platform_asset_class_asset_class_id", "asset_class_id"),)
+
+    platform_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trading_platform.id"), primary_key=True
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), primary_key=True
+    )
+    courtage_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
+    typ_spread_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
+    bevorzugt: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"PlatformAssetClass(platform_id={self.platform_id!r}, "
+            f"asset_class_id={self.asset_class_id!r}, bevorzugt={self.bevorzugt!r})"
+        )
+
+
 class MarketDataBronze(Base):
     """Bronze-Rohdaten — immutabel, Point-in-Time, versioniert (data-model.md
     §2 `market_data_bronze`, BR-121/BR-122; Spec `docs/specs/datenqualitaet.md`

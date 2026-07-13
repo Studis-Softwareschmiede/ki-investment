@@ -29,6 +29,17 @@ Umsetzung festzulegen", AC2) — provisorisch gewählt: **Alert bei 10 %,
 Kill bei 20 %** Rückgang vom laufenden Höchststand. Beide Werte sind ohne
 Codeänderung über `DRAWDOWN_ALERT_SCHWELLE`/`DRAWDOWN_KILL_SCHWELLE`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
+
+Aus S-017 (AC11, `docs/specs/ausfuehrung-paper.md`) kommt
+`erwartete_slippage_pct_default` hinzu: der provisorische, konfigurierbare
+Prozentsatz, den `app.db.trading_platform.berechne_erwartete_kosten()` als
+geschätzte Slippage in die Pre-Trade-Kostenkalkulation für die (künftigen)
+Sizing-Module einrechnet. Weder Konzept noch Spec nennen einen konkreten
+Wert (das eigentliche Paper-Slippage-/Spread-Modell aus AC9 ist eine eigene
+Folge-Story, S-049, und modelliert die tatsächliche Fill-Slippage, nicht die
+Pre-Trade-Schätzung dieser Story) — provisorisch gewählt: **5 Basispunkte
+(0.05 %)**, ohne Codeänderung über `ERWARTETE_SLIPPAGE_PCT_DEFAULT`
+überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
 """
 
 from __future__ import annotations
@@ -99,6 +110,17 @@ class Settings(BaseSettings):
     #: `"drawdown"`). Provisorischer Default 20 % (s. Modul-Docstring),
     #: ohne Codeänderung über `DRAWDOWN_KILL_SCHWELLE` überschreibbar.
     drawdown_kill_schwelle: float = Field(default=0.20, ge=0, le=1)
+
+    #: Geschätzte Slippage (AC11, Pre-Trade-Kalkulation): Prozent-Zahl (z.B.
+    #: `0.05` = 0.05 %, analog `platform_asset_class.courtage_pct`/
+    #: `typ_spread_pct` in data-model.md — NICHT als Anteil 0-1 zu lesen)
+    #: des Order-Werts, den
+    #: `app.db.trading_platform.berechne_erwartete_kosten()` als geschätzte
+    #: Slippage in die erwarteten Kosten einrechnet — bewusst kein
+    #: Fill-Modell (das ist AC9/S-049, eigene Folge-Story). Provisorischer
+    #: Default 0.05 % (5 Basispunkte), ohne Codeänderung über
+    #: `ERWARTETE_SLIPPAGE_PCT_DEFAULT` überschreibbar.
+    erwartete_slippage_pct_default: float = Field(default=0.05, ge=0)
 
 
 @lru_cache

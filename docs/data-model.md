@@ -156,6 +156,18 @@ erDiagram
 | bevorzugt | BOOLEAN | DEFAULT false (bevorzugte Plattform je Klasse) |
 | — | — | PK (platform_id, asset_class_id) |
 
+> **Prozent-Konvention (S-017, AC10/AC11-Präzisierung):** `courtage_pct` und
+> `typ_spread_pct` sind — analog `category_weight.weight_pct` — Prozent-Zahlen
+> (z. B. `0.0500` = 0.05 %), **keine** Anteile 0–1. Konsumenten (z. B.
+> `app.db.trading_platform.berechne_erwartete_kosten`) teilen den
+> gespeicherten Wert vor der Multiplikation mit einem Order-Wert durch 100.
+> Diese Story seedt bewusst KEINE konkreten Zeilen für `trading_platform`/
+> `platform_asset_class` — weder Konzept noch Spec nennen belegte
+> Courtage-/Spread-/Mindestgebühr-Zahlen für Interactive Brokers je
+> Anlageklasse; die Referenzdaten sind Konfiguration und werden außerhalb
+> dieser Story mit tatsächlich bekannten Konditionen befüllt (z. B. im
+> Rahmen von S-046, der Broker-Adapter-Story).
+
 ### `instrument` — Titel / handelbares Instrument (C-007, C-017)
 | Feld | Typ | Constraint |
 |---|---|---|
