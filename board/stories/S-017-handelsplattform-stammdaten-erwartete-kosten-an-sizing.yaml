@@ -1,7 +1,7 @@
 id: S-017
 parent: F-015
 title: Handelsplattform-Stammdaten & erwartete Kosten an Sizing
-status: To Do
+status: Done
 priority: P0
 spec: docs/specs/ausfuehrung-paper.md
 implements:
@@ -20,9 +20,9 @@ estimate_note: Cold-Start; Referenzdaten (Gebühr/Mindestgebühr/Spread je Klass
   Pre-Trade-Kosten, früher Baustein (Sizing-Konsument).
 confidence: medium
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-017-plattform-stammdaten
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/38
 blocked_reason: null
 created_at: '2026-07-12T10:09:01Z'
-updated_at: '2026-07-12T10:09:03Z'
-done_at: null
+updated_at: '2026-07-13T01:32:02Z'
+done_at: '2026-07-13T01:32:00Z'

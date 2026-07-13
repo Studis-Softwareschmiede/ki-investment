@@ -74,6 +74,10 @@ Das Kauf-&-Verkaufsmodul führt gebilligte Käufe (vom Risikomanagement-Gate) un
 - **Handelsplattform-Stammdaten (Referenzdaten):** je Plattform/Anlageklasse `{ gebuehrenmodell, mindestgebuehr, typischer_spread }` → erwartete Kosten an Position-/Exit-Sizing.
 - **Konfiguration:** Modus (global + je Anlageklasse), Plattform-Zuordnung je Anlageklasse, Order-Timeout/Retry, Paper-Slippage-/Spread-Modell-Parameter.
 
+> **AC11-Präzisierung (S-017):** Die "geschätzte Slippage" der Pre-Trade-Kalkulation (AC11) ist NICHT dasselbe wie das Paper-Fill-Slippage-/Spread-Modell aus AC9 (das modelliert die tatsächliche Fill-Slippage einer bereits gesendeten Order, nicht die Vorab-Schätzung an das Sizing). Für AC11 ist ein eigener, einfacher **provisorischer, konfigurierbarer** Default-Prozentsatz vorgesehen (`Settings.erwartete_slippage_pct_default`, Default 0.05 % — Konzept/Spec nennen keinen konkreten Wert), unabhängig von den (Folge-Story S-049) Fill-Modell-Parametern.
+
+
+
 ## Edge-Cases & Fehlerverhalten
 - Order kleiner als die Mindest-Ordergrösse/Mindestgebühr-Schwelle → das Modul meldet dies zurück (Mindestgebühr-Effekt), statt einen unwirtschaftlichen Trade auszuführen.
 - Signal-Kurs zum Order-Zeitpunkt nicht verfügbar → Arrival-Price wird als unbestimmt markiert, Slippage nicht fälschlich als 0 gemeldet.
