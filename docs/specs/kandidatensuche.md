@@ -65,6 +65,7 @@ Die Kandidatensuche (Suchkriteria) definiert, **wonach** gesucht wird, um neue T
 ## Edge-Cases & Fehlerverhalten
 - Hoher RVOL ohne Katalysator (Small/Mid) → kein Kandidat (AC3/E1).
 - Reddit-Signal für Large-Cap/ETF vorhanden → wird ignoriert (kein Selektor, AC4).
+- Fehlende Liquiditäts-/Volatilitäts-Werte für einen Kandidaten (keine aggregierbare Quelle in der Datenquellen-Abfrage) → der Querschnitt-Filter (AC6) gilt als nicht erfüllt (Kandidat ausgeschlossen) — kein Schätzen, analog dem `[[dateneingang]]`-AC2-Prinzip "fehlend kennzeichnen statt schätzen".
 - Free-Tier-Daten verzögert (15–20 min) → für zeitkritische Klassen (Krypto, Daytrade-Aktien) als unzureichend markieren; die Suche darf sich nicht auf verzögerte Daten als Echtzeit-Signal verlassen.
 - Regelvorschlag ohne Gate-Freigabe → verworfen/geparkt, nie automatisch aktiv (AC8).
 - Alle Schwellen auf provisorischen Defaults, noch nicht kalibriert → Betrieb nur im Simulationsmodus sinnvoll (AC10).
