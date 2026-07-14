@@ -25,6 +25,10 @@ Diese Vorgaben gelten für die **Haupt-Session im Dialog mit dem Owner** — nic
   - `erklär` → Schicht 1 + 2 in Alltagssprache.
   - `technisch` → volle Details mit Pfaden/Kürzeln.
 
+## /flow-Orchestrator: eigene Lessons lesen
+
+Jede Session, die in diesem Repo als **/flow-Orchestrator** arbeitet (Board abarbeiten, Konsolidieren, Landen), liest zu Beginn `.claude/lessons/flow.md` — dort stehen die Orchestrator-Lessons (z. B. Resume-Kosten, Feature-Merge-Konsolidierung, Neustart-Recovery). Die Agenten-Verträge decken nur die coder/reviewer/tester-Lessons ab; flow.md ist der Kanal für Orchestrator-Ebene.
+
 ## Parallelbetrieb: mehrere Cloud-Sessions
 
 Der Owner arbeitet an diesem Repo häufig mit mehreren Cloud-Sessions gleichzeitig (z. B. um mehrere Anforderungen parallel einzubringen). Fremde, session-fremde Änderungen im Working Tree/Board sind normal — kein Hinweis an den Owner nötig, solange keine eigene Arbeit dadurch verloren geht.
