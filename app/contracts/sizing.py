@@ -66,9 +66,7 @@ class KellyFraktionsKonfiguration(BaseModel):
     #: AC2/P6: Anlageklassen-IDs, die als volatil gelten (Quarter-Kelly statt
     #: Half-Kelly). Konfigurierbar statt hartkodierte Code-Grenze im Kern
     #: (architecture.md §2 P6, C-006) — Default Krypto (7).
-    volatile_anlageklassen_ids: frozenset[int] = Field(
-        default=DEFAULT_VOLATILE_ANLAGEKLASSEN_IDS
-    )
+    volatile_anlageklassen_ids: frozenset[int] = Field(default=DEFAULT_VOLATILE_ANLAGEKLASSEN_IDS)
 
 
 class PositionSizingErgebnis(BaseModel):
