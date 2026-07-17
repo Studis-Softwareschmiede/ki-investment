@@ -1,7 +1,7 @@
 id: S-034
 parent: F-008
 title: Sell-Pfad (bestehende Titel) gegen fixierte Exit-Regeln
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/analyse-pipelines.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: 'Cold-Start: Wiederbewertung ausschliesslich gegen beim Kauf fixi
   (AC7). Empfängt Ereignisse aus depot-ueberwachung.'
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-034
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:34Z'
-updated_at: '2026-07-12T10:09:35Z'
-done_at: null
+updated_at: '2026-07-17T23:19:13Z'
+done_at: '2026-07-17T23:19:12Z'
