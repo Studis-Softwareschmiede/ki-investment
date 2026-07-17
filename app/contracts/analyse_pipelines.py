@@ -14,6 +14,13 @@ Output-Verträge aus `docs/specs/analyse-pipelines.md` ab:
   `app.domain.analysis_existing.sell_pfad.bewerte_bestehenden_titel`, zur
   Übergabe an das (noch nicht gebaute) Exit-Sizing (`[[sizing]]`,
   Nicht-Ziel dieser Story).
+- `ExitTriggerKontext` — (S-052, AC8-AC10) Erweiterung der Verträge "(b)
+  Input bestehende Titel" um die Depot-Felder `exit_regeln, strategie,
+  einstand, hoch_seit_kauf`, die die numerischen/zeitbasierten Stop-
+  Trigger-Prüfungen (Drawdown ggü. Hoch/Einstand, Stop-Typ je Strategie,
+  Time-Box-Ablauf) speisen. Optionaler Parameter von
+  `bewerte_bestehenden_titel` — fehlt er, bleibt das S-034-Verhalten
+  (jedes Ereignis erzeugt ein Soft-Exit-Signal) unverändert.
 
 `kategorie_scores` reicht `app.contracts.analyse_framework.KategorieScores`
 durch (Score-Engine, S-010) statt eine eigene, redundante DTO-Kopie zu
@@ -31,7 +38,8 @@ Basis-/Union-Typ) und aus zwei getrennten Domain-Paketen stammen
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -90,4 +98,46 @@ class SellSignal(BaseModel):
     zeitstempel: datetime
 
 
-__all__ = ["BuySignal", "Dringlichkeit", "SellSignal"]
+class ExitTriggerKontext(BaseModel):
+    """AC8-AC10 (S-052) Input-Erweiterung der Verträge "(b) Input
+    bestehende Titel": Depot-Zustand + die beim Kauf fixierten Stop-/
+    Time-Box-Exit-Regeln (bildet `app.domain.portfolio.ports
+    .ExitRegelnBestand` plus die für die Prüfung zusätzlich nötigen
+    Live-Werte ab), die die numerischen/zeitbasierten Stop-Trigger-
+    Prüfungen speisen:
+
+    - **AC8 (Drawdown-Trigger):** `hoch_seit_kauf`/`einstand` (Referenz-
+      Kurse) + `aktueller_kurs` (Fall-Prüfung) + `titel_bewegung_pct`/
+      `markt_bewegung_pct` (Underperformance-Prüfung, marktkontext-
+      normiert analog `app.domain.depot_ueberwachung.marktkontext
+      .normiere_kursbewegung`).
+    - **AC9 (Stop-Typ je Strategie):** `stop_typ` (aus `ExitRegelnBestand`,
+      bereits beim Kauf strategie-abhängig fixiert, S-038) + `atr_wert`/
+      `atr_multiplikator` (ATR-Trailing) bzw. `stop_loss_pct` (fix_pct,
+      Buy-and-Hold) — `stop_typ in ("fundamental", "keiner")` löst nie
+      einen numerischen Kurs-Stop aus (Value: qualitativer Stop; "keiner":
+      expliziter Verzicht).
+    - **AC10 (Time-Box):** `time_box` (optional, `None` = keine Frist) +
+      `position_alter` (verstrichene Zeit seit Kauf/letzter Bewegung).
+
+    Optionaler Parameter von `bewerte_bestehenden_titel` — fehlt dieser
+    Kontext (`None`), bleibt das S-034-Verhalten (jedes Ereignis erzeugt
+    ein Soft-Exit-Signal) unverändert (Cold-Start, solange kein Aufrufer
+    die Depot-Werte liefert, analog `ExitRegelnBestand`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    einstand: Decimal
+    hoch_seit_kauf: Decimal
+    aktueller_kurs: Decimal
+    titel_bewegung_pct: Decimal
+    position_alter: timedelta
+    markt_bewegung_pct: Decimal | None = None
+    stop_typ: str | None = None
+    atr_wert: Decimal | None = None
+    atr_multiplikator: Decimal | None = None
+    stop_loss_pct: Decimal | None = None
+    time_box: timedelta | None = None
+
+
+__all__ = ["BuySignal", "Dringlichkeit", "ExitTriggerKontext", "SellSignal"]
