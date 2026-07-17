@@ -70,6 +70,20 @@ benannt) — provisorisch gewählt: **24 Stunden (86400s)**, ohne
 Codeänderung über `DEPOT_UEBERWACHUNG_FRISCHE_FENSTER_SEKUNDEN`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
 
+Aus S-050 (AC12, `docs/specs/dateneingang.md`, A2) kommt
+`fred_recalculation_window_tage` hinzu: die Fensterbreite (in Tagen), die
+`app.adapters.sockets.fred.FredAdapter` bei jedem Abruf als
+`observation_start` an die FRED-API übergibt — für revisionsbehaftete
+Quellen wie FRED holt der Adapter damit bei JEDEM Tick erneut die letzten
+N Tage, statt nur strikt neue Beobachtungen, und erfasst so rückwirkende
+Korrekturen (die tatsächliche idempotente Persistierung der dabei erneut
+gelieferten Datenpunkte übernimmt der bereits bestehende Bronze-Layer,
+`app.db.bronze.record_observation`, S-022 — sobald ein künftiges
+Ingest-Pipeline-Modul Adapter-Ergebnisse dorthin verdrahtet). Die Spec
+nennt "Default 2–3 Tage, provisorisch" — hier konkret auf **3 Tage**
+festgelegt, ohne Codeänderung über `FRED_RECALCULATION_WINDOW_TAGE`
+überschreibbar (Muster von `SCHEDULER_BACKOFF_BASIS_SEKUNDEN` folgend).
+
 Aus S-029 (AC6/AC7/AC10, `docs/specs/kandidatensuche.md`) kommen die
 Kandidatensuche-Querschnitt-Filter-Schwellen +
 Suchprofil-Konfig-Overrides hinzu (`app.domain.kandidatensuche.*`):
@@ -225,6 +239,15 @@ class Settings(BaseSettings):
     #: ohne Codeänderung über `KANDIDATENSUCHE_VOLATILITAETS_FENSTER_MAX`
     #: überschreibbar.
     kandidatensuche_volatilitaets_fenster_max: Decimal = Field(default=Decimal("1000000"))
+
+    #: Recalculation-Window in Tagen (AC12, S-050,
+    #: `app.adapters.sockets.fred.FredAdapter`) — bei revisionsbehafteten
+    #: Quellen (FRED, A2) wird bei jedem Abruf `observation_start` auf
+    #: `jetzt - <window>` gesetzt, damit rückwirkende Korrekturen der
+    #: letzten Tage erneut abgerufen werden. Spec: "Default 2–3 Tage,
+    #: provisorisch" — hier 3 Tage, ohne Codeänderung über
+    #: `FRED_RECALCULATION_WINDOW_TAGE` überschreibbar.
+    fred_recalculation_window_tage: int = Field(default=3, ge=1)
 
     #: Suchprofil-Konfig-Overrides je Anlageklasse (AC7 `modus`, AC10
     #: `schwellen`, S-029) — ohne Codeänderung über

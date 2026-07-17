@@ -3,12 +3,31 @@
 FRED (Federal Reserve Economic Data, St. Louis Fed) ist eine der
 kostenlosen MVP-Quellen (`docs/specs/dateneingang.md`, Main Success
 Scenario Schritt 2 + A2, NFR-Kostendisziplin). Die volle Quellen-Registry
-mit allen 12 Quellen und ihrer Anlageklassen-Zuordnung (AC5) sowie das
-Revisions-Re-Pull-Verhalten (AC12, A2) sind Nicht-Ziel dieser Story
-(S-006/Folge-Stories) — dieser Adapter zeigt nur die Adapter-Abstraktion
-(AC1) konkret: Auth per API-Key aus Env-Var + Log-Maskierung (AC3), ein
-gekapseltes Rate-Limit (AC3) und Normalisierung auf den einheitlichen
-`Datenpunkt` (AC1/AC2).
+mit allen 12 Quellen und ihrer Anlageklassen-Zuordnung (AC5) ist Nicht-Ziel
+dieser Story (S-006/Folge-Stories) — dieser Adapter zeigt nur die
+Adapter-Abstraktion (AC1) konkret: Auth per API-Key aus Env-Var +
+Log-Maskierung (AC3), ein gekapseltes Rate-Limit (AC3) und Normalisierung
+auf den einheitlichen `Datenpunkt` (AC1/AC2).
+
+**AC12/A2 (Recalculation-Window, S-050):** FRED korrigiert Werte
+rückwirkend. `_fetch_raw()` übergibt deshalb bei JEDEM Abruf
+`observation_start = jetzt - recalculation_window_tage` an die FRED-API
+(Default 3 Tage, provisorisch, `app.config.Settings
+.fred_recalculation_window_tage`, ohne Codeänderung über
+`FRED_RECALCULATION_WINDOW_TAGE` überschreibbar) — die letzten Tage werden
+so bei jedem Tick erneut gezogen und normalisiert, auch wenn FRED sie
+zwischenzeitlich revidiert hat. Die idempotente Aktualisierung der
+betroffenen Datenpunkte (kein Duplikat bei unveränderter Wiederholung,
+neue Version bei abweichendem Wert) übernimmt der bereits bestehende
+Bronze-Layer (`app.db.bronze.record_observation`, S-022/AC9/AC10 in
+`[[datenqualitaet]]`) — sobald ein künftiges
+Ingest-Pipeline-Modul (`app.orchestration.ingest_pipeline`, S-020-Notiz in
+`app.scheduler.worker`) die von diesem Adapter gelieferten `Datenpunkt`e
+dorthin verdrahtet. Ein vollständiger Cold-Start-Backfill VOR dem
+Recalculation-Window (z. B. komplette Serienhistorie beim allerersten
+Abruf) ist bewusst NICHT Teil dieser Story (kein Baseline-/Backfill-
+Mechanismus vorhanden) — jeder Abruf liefert ausschliesslich die letzten
+`recalculation_window_tage` Tage.
 """
 
 from __future__ import annotations
@@ -18,12 +37,13 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
 from app.adapters.sockets.base import RateLimiter, SocketAdapter
+from app.config import get_settings
 from app.core.secrets import mask_secret
 
 logger = logging.getLogger(__name__)
@@ -61,6 +81,8 @@ class FredAdapter(SocketAdapter):
         api_key: str | None = None,
         http_get: Callable[[str], bytes] | None = None,
         rate_limiter: RateLimiter | None = None,
+        recalculation_window_tage: int | None = None,
+        jetzt: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         resolved_key = api_key if api_key is not None else os.environ.get(FRED_API_KEY_ENV_VAR)
         if not resolved_key:
@@ -72,10 +94,20 @@ class FredAdapter(SocketAdapter):
         self._anlageklassen_tag = anlageklassen_tag
         self._api_key = resolved_key
         self._http_get = http_get or self._default_http_get
+        # AC12/A2 (S-050): Fensterbreite für das Revisions-Re-Pull —
+        # explizit übergeben (Tests) oder aus den Settings gelesen (Default
+        # 3 Tage, `FRED_RECALCULATION_WINDOW_TAGE`).
+        self._recalculation_window_tage = (
+            recalculation_window_tage
+            if recalculation_window_tage is not None
+            else get_settings().fred_recalculation_window_tage
+        )
+        self._jetzt = jetzt
         logger.debug(
-            "FredAdapter für Serie %s initialisiert (api_key=%s)",
+            "FredAdapter für Serie %s initialisiert (api_key=%s, recalculation_window_tage=%d)",
             series_id,
             mask_secret(resolved_key),
+            self._recalculation_window_tage,
         )
 
     @staticmethod
@@ -84,8 +116,19 @@ class FredAdapter(SocketAdapter):
             return response.read()
 
     async def _fetch_raw(self) -> dict[str, Any]:
+        # AC12/A2: bei jedem Abruf werden die letzten
+        # `recalculation_window_tage` Tage erneut gezogen, damit
+        # rückwirkende FRED-Korrekturen erfasst werden (siehe Modul-Docstring).
+        observation_start = (
+            self._jetzt() - timedelta(days=self._recalculation_window_tage)
+        ).strftime("%Y-%m-%d")
         query = urlencode(
-            {"series_id": self._series_id, "api_key": self._api_key, "file_type": "json"}
+            {
+                "series_id": self._series_id,
+                "api_key": self._api_key,
+                "file_type": "json",
+                "observation_start": observation_start,
+            }
         )
         url = f"{_BASE_URL}?{query}"
         rohbytes = await asyncio.to_thread(self._http_get, url)
