@@ -327,7 +327,27 @@ def bewerte_stufe_a(
             splits=splits,
         )
 
-    dsr = berechne_deflated_sharpe_ratio([t.rendite_pct for t in trades], n_trials=n_trials)
+    try:
+        dsr = berechne_deflated_sharpe_ratio([t.rendite_pct for t in trades], n_trials=n_trials)
+    except ValueError as exc:
+        # Degenerierte Renditeverteilung (z.B. konstante Renditen → Std 0,
+        # oder extreme Schiefe/Wölbung → Varianzterm <= 0): die DSR ist
+        # mathematisch nicht definiert. Das AC4-Drei-Zonen-Modell verspricht
+        # für jede "ausreichende" Stichprobe ein Urteil, keinen Absturz —
+        # daher kontrolliert als "durchgefallen" werten (analog splits<2/
+        # wfe-None-Fallback oben), statt die Exception nach oben zu reissen.
+        return _report(
+            hypothesis_id,
+            n_trades,
+            konfiguration,
+            ergebnis="durchgefallen",
+            begruendung=(
+                f"Deflated Sharpe Ratio nicht berechenbar ({exc}) — degenerierte "
+                "Renditeverteilung, Stufe A nicht bestanden (AC7)."
+            ),
+            walk_forward_effizienz=wfe,
+            splits=splits,
+        )
 
     if wfe < konfiguration.wfe_schwelle:
         return _report(

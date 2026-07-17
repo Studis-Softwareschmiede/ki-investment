@@ -386,3 +386,18 @@ def test_bewerte_stufe_a_dsr_sinkt_mit_steigender_trial_anzahl_im_vollen_flow() 
     assert report_wenige.dsr is not None
     assert report_viele.dsr is not None
     assert report_viele.dsr < report_wenige.dsr
+
+
+def test_bewerte_stufe_a_konstante_renditen_faellt_durch_statt_zu_crashen() -> None:
+    """@trace lernschleife#AC7 — bei konstanten Renditen (Standardabweichung 0,
+    z.B. fixes Take-Profit-Bracket) ist die Deflated Sharpe Ratio mathematisch
+    nicht definiert. `bewerte_stufe_a` darf dann NICHT mit ValueError abstürzen,
+    sondern muss ein kontrolliertes 'durchgefallen'-Urteil liefern (AC4-Zusage:
+    jede ausreichende Stichprobe erhält ein Urteil)."""
+    trades = _trades(150, schritt_tage=1, rendite="2.0")
+
+    report = bewerte_stufe_a(trades, hypothesis_id=uuid.uuid4(), n_trials=3)
+
+    assert report.n_trades == 150
+    assert report.ergebnis == "durchgefallen"
+    assert report.dsr is None
