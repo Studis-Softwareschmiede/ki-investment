@@ -187,7 +187,8 @@ def test_ermittle_depot_stand_ohne_positionen_liefert_leeres_aggregat() -> None:
 
 def test_ermittle_titel_strategie_exit_regeln_liefert_je_titel_einen_eintrag() -> None:
     """@trace depot#AC9 — Output an die Depot-Überwachung: je gehaltenem
-    Titel genau ein `{ titel_id, strategie, exit_regeln }`-Eintrag."""
+    Titel genau ein `{ titel_id, anlageklasse, strategie, exit_regeln }`-
+    Eintrag."""
     exit_regeln = ExitRegelnBestand(
         stop_loss_pct=Decimal("-15"),
         take_profit_pct=Decimal("30"),
@@ -197,11 +198,12 @@ def test_ermittle_titel_strategie_exit_regeln_liefert_je_titel_einen_eintrag() -
         time_box=None,
     )
     positionen = [
-        _position(titel_id="titel-a", strategie="Index", exit_regeln=exit_regeln),
+        _position(titel_id="titel-a", asset_class_id=1, strategie="Index", exit_regeln=exit_regeln),
     ]
     ergebnis = ermittle_titel_strategie_exit_regeln(positionen)
     assert len(ergebnis) == 1
     assert ergebnis[0].titel_id == "titel-a"
+    assert ergebnis[0].anlageklasse == 1
     assert ergebnis[0].strategie == "Index"
     assert ergebnis[0].exit_regeln == exit_regeln
 

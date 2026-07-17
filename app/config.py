@@ -59,6 +59,17 @@ Pre-Trade-Schätzung dieser Story) — provisorisch gewählt: **5 Basispunkte
 (0.05 %)**, ohne Codeänderung über `ERWARTETE_SLIPPAGE_PCT_DEFAULT`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
 
+Aus S-032 (AC9, `docs/specs/depot-ueberwachung.md`) kommt
+`depot_ueberwachung_frische_fenster_sekunden` hinzu: das Frische-Fenster,
+gegen das `app.domain.depot_ueberwachung.frische.ist_titel_bewertbar` das
+jüngste Signal eines Signal-Bündels prüft — überschreitet dessen Alter
+diesen Wert, gilt der Titel als „nicht bewertbar" (kein Ereignis wird aus
+veralteten Daten fabriziert, deckt E1). Die Spec lässt den konkreten Wert
+explizit offen ("Frische-Fenster" nur als konfigurierbarer Parameter
+benannt) — provisorisch gewählt: **24 Stunden (86400s)**, ohne
+Codeänderung über `DEPOT_UEBERWACHUNG_FRISCHE_FENSTER_SEKUNDEN`
+überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
+
 Aus S-029 (AC6/AC7/AC10, `docs/specs/kandidatensuche.md`) kommen die
 Kandidatensuche-Querschnitt-Filter-Schwellen +
 Suchprofil-Konfig-Overrides hinzu (`app.domain.kandidatensuche.*`):
@@ -220,6 +231,12 @@ class Settings(BaseSettings):
     #: `KANDIDATENSUCHE_PROFIL_OVERRIDES` überschreibbar (Default: kein
     #: Override, jedes registrierte Profil behält seinen Default-Wert).
     kandidatensuche_profil_overrides: SuchprofilOverrides = Field(default_factory=dict)
+
+    #: Depot-Überwachung Frische-Fenster (AC9, S-032), in Sekunden —
+    #: provisorischer Default 24h, ohne Codeänderung über
+    #: `DEPOT_UEBERWACHUNG_FRISCHE_FENSTER_SEKUNDEN` überschreibbar (siehe
+    #: Modul-Docstring).
+    depot_ueberwachung_frische_fenster_sekunden: int = Field(default=86400, gt=0)
 
 
 @lru_cache
