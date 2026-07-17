@@ -57,6 +57,7 @@ Die Kandidatensuche (Suchkriteria) definiert, **wonach** gesucht wird, um neue T
 
 ## Verträge
 - **Suchprofil (je Anlageklasse):** `{ anlageklasse: 1..11, pflicht_bedingungen[...], optionale_signale[...], schwellen: { ... konfigurierbar }, modus: eventbasiert|periodisch }`.
+- **Präzisierung Klasse 1 (Aktien) — zwei Profil-Varianten nach Marktkapitalisierung:** Small-/Mid-Cap (AC2/AC3) und Large-Cap (AC4) benennen beide Klasse 1, brauchen aber unterschiedliche Selektionsmechanismen (RVOL-Momentum vs. Fundamentaldaten/Revisionen/Flows). Die Suchprofil-Registry hält weiterhin genau ein Suchprofil je Registry-Eintrag (AC1: kein klassenübergreifendes/geteiltes Profil); die Auswahl zwischen den beiden Klasse-1-Varianten erfolgt über ein zusätzliches Marktkapitalisierungs-Segment, das vor dem Registry-Aufbau feststeht. ETFs (Klasse 2, AC4 "Klassen 1, 2") teilen den Large-Cap-Selektionsansatz, erhalten aber ein eigenes Suchprofil unter Klasse 2.
 - **Querschnitt-Filter:** `{ liquiditaets_mindestschwelle, volatilitaets_fenster: { min, max } }` — auf alle Profile angewandt.
 - **Output an Datenquellen-Abfrage:** Filterkriterien `{ anlageklasse, signale, schwellen }` (Vertrag mit `[[dateneingang]]`).
 - **Output an Analyse neuer Titel:** Trefferliste `[{ titel, anlageklasse, erfuellte_kriterien[...] }]`.
