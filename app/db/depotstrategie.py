@@ -96,6 +96,14 @@ def waehle_risikoprofil_preset(session: Session, *, risk_profile_name: str) -> P
         )
 
     _deaktiviere_aktive_strategie(session)
+    # BR-117: Das/die Deaktivierungs-UPDATE(s) MÜSSEN als eigener Flush
+    # abgeschlossen sein, BEVOR die neue Zeile aktiviert wird. Ohne dieses
+    # explizite flush() ist die Emissionsreihenfolge der UPDATEs für mehrere
+    # `dirty`-Objekte derselben Tabelle in SQLAlchemy nicht determiniert —
+    # wird die Aktivierung zuerst geschrieben, verletzt sie den nicht-deferred
+    # partiellen Unique-Index `ux_portfolio_strategy_aktiv` (WHERE aktiv) und
+    # der Preset-Wechsel schlägt nicht-deterministisch mit IntegrityError fehl.
+    session.flush()
     zeile.aktiv = True
     return zeile
 

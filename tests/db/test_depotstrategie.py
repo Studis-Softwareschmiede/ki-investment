@@ -27,7 +27,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from app.db.base import Base
@@ -44,14 +44,28 @@ from app.db.models import AssetClass, PortfolioClassLimit, PortfolioStrategy, Ri
 KRYPTO_ID = 7
 
 
-def _engine_mit_presets() -> Session:
+def _engine_mit_presets(*, mit_partiellem_aktiv_index: bool = False) -> Session:
     """Baut eine SQLite-Session mit den 3 Risikoprofilen + je einer
     Preset-`PortfolioStrategy`-Zeile (Werte analog dem Migrations-Seed,
     hier bewusst unabhängig nachgebaut statt importiert — reine
-    Fixture-Daten für die App-Layer-Logik, kein Migrations-Test)."""
+    Fixture-Daten für die App-Layer-Logik, kein Migrations-Test).
+
+    `mit_partiellem_aktiv_index=True` legt zusätzlich den partiellen
+    Unique-Index `ux_portfolio_strategy_aktiv` (WHERE aktiv) an — er steht
+    bewusst NUR in der rohen Migrations-DDL, nicht im ORM-`__table_args__`,
+    weshalb `Base.metadata.create_all` ihn sonst nicht erzeugt. SQLite
+    unterstützt `CREATE UNIQUE INDEX ... WHERE` wie Postgres, sodass das
+    BR-117-Laufzeitverhalten gegen den ECHTEN Index prüfbar wird."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     session = Session(engine)
+    if mit_partiellem_aktiv_index:
+        session.execute(
+            text(
+                "CREATE UNIQUE INDEX ux_portfolio_strategy_aktiv "
+                f"ON {PortfolioStrategy.__tablename__} (aktiv) WHERE aktiv"
+            )
+        )
     session.add(AssetClass(id=KRYPTO_ID, name="Kryptowährungen", prio_stufe="Stufe3", aktiv=True))
 
     presets = {
@@ -114,13 +128,28 @@ def test_waehle_risikoprofil_preset_switches_active_strategy_leaves_exactly_one_
     assert konservativ.aktiv is False
     assert offensiv.aktiv is True
 
-    aktive = (
-        session.execute(select(PortfolioStrategy).where(PortfolioStrategy.aktiv.is_(True)))
-        .scalars()
-        .all()
-    )
-    assert len(aktive) == 1
-    assert aktive[0].id == offensiv.id
+
+def test_waehle_risikoprofil_preset_respektiert_partiellen_unique_index() -> None:
+    """@trace risikomanagement#AC3 — mehrfacher Preset-Wechsel gegen den
+    TATSÄCHLICHEN partiellen Unique-Index (`WHERE aktiv`, BR-117) bleibt
+    fehlerfrei: `waehle_risikoprofil_preset` flusht die Deaktivierung der
+    bisherigen Zeile explizit VOR der Aktivierung der neuen, sonst ist die
+    UPDATE-Emissionsreihenfolge in SQLAlchemy nicht determiniert und der
+    Index wird nicht-deterministisch mit IntegrityError verletzt. Prüft
+    zugleich, dass nach jedem Wechsel genau eine Zeile aktiv ist."""
+    session = _engine_mit_presets(mit_partiellem_aktiv_index=True)
+
+    for name in ("konservativ", "offensiv", "ausgewogen", "konservativ", "offensiv"):
+        gewaehlt = waehle_risikoprofil_preset(session, risk_profile_name=name)
+        session.commit()
+
+        aktive = (
+            session.execute(select(PortfolioStrategy).where(PortfolioStrategy.aktiv.is_(True)))
+            .scalars()
+            .all()
+        )
+        assert len(aktive) == 1
+        assert aktive[0].id == gewaehlt.id
 
 
 def test_waehle_risikoprofil_preset_rejects_unknown_profile_name() -> None:
