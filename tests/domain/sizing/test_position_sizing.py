@@ -99,6 +99,24 @@ def test_ac2_quarter_kelly_fuer_volatile_anlageklasse() -> None:
     assert ist_volatile_anlageklasse(_AKTIEN_ID) is False
 
 
+def test_ac2_volatile_klassen_sind_konfigurierbar_nicht_hartkodiert() -> None:
+    """@trace sizing#AC2 — P6 (architecture.md §2): die Volatilitäts-
+    Klassifikation ist Konfiguration, keine hartkodierte Code-Grenze. Eine
+    Konfiguration, die eine sonst nicht-volatile Klasse (hier: Aktien) als
+    volatil deklariert, führt für diese zu Quarter-Kelly; eine leere Menge
+    macht auch Krypto nicht-volatil (Half-Kelly)."""
+    aktien_als_volatil = KellyFraktionsKonfiguration(
+        volatile_anlageklassen_ids=frozenset({_AKTIEN_ID})
+    )
+    assert ist_volatile_anlageklasse(_AKTIEN_ID, aktien_als_volatil) is True
+    assert ist_volatile_anlageklasse(_KRYPTO_ID, aktien_als_volatil) is False
+    assert bestimme_konfigurierte_fraktion(_AKTIEN_ID, aktien_als_volatil) == Decimal("0.25")
+
+    keine_volatilen = KellyFraktionsKonfiguration(volatile_anlageklassen_ids=frozenset())
+    assert ist_volatile_anlageklasse(_KRYPTO_ID, keine_volatilen) is False
+    assert bestimme_konfigurierte_fraktion(_KRYPTO_ID, keine_volatilen) == Decimal("0.5")
+
+
 def test_ac2_quarter_kelly_wirkt_als_obergrenze() -> None:
     """@trace sizing#AC2 — "Quarter-Kelly wirkt zugleich als Obergrenze
     der eingesetzten Fraktion": eine (fehlerhaft) höher konfigurierte

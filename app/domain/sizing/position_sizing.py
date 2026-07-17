@@ -51,14 +51,6 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from app.contracts.sizing import KellyFraktionsKonfiguration, PositionSizingErgebnis
 
-#: C-006 (verbindliche Anlageklassen-Nummerierung, `docs/concept.md`):
-#: Anlageklasse 7 = Kryptowährungen — die einzige MVP-aktive volatile
-#: Klasse im Sinne von AC2 ("volatile Anlageklassen (z.B. Krypto)").
-#: Bewusst eigenständig statt aus `app.db.models` importiert:
-#: `app/domain/**` darf laut architecture.md §4 (P1/P3) nicht von
-#: `app.db.*` abhängen (analog `analyse_framework.KATEGORIE_NAMEN`).
-VOLATILE_ANLAGEKLASSEN_IDS: frozenset[int] = frozenset({7})
-
 #: AC2: fest verdrahtete Obergrenze der für volatile Anlageklassen
 #: eingesetzten Fraktion ("Quarter-Kelly wirkt zugleich als Obergrenze
 #: der eingesetzten Fraktion") — ein niedrigerer `fraktion_volatil`-Wert
@@ -76,10 +68,17 @@ def _quantize_anteil(wert: Decimal) -> Decimal:
     return wert.quantize(_ANTEIL_QUANTUM, rounding=ROUND_HALF_UP)
 
 
-def ist_volatile_anlageklasse(anlageklasse: int) -> bool:
-    """AC2: `True`, wenn `anlageklasse` (Anlageklassen-ID, C-006) als
-    volatil gilt (Krypto = 7)."""
-    return anlageklasse in VOLATILE_ANLAGEKLASSEN_IDS
+def ist_volatile_anlageklasse(
+    anlageklasse: int,
+    konfiguration: KellyFraktionsKonfiguration | None = None,
+) -> bool:
+    """AC2/P6: `True`, wenn `anlageklasse` (Anlageklassen-ID, C-006) laut
+    Konfiguration als volatil gilt (Default: Krypto = 7). Die Menge der
+    volatilen Klassen kommt aus `konfiguration.volatile_anlageklassen_ids`
+    (überschreibbare Konfiguration statt hartkodierter Code-Grenze im Kern —
+    architecture.md §2 P6)."""
+    aktive_konfiguration = konfiguration or KellyFraktionsKonfiguration()
+    return anlageklasse in aktive_konfiguration.volatile_anlageklassen_ids
 
 
 def berechne_kelly_fraktion(p: Decimal, b: Decimal) -> Decimal:
@@ -110,7 +109,7 @@ def bestimme_konfigurierte_fraktion(
     ("Quarter-Kelly wirkt zugleich als Obergrenze der eingesetzten
     Fraktion")."""
     aktive_konfiguration = konfiguration or KellyFraktionsKonfiguration()
-    if ist_volatile_anlageklasse(anlageklasse):
+    if ist_volatile_anlageklasse(anlageklasse, aktive_konfiguration):
         return min(aktive_konfiguration.fraktion_volatil, QUARTER_KELLY_OBERGRENZE)
     return aktive_konfiguration.fraktion_standard
 
@@ -181,7 +180,6 @@ def berechne_positionsgroesse(
 
 __all__ = [
     "QUARTER_KELLY_OBERGRENZE",
-    "VOLATILE_ANLAGEKLASSEN_IDS",
     "berechne_kelly_fraktion",
     "berechne_positionsgroesse",
     "bestimme_konfigurierte_fraktion",

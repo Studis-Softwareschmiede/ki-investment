@@ -24,6 +24,15 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+#: AC2/C-006-Default: Anlageklassen-IDs, die als "volatil" gelten (Krypto = 7,
+#: `docs/concept.md`). Bewusst als konfigurierbarer Default (nicht als
+#: hartkodierte Code-Grenze im Domain-Kern) — architecture.md §2 P6:
+#: "Anlageklassen sind Konfiguration, keine Code-Grenze; kein
+#: `if asset_class == …` im Kern". Ein Aufrufer/Orchestrierungs-Layer kann die
+#: Menge über `KellyFraktionsKonfiguration.volatile_anlageklassen_ids`
+#: überschreiben (z.B. aus einer künftigen `AssetClass`-Konfig-Spalte gespeist).
+DEFAULT_VOLATILE_ANLAGEKLASSEN_IDS: frozenset[int] = frozenset({7})
+
 
 class KellyFraktionsKonfiguration(BaseModel):
     """AC2/AC3/AC4: die konfigurierbaren Sizing-Parameter (Verträge:
@@ -54,6 +63,12 @@ class KellyFraktionsKonfiguration(BaseModel):
     #: A2/AC4: konservative Fixed-Fractional-Ersatzgrösse, solange Kelly
     #: nicht scharf ist.
     fixed_fractional_pct: Decimal = Field(default=Decimal("0.01"), gt=0)
+    #: AC2/P6: Anlageklassen-IDs, die als volatil gelten (Quarter-Kelly statt
+    #: Half-Kelly). Konfigurierbar statt hartkodierte Code-Grenze im Kern
+    #: (architecture.md §2 P6, C-006) — Default Krypto (7).
+    volatile_anlageklassen_ids: frozenset[int] = Field(
+        default=DEFAULT_VOLATILE_ANLAGEKLASSEN_IDS
+    )
 
 
 class PositionSizingErgebnis(BaseModel):
