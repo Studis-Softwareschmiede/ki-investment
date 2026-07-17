@@ -178,3 +178,21 @@ def test_ac5_ungueltige_kapitalbasis_wirft() -> None:
             kapitalbasis_chf=Decimal("0"),
             erwartete_kosten=kosten,
         )
+
+
+def test_ac5_risiko_pct_null_wird_als_kein_trade_durchgereicht() -> None:
+    """@trace sizing#AC5 — ein `risiko_pct=0` (S-039 verwirft einen Trade mit
+    `kelly-negativ` → `risiko_pct=0`) ergibt eine Brutto-Grösse von 0; nach
+    Kostenabzug bleibt keine positive Netto-Grösse, der Trade wird sauber als
+    `kosten-uebersteigen-ertrag` verworfen (kein negatives/fälschlich positives
+    Ergebnis, kein Crash)."""
+    kosten = _erwartete_kosten(gesamtkosten_chf=Decimal("10"), order_wert_chf=Decimal("1000"))
+    ergebnis = berechne_ordergroesse(
+        titel_id="AAA",
+        risiko_pct=Decimal("0"),
+        kapitalbasis_chf=Decimal("10000"),
+        erwartete_kosten=kosten,
+    )
+    assert ergebnis.ordergroesse_brutto_chf == Decimal(0)
+    assert ergebnis.ordergroesse_chf == Decimal(0)
+    assert ergebnis.verworfen == "kosten-uebersteigen-ertrag"

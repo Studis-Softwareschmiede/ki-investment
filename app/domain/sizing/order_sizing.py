@@ -89,7 +89,7 @@ def berechne_ordergroesse(
             titel_id=titel_id,
             ordergroesse_chf=Decimal(0),
             ordergroesse_brutto_chf=ordergroesse_brutto_chf,
-            kosten_chf=erwartete_kosten.gesamtkosten_chf,
+            kosten_chf=_quantize_geld(erwartete_kosten.gesamtkosten_chf),
             verworfen="kosten-uebersteigen-ertrag",
         )
 
@@ -98,7 +98,7 @@ def berechne_ordergroesse(
             titel_id=titel_id,
             ordergroesse_chf=Decimal(0),
             ordergroesse_brutto_chf=ordergroesse_brutto_chf,
-            kosten_chf=erwartete_kosten.gesamtkosten_chf,
+            kosten_chf=_quantize_geld(erwartete_kosten.gesamtkosten_chf),
             verworfen="unter-mindest-ordergroesse",
         )
 
