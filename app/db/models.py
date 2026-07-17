@@ -1226,3 +1226,64 @@ class PlatformAssetClass(Base):
             f"PlatformAssetClass(platform_id={self.platform_id!r}, "
             f"asset_class_id={self.asset_class_id!r}, bevorzugt={self.bevorzugt!r})"
         )
+
+
+class TrialRegistry(Base):
+    """Trial-Registry: JEDE an das Validierungs-Gate übergebene Regelvariante
+    (data-model.md §6 `trial_registry`, C-012; Spec `docs/specs/lernschleife.md`
+    AC3, Story S-059; → BR-118).
+
+    Append-only: jede getestete Variante wird gezählt, auch verworfene —
+    ohne diese vollständige Zählung ist die Deflated Sharpe Ratio (AC7,
+    Folge-Story) statistisch ungültig. Eine abgelehnte Variante wird
+    `archived=True` gesetzt (`app.db.trial_registry.archiviere_trial`),
+    **nie gelöscht**.
+
+    **`hypothesis_id` bewusst OHNE FK:** data-model.md §6 modelliert
+    `hypothesis_id` als `FK → rule_hypothesis.id`; `rule_hypothesis`
+    entsteht erst mit S-058 (AC1/AC2, keine Story-Abhängigkeit zu S-059).
+    Bis dahin ist `hypothesis_id` ein reiner `UUID NOT NULL`-Wert ohne
+    referentielle Integrität (siehe Migrations-Docstring
+    `e4f7a1c9b2d3_create_trial_registry_ac3`).
+
+    **Append-only-Durchsetzung (BR-118), zwei Schichten:**
+    - **DB:** die Migration legt unter Postgres einen `BEFORE DELETE`-
+      Trigger an, der jede Löschung mit einer Exception verweigert (BR-118
+      verlangt nur „kein Delete-Grant", NICHT volle Immutabilität wie
+      BR-115/`transaction` — `archived` muss von `false` auf `true`
+      wechseln können).
+    - **App:** `app.db.trial_registry` bietet ausschliesslich
+      `registriere_trial` (Insert), `archiviere_trial` (UPDATE nur der
+      `archived`-Spalte) und `anzahl_trials`/`trials_fuer_hypothese`
+      (Lesen) an — keine Delete-Methode existiert im Modul.
+    """
+
+    __tablename__ = "trial_registry"
+    __table_args__ = (
+        Index("ix_trial_registry_hypothesis_id", "hypothesis_id"),
+        UniqueConstraint(
+            "hypothesis_id", "variant_hash", name="uq_trial_registry_hypothesis_variant"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    hypothesis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    variant_hash: Mapped[str] = mapped_column(String, nullable=False)
+    params: Mapped[Any] = mapped_column(sa.JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+    tested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"TrialRegistry(hypothesis_id={self.hypothesis_id!r}, "
+            f"variant_hash={self.variant_hash!r}, archived={self.archived!r})"
+        )
