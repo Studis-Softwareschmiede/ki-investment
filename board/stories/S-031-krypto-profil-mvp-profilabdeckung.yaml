@@ -1,7 +1,7 @@
 id: S-031
 parent: F-009
 title: Krypto-Profil & MVP-Profilabdeckung
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/kandidatensuche.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: 'Cold-Start, aber eng: Krypto-Profil (Social-Volumen, On-Chain/Wh
   und optionale Erweiterbarkeit ohne Bruch bestehender Profile (AC11).'
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-031
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:25Z'
-updated_at: '2026-07-12T10:09:27Z'
-done_at: null
+updated_at: '2026-07-17T23:04:32Z'
+done_at: '2026-07-17T23:04:31Z'

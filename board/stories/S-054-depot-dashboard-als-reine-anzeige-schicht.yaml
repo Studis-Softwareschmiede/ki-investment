@@ -1,7 +1,7 @@
 id: S-054
 parent: F-011
 title: Depot-Dashboard als reine Anzeige-Schicht
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/depot.md
 implements:
@@ -24,9 +24,9 @@ estimate_note: Cold-Start; reine Lese-Schicht (keine Trading-Logik), Live-Kurse 
   Socket-Cross-Cutting, UI-Umfang offen.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-054
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:36Z'
-updated_at: '2026-07-12T10:10:41Z'
-done_at: null
+updated_at: '2026-07-17T23:04:35Z'
+done_at: '2026-07-17T23:04:34Z'

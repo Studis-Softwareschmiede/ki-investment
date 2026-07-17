@@ -1,7 +1,7 @@
 id: S-033
 parent: F-010
 title: Ereignis-Filter, Marktkontext-Normierung & Weitergabe
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/depot-ueberwachung.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: 'Cold-Start: konfigurierbarer Keyword-/Ereignis-Filter mit Entdop
   idx2) konsumiert.'
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-033
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:30Z'
-updated_at: '2026-07-12T10:09:34Z'
-done_at: null
+updated_at: '2026-07-17T23:04:40Z'
+done_at: '2026-07-17T23:04:37Z'
