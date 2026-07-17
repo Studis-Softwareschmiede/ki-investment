@@ -129,14 +129,20 @@ def _news_ereignis(
 
 
 def _normierter_kurssturz_betrag(titel: TitelSignalRohdaten) -> Decimal | None:
-    """AC5: liefert den BETRAG der marktkontext-normierten Übertreibung
-    (`abs(normierte_bewegung)`) — die Richtung (Sturz vs. Anstieg) ist für
-    die Schwellenprüfung (AC6, "Überschreitet ... die Schwelle") nicht
-    relevant, nur die Stärke der Abweichung vom Markt."""
+    """AC5/AC6: liefert den BETRAG eines marktkontext-normierten Kurs-STURZES
+    — ausschliesslich die Abwärtsrichtung (`normierte_bewegung < 0`). Ein
+    `relativer_kurssturz` ist eine downside-orientierte Überwachungsgrösse
+    (Exit-Trigger-Kontext neben Sentiment-Kippen/Momentum-Verlust, AC3/S-032);
+    eine relative Kursrally (Titel steigt stärker als der Markt, normierte
+    Bewegung >= 0) ist KEIN Kurssturz und darf kein solches Ereignis auslösen.
+    Rückgabe `None` (kein Ereignis), sobald die normierte Bewegung nicht
+    negativ ist."""
     if titel.kursbewegung is None:
         return None
     normiert = normiere_kursbewegung(titel.kursbewegung, titel.marktbewegung)
-    return abs(normiert.normierte_bewegung)
+    if normiert.normierte_bewegung >= 0:
+        return None
+    return -normiert.normierte_bewegung
 
 
 def _numerisches_ereignis(

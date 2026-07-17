@@ -80,9 +80,12 @@ Ereignistyp konfigurierten Schwellen (AC6-Nachbar-Konfiguration, siehe
 Tages-Schwellwert (AC7, Default 10 Ereignisse/Tag). Alle drei sind ohne
 Codeänderung über `DEPOT_UEBERWACHUNG_EREIGNIS_KEYWORDS`/
 `DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN`/
-`DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT` überschreibbar (Muster
-von `TOLERANZ_CONFIG` folgend — ein Override ERSETZT das VOLLSTÄNDIGE
-Default-Mapping, kein Merge).
+`DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT` überschreibbar. Keywords
+und Tages-Schwellwert werden bei Angabe vollständig ersetzt; die
+Ereignistyp-Schwellen dagegen werden in
+`app.domain.depot_ueberwachung.ereignis_erzeugung.erzeuge_ueberwachungsereignisse`
+mit `DEFAULT_EREIGNIS_SCHWELLEN` GEMERGT — ein partieller Override setzt nur
+die genannten Ereignistypen, alle übrigen behalten ihren Default.
 
 Aus S-050 (AC12, `docs/specs/dateneingang.md`, A2) kommt
 `fred_recalculation_window_tage` hinzu: die Fensterbreite (in Tagen), die
@@ -286,8 +289,10 @@ class Settings(BaseSettings):
     #: Ereignistyp-Schwellen (AC6-Nachbar-Konfiguration, S-033) — je
     #: Ereignistyp EIN Schwellwert (provisorisch, klassenunabhängig
     #: einheitlich, s. Modul-Docstring); ein Override via
-    #: `DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN` ERSETZT das VOLLSTÄNDIGE
-    #: Default-Mapping (kein Merge, Muster von `toleranz_config`).
+    #: `DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN` wird in
+    #: `ereignis_erzeugung.erzeuge_ueberwachungsereignisse` mit
+    #: `DEFAULT_EREIGNIS_SCHWELLEN` GEMERGT — ein partieller Override setzt nur
+    #: die genannten Ereignistypen, alle übrigen behalten ihren Default.
     depot_ueberwachung_ereignis_schwellen: dict[str, Decimal] = Field(
         default_factory=lambda: dict(DEFAULT_EREIGNIS_SCHWELLEN)
     )

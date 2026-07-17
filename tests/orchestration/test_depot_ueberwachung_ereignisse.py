@@ -105,3 +105,29 @@ def test_ohne_jetzt_wird_die_aktuelle_zeit_verwendet() -> None:
 
     [ereignis] = auswertung.ereignisse
     assert (datetime.now(UTC) - ereignis.zeitstempel).total_seconds() < 5
+
+
+def test_fehlende_marktreferenz_wird_als_marktkontext_fallback_protokolliert() -> None:
+    """@trace depot-ueberwachung#AC5 — fehlt zu einer Kursbewegung der
+    Marktreferenz-Wert, fällt die Normierung auf die Absolut-Bewegung zurück;
+    dies wird protokolliert (Spec AC5 Edge-Case "und dies protokolliert"),
+    statt still zu bleiben."""
+    rohdaten = TitelSignalRohdaten(titel_id="AAPL", kursbewegung=Decimal("-0.10"))
+
+    auswertung = werte_monitoring_ereignisse_aus([rohdaten], jetzt=_JETZT)
+
+    assert [(e.titel_id, e.grund) for e in auswertung.protokoll] == [
+        ("AAPL", "marktkontext_fallback")
+    ]
+
+
+def test_vorhandene_marktreferenz_erzeugt_keinen_fallback_eintrag() -> None:
+    """@trace depot-ueberwachung#AC5 — mit vorhandenem Marktreferenz-Wert
+    bleibt das Fallback-Protokoll leer."""
+    rohdaten = TitelSignalRohdaten(
+        titel_id="MSFT", kursbewegung=Decimal("-0.10"), marktbewegung=Decimal("-0.02")
+    )
+
+    auswertung = werte_monitoring_ereignisse_aus([rohdaten], jetzt=_JETZT)
+
+    assert auswertung.protokoll == ()

@@ -1,6 +1,6 @@
 """Tests für die Ereignis-Erzeugung (Story S-033).
 
-Covers (depot-ueberwachung): AC6
+Covers (depot-ueberwachung): AC5, AC6
 
 `app.domain.depot_ueberwachung.ereignis_erzeugung
 .erzeuge_ueberwachungsereignisse` erzeugt bei Schwellenüberschreitung ein
@@ -89,6 +89,32 @@ def test_kurssturz_ohne_marktreferenz_faellt_auf_absolutwert_zurueck() -> None:
     rohdaten = TitelSignalRohdaten(titel_id="AAPL", kursbewegung=Decimal("-0.10"))
     [ereignis] = erzeuge_ueberwachungsereignisse([rohdaten], jetzt=_JETZT)
     assert ereignis.ereignistyp == "relativer_kurssturz"
+
+
+def test_relative_kursrally_erzeugt_keinen_kurssturz() -> None:
+    """@trace depot-ueberwachung#AC5,AC6 — steigt der Titel STÄRKER als der
+    Markt (positive normierte Bewegung), ist das KEIN Kurssturz: ein
+    `relativer_kurssturz`-Ereignis entsteht nur bei Abwärtsbewegung, nicht
+    aus dem Betrag der Übertreibung nach oben."""
+    rally = TitelSignalRohdaten(
+        titel_id="NVDA", kursbewegung=Decimal("0.15"), marktbewegung=Decimal("0")
+    )
+    assert erzeuge_ueberwachungsereignisse([rally], jetzt=_JETZT) == ()
+
+
+def test_partieller_schwellen_override_mergt_mit_defaults() -> None:
+    """@trace depot-ueberwachung#AC6 — ein partieller `schwellen`-Override
+    setzt NUR die genannten Ereignistypen; alle übrigen behalten ihren
+    Default-Schwellwert (Merge mit `DEFAULT_EREIGNIS_SCHWELLEN`, kein
+    Ersetzen des ganzen Mappings). Der Override senkt hier nur die
+    Kurssturz-Schwelle; `momentum_verlust` bleibt auf dem Default 0.5 und
+    löst bei 0.6 weiterhin aus (bei Ersetzen wäre seine Schwelle weg → kein
+    Ereignis)."""
+    titel = TitelSignalRohdaten(titel_id="AAPL", momentum_wert=Decimal("0.6"))
+    ereignisse = erzeuge_ueberwachungsereignisse(
+        [titel], schwellen={"relativer_kurssturz": Decimal("0.01")}, jetzt=_JETZT
+    )
+    assert [e.ereignistyp for e in ereignisse] == ["momentum_verlust"]
 
 
 def test_sentiment_kippen_ueber_schwelle_erzeugt_ereignis() -> None:

@@ -100,6 +100,7 @@ from app.core.monitoring_kennzahlen import berechne_tageskennzahl, registriere_e
 from app.db.models import AssetClass
 from app.domain.depot_ueberwachung.ereignis_erzeugung import erzeuge_ueberwachungsereignisse
 from app.domain.depot_ueberwachung.frische import ist_titel_bewertbar
+from app.domain.depot_ueberwachung.marktkontext import normiere_kursbewegung
 from app.domain.depot_ueberwachung.toggle import ist_ueberwachung_erlaubt
 from app.domain.depot_ueberwachung.ueberwachte_groessen import ermittle_ueberwachte_groessen
 from app.domain.depot_ueberwachung.vollstaendigkeit import ermittle_fehlende_felder
@@ -139,10 +140,15 @@ class MonitoringZyklusErgebnis:
 class MonitoringEreignisAuswertung:
     """Ergebnis von `werte_monitoring_ereignisse_aus` (AC4-AC7): die in
     diesem Aufruf erzeugten Überwachungs-Ereignisse (AC6) plus die
-    aktualisierte Alert-Fatigue-Tageskennzahl (AC7)."""
+    aktualisierte Alert-Fatigue-Tageskennzahl (AC7) plus das Protokoll der
+    Titel, für die die Marktkontext-Normierung mangels Marktreferenz-Wert
+    konservativ auf die Absolut-Bewegung zurückfiel (AC5 Edge-Case: "fehlt
+    dieser, wird konservativ auf Absolut-Bewertung zurückgefallen und dies
+    protokolliert")."""
 
     ereignisse: tuple[UeberwachungsEreignis, ...]
     kennzahl: MonitoringTagesKennzahl
+    protokoll: tuple[MonitoringProtokollEintrag, ...] = ()
 
 
 def fuehre_monitoring_zyklus_aus(
@@ -263,6 +269,28 @@ def werte_monitoring_ereignisse_aus(
     (AC7). `rohdaten` ist der Cold-Start-Input, siehe Moduldocstring."""
     jetzt = jetzt or datetime.now(UTC)
     settings = get_settings()
+
+    # AC5 Edge-Case: fehlt zu einer Kursbewegung der Marktreferenz-Wert, fällt
+    # `normiere_kursbewegung` konservativ auf die Absolut-Bewegung zurück
+    # (`fallback_verwendet=True`). Die Spec verlangt, dass DIES protokolliert
+    # wird — der Aufrufer (diese Orchestrierung) ist dafür zuständig, nicht der
+    # reine Domain-Kern.
+    protokoll: list[MonitoringProtokollEintrag] = []
+    for titel in rohdaten:
+        if titel.kursbewegung is None:
+            continue
+        if normiere_kursbewegung(titel.kursbewegung, titel.marktbewegung).fallback_verwendet:
+            _protokolliere(
+                protokoll,
+                titel_id=titel.titel_id,
+                grund="marktkontext_fallback",
+                detail=(
+                    "Kein Marktreferenz-Wert vorhanden — Kursbewegung konservativ "
+                    "absolut statt marktkontext-normiert bewertet (AC5)."
+                ),
+                jetzt=jetzt,
+            )
+
     ereignisse = erzeuge_ueberwachungsereignisse(
         rohdaten,
         schwellen=settings.depot_ueberwachung_ereignis_schwellen,
@@ -271,7 +299,9 @@ def werte_monitoring_ereignisse_aus(
     )
     registriere_ereignisse(len(ereignisse), zeitpunkt=jetzt)
     kennzahl = berechne_tageskennzahl(tag=jetzt.date())
-    return MonitoringEreignisAuswertung(ereignisse=ereignisse, kennzahl=kennzahl)
+    return MonitoringEreignisAuswertung(
+        ereignisse=ereignisse, kennzahl=kennzahl, protokoll=tuple(protokoll)
+    )
 
 
 __all__ = [

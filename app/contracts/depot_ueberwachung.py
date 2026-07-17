@@ -36,7 +36,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 #: Protokoll-Gründe (AC1 "unvollständig" / AC9 "nicht bewertbar", deckt E1).
-MonitoringProtokollGrund = Literal["unvollstaendig", "nicht_bewertbar"]
+MonitoringProtokollGrund = Literal["unvollstaendig", "nicht_bewertbar", "marktkontext_fallback"]
 
 
 class MonitoringProtokollEintrag(BaseModel):
