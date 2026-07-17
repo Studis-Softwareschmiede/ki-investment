@@ -24,6 +24,15 @@ interpretiert sie nicht fachlich, es transportiert sie nur.
   auf jedes Profil/jeden Kandidaten angewandt.
 - `Filterkriterien` — Output an die Datenquellen-Abfrage (Verträge "Output
   an Datenquellen-Abfrage", Main-Success-Scenario Schritt 4).
+- `Ampel`/`Regelvorschlag` — Regel-Governance (Story S-057, AC8, deckt A3):
+  Vertrag "Input aus Lernschleife" ("validierte Regeländerung nur mit
+  Gate-Status 🟢"). `Ampel` übernimmt die Werte-Domäne der Lernschleife
+  (`docs/data-model.md` §6 `gate_result.ampel`: `gruen`/`gelb`/`rot`) —
+  dieses Modul definiert sie hier eigenständig (statt aus
+  `app.contracts.lernschleife` zu importieren), weil S-057 bewusst NICHT
+  von S-058/S-060/S-061/S-062 abhängt (die dortigen Gate-Contracts sind
+  noch nicht gebaut); die Kandidatensuche-Seite kennt vom Gate nur dessen
+  Output-Vertrag, nicht dessen Berechnung.
 """
 
 from __future__ import annotations
@@ -129,12 +138,34 @@ class Filterkriterien(BaseModel):
     schwellen: dict[str, Decimal]
 
 
+#: Ampel-Status einer Gate-Entscheidung (AC8, `docs/data-model.md` §6
+#: `gate_result.ampel`): nur `"gruen"` erlaubt die Übernahme einer
+#: Regeländerung in die Suchkriteria (Vertrag "Input aus Lernschleife").
+Ampel = Literal["gruen", "gelb", "rot"]
+
+
+class Regelvorschlag(BaseModel):
+    """Vorschlag für eine Suchregel-Änderung aus der Lernschleife (AC8,
+    deckt A3) — trägt das vorgeschlagene `Suchprofil` (dessen
+    `anlageklasse`-Feld die Zielklasse in der Registry bestimmt) samt dem
+    Gate-`ampel`-Status, der über seine Übernahme entscheidet. Ein
+    Vorschlag ohne `"gruen"`-Status ändert die aktive Suche nicht (Edge-
+    Case "Regelvorschlag ohne Gate-Freigabe → verworfen/geparkt")."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profil: Suchprofil
+    ampel: Ampel
+
+
 __all__ = [
     "QUERSCHNITT_SCHWELLEN_KEY_LIQUIDITAET",
     "QUERSCHNITT_SCHWELLEN_KEY_VOLATILITAET_MAX",
     "QUERSCHNITT_SCHWELLEN_KEY_VOLATILITAET_MIN",
+    "Ampel",
     "Filterkriterien",
     "QuerschnittFilter",
+    "Regelvorschlag",
     "Suchmodus",
     "Suchprofil",
     "SuchprofilOverride",
