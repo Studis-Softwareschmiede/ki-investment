@@ -1,7 +1,7 @@
 id: S-059
 parent: F-016
 title: Trial-Registry (append-only, zählt alle Varianten, nie löschen)
-status: To Do
+status: Done
 priority: P3
 spec: docs/specs/lernschleife.md
 implements:
@@ -18,9 +18,9 @@ estimate_note: Cold-Start; append-only-Registry (BR-118) als Basis der DSR-Zähl
   klar abgegrenzt.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-059
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:56Z'
-updated_at: '2026-07-12T10:10:59Z'
-done_at: null
+updated_at: '2026-07-17T22:30:37Z'
+done_at: '2026-07-17T22:30:36Z'

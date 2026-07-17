@@ -1,7 +1,7 @@
 id: S-050
 parent: F-003
 title: Recalculation-Window für revisionsbehaftete Quellen (FRED)
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/dateneingang.md
 implements:
@@ -19,9 +19,9 @@ estimate_note: Konfigurierbares Re-Pull-Fenster mit idempotenter Aktualisierung;
   Zusatz auf dem Scheduler, Ausbau-Feinheit, Cold-Start ohne Baseline.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-050
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:15Z'
-updated_at: '2026-07-12T10:10:21Z'
-done_at: null
+updated_at: '2026-07-17T22:30:32Z'
+done_at: '2026-07-17T22:30:30Z'

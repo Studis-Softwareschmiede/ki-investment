@@ -1,7 +1,7 @@
 id: S-032
 parent: F-010
 title: 'Monitoring-Zyklus: Depot-Read, geteilte Abfrage & Toggle-/Frische-Regeln'
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/depot-ueberwachung.md
 implements:
@@ -30,9 +30,9 @@ estimate_note: 'Cold-Start: liest je Titel Identität/Klasse/Strategie/Exit-Rege
   (gesamtes Feature).'
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-032
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:28Z'
-updated_at: '2026-07-12T10:09:30Z'
-done_at: null
+updated_at: '2026-07-17T22:30:26Z'
+done_at: '2026-07-17T22:30:25Z'
