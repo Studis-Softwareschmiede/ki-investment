@@ -264,6 +264,26 @@ erDiagram
 
 > **S-037-Präzisierung:** AC3 verlangt explizit zwei separate Attribute ("Transaktionskosten-Relevanz und Break-Even-Anforderung") statt des vormaligen einzelnen `break_even_hinweis`-Feldes — dieses Feld war noch in keiner Migration umgesetzt (greenfield), daher reine Präzisierung ohne Migrationspfad für einen bereits existierenden Spaltennamen.
 
+### `exit_default_set` — Default-Exit-Set je Kategorie (C-014, S-038, provisorisch/konfigurierbar)
+| Feld | Typ | Constraint |
+|---|---|---|
+| kategorie | TEXT | PK, CHECK ∈ {value_aktien, growth_momentum, index_buy_and_hold, krypto, daytrade_swing} — 5 Kategorien der Spec-Tabelle `docs/specs/strategie-exit-regeln.md` AC8 |
+| stop_typ | TEXT | NOT NULL, CHECK ∈ {fundamental, atr_trailing, fix_pct, technisch, keiner} — bewusst eigenes Enum, nicht identisch mit `exit_rule.stop_typ` (siehe Spalten-Kommentar Modell) |
+| stop_parameter_hinweis | TEXT | NOT NULL — Freitext-Beschreibung des Stop-Mechanismus je Kategorie |
+| stop_parameter_pct | NUMERIC(6,3) | nur bei `stop_typ = fix_pct` gesetzt (aktuell nur `index_buy_and_hold`, Default 27.5 — Spannen-Mittelpunkt 25–30 %, AC8-Präzisierung) |
+| take_profit_hinweis | TEXT | Freitext, kann `NULL` sein |
+| time_box | INTERVAL | optional (nur `value_aktien` gesetzt: ~3 Jahre) |
+
+> **S-038-Präzisierung:** Konfigurationsdatum analog `strategy_cluster` — zur Laufzeit per `UPDATE` änderbar (NFR "zur Laufzeit konfigurierbar"). Die Zuordnung Strategie/Anlageklasse/Zeithorizont → `kategorie` (inkl. generischem Fallback für Strategien ohne eigene Zeile) ist App-Logik (`app.db.exit_regel_ableitung.klassifiziere_exit_kategorie`), nicht Teil dieser Tabelle.
+
+### `atr_multiplier_default` — ATR-Multiplikator je Volatilitätsklasse (C-014, S-038, provisorisch/konfigurierbar)
+| Feld | Typ | Constraint |
+|---|---|---|
+| volatilitaetsklasse | TEXT | PK, CHECK ∈ {ruhig, volatil} |
+| multiplikator | NUMERIC(5,2) | NOT NULL — angewandter Default-Wert (Spannen-Mittelpunkt: 2.25 ruhig, 3.5 volatil, AC9-Präzisierung) |
+| multiplikator_min | NUMERIC(5,2) | NOT NULL — Referenzwert (Spec-Spanne, nicht Teil der Ableitungsrechnung) |
+| multiplikator_max | NUMERIC(5,2) | NOT NULL — Referenzwert (Spec-Spanne, nicht Teil der Ableitungsrechnung) |
+
 ### `system_setting` — globale Systemeinstellungen (C-016)
 | Feld | Typ | Constraint |
 |---|---|---|
@@ -789,7 +809,7 @@ bislang nicht führte).
 
 Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 
-1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy_cluster` → `strategy`, `time_horizon`, `risk_profile`, `system_setting`.
+1. **Stammdaten-Basis:** `asset_class`, `analysis_category`, `strategy_cluster` → `strategy`, `time_horizon`, `exit_default_set`, `atr_multiplier_default`, `risk_profile`, `system_setting`.
 2. **Konfig mit FK auf Basis:** `category_weight_version` → `category_weight`, `analysis_method_version` → `analysis_method`, `data_source`, `data_source_asset_class`, `trading_platform`, `platform_asset_class`, `portfolio_strategy`, `portfolio_class_limit`. Die Versionsregister (`*_version`) haben keine FK-Abhängigkeit und werden jeweils vor der zugehörigen versionierten Tabelle angelegt.
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
@@ -798,7 +818,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.
-10. **Seed-Daten (separate Migration):** Anlageklassen 1–11, 5 Kategorien, Kategoriegewichte + Methodentabellen je Klasse (aus Anlageklassen-Notiz), Datenquellen-Registry (12 Quellen), 3 Risikoprofile, 9 Zeithorizonte, 18 Strategien. Idempotent seedbar (`ON CONFLICT DO NOTHING`).
+10. **Seed-Daten (separate Migration):** Anlageklassen 1–11, 5 Kategorien, Kategoriegewichte + Methodentabellen je Klasse (aus Anlageklassen-Notiz), Datenquellen-Registry (12 Quellen), 3 Risikoprofile, 9 Zeithorizonte, 18 Strategien, 5 Default-Exit-Set-Kategorien (S-038), 2 ATR-Multiplikator-Volatilitätsklassen (S-038). Idempotent seedbar (`ON CONFLICT DO NOTHING`).
 
 > **Append-only-Durchsetzung (BR-111/115/118/121):** über entzogene UPDATE/DELETE-Grants auf App-Rolle **oder** BEFORE-UPDATE/DELETE-Trigger `RAISE EXCEPTION` — Wahl trifft der `coder` in der jeweiligen Migration; das Modell fordert nur die Invariante.
 
