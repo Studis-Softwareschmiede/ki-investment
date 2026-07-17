@@ -94,6 +94,40 @@ MODE_VALUES = ("echt", "simuliert")
 # data-model.md §4 `exit_rule`: CHECK stop_typ ∈ {...}
 EXIT_RULE_STOP_TYP_VALUES = ("fix_pct", "atr_trailing", "fundamental", "keiner")
 
+# data-model.md §1 `exit_default_set`: CHECK kategorie ∈ {...} (Spec
+# `docs/specs/strategie-exit-regeln.md` AC8 — 5 Default-Exit-Set-Kategorien
+# der Spec-Tabelle, Story S-038). Strategien/Klassen ohne Treffer nutzen den
+# generischen AC7-Fallback (keine eigene Tabellenzeile, siehe
+# `app.db.exit_regel_ableitung`).
+EXIT_DEFAULT_SET_KATEGORIE_VALUES = (
+    "value_aktien",
+    "growth_momentum",
+    "index_buy_and_hold",
+    "krypto",
+    "daytrade_swing",
+)
+_EXIT_DEFAULT_SET_KATEGORIE_VALUES_SQL = ", ".join(
+    repr(kategorie) for kategorie in EXIT_DEFAULT_SET_KATEGORIE_VALUES
+)
+
+# data-model.md §1 `exit_default_set`: CHECK stop_typ ∈ {...} — bewusst NICHT
+# identisch mit EXIT_RULE_STOP_TYP_VALUES (jenes Enum ist die bereits in
+# S-015 fixierte Persistenz-Spalte `exit_rule.stop_typ`; 'technisch' kommt
+# hier zusaetzlich vor, AC8 "technischer Stop" — dessen Uebernahme in
+# `exit_rule` ist Sache der fixierenden Story S-040, nicht dieser reinen
+# Ableitungs-Konfiguration).
+EXIT_DEFAULT_SET_STOP_TYP_VALUES = ("fundamental", "atr_trailing", "fix_pct", "technisch", "keiner")
+_EXIT_DEFAULT_SET_STOP_TYP_VALUES_SQL = ", ".join(
+    repr(stop_typ) for stop_typ in EXIT_DEFAULT_SET_STOP_TYP_VALUES
+)
+
+# data-model.md §1 `atr_multiplier_default`: CHECK volatilitaetsklasse ∈ {...}
+# (Spec AC9, Story S-038)
+ATR_MULTIPLIER_VOLATILITAETSKLASSE_VALUES = ("ruhig", "volatil")
+_ATR_MULTIPLIER_VOLATILITAETSKLASSE_VALUES_SQL = ", ".join(
+    repr(klasse) for klasse in ATR_MULTIPLIER_VOLATILITAETSKLASSE_VALUES
+)
+
 # data-model.md §4 `transaction`: CHECK typ ∈ {...} (C-017, Story S-035)
 TRANSACTION_TYP_VALUES = ("buy", "sell", "dividend", "fee", "fx_adjust")
 
@@ -497,6 +531,77 @@ class TimeHorizon(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"TimeHorizon(id={self.id!r}, name={self.name!r})"
+
+
+class ExitDefaultSet(Base):
+    """Default-Exit-Set je Kategorie — provisorischer, konfigurierbarer
+    Default (data-model.md `exit_default_set`, Spec
+    `docs/specs/strategie-exit-regeln.md` AC8, Story S-038).
+
+    `kategorie` bildet die 5 Zeilen der AC8-Tabelle ab (Value/Aktien,
+    Growth/Momentum, Index/Buy-and-Hold, Krypto, Daytrade/Swing) — die
+    Zuordnung Strategie/Anlageklasse/Zeithorizont -> Kategorie (inkl.
+    generischem Fallback für Strategien ohne eigene Tabellenzeile) trifft
+    `app.db.exit_regel_ableitung.klassifiziere_exit_kategorie` (AC8-
+    Präzisierung in der Spec). Jede Zeile ist ein reines
+    DB-Konfigurationsdatum (analog `StrategyCluster.freigeschaltet`) — zur
+    Laufzeit per UPDATE änderbar, ohne Code-/Migrations-Änderung (NFR "zur
+    Laufzeit konfigurierbar").
+    """
+
+    __tablename__ = "exit_default_set"
+    __table_args__ = (
+        CheckConstraint(
+            f"kategorie IN ({_EXIT_DEFAULT_SET_KATEGORIE_VALUES_SQL})",
+            name="ck_exit_default_set_kategorie",
+        ),
+        CheckConstraint(
+            f"stop_typ IN ({_EXIT_DEFAULT_SET_STOP_TYP_VALUES_SQL})",
+            name="ck_exit_default_set_stop_typ",
+        ),
+    )
+
+    kategorie: Mapped[str] = mapped_column(String, primary_key=True)
+    stop_typ: Mapped[str] = mapped_column(String, nullable=False)
+    stop_parameter_hinweis: Mapped[str] = mapped_column(String, nullable=False)
+    stop_parameter_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    take_profit_hinweis: Mapped[str | None] = mapped_column(String, nullable=True)
+    time_box: Mapped[timedelta | None] = mapped_column(Interval, nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"ExitDefaultSet(kategorie={self.kategorie!r}, stop_typ={self.stop_typ!r})"
+
+
+class AtrMultiplierDefault(Base):
+    """ATR-Multiplikator je Volatilitätsklasse — provisorischer,
+    konfigurierbarer Default (data-model.md `atr_multiplier_default`, Spec
+    `docs/specs/strategie-exit-regeln.md` AC9, Story S-038).
+
+    `multiplikator` ist der angewandte Punktwert (Richtwert-Mittelpunkt der
+    Spec-Bandbreite, siehe AC9-Präzisierung); `multiplikator_min`/`_max`
+    dokumentieren die von der Spec genannte Bandbreite (ruhig 2–2.5×,
+    volatil 3–4×) — reine Referenzwerte, nicht Teil der Ableitungsrechnung
+    (`app.db.exit_regel_ableitung.leite_exit_regeln_ab` verwendet nur
+    `multiplikator`)."""
+
+    __tablename__ = "atr_multiplier_default"
+    __table_args__ = (
+        CheckConstraint(
+            f"volatilitaetsklasse IN ({_ATR_MULTIPLIER_VOLATILITAETSKLASSE_VALUES_SQL})",
+            name="ck_atr_multiplier_default_volatilitaetsklasse",
+        ),
+    )
+
+    volatilitaetsklasse: Mapped[str] = mapped_column(String, primary_key=True)
+    multiplikator: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    multiplikator_min: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+    multiplikator_max: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AtrMultiplierDefault(volatilitaetsklasse={self.volatilitaetsklasse!r}, "
+            f"multiplikator={self.multiplikator!r})"
+        )
 
 
 class MarketDataBronze(Base):
