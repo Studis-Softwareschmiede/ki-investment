@@ -66,6 +66,16 @@ realisierte FX-Attribution (`app.domain.portfolio.fx_attribution
 .berechne_fx_split_realisiert`), persistiert als `Transaction.fx_rate`/
 `kapital_gv_chf`/`waehrungs_gv_chf` (data-model.md §4 `transaction`,
 → BR-129).
+
+Story S-054 (AC11, Depot-Dashboard) ergänzt `LivePriceProvider`: den Port
+für den Cross-Cutting Socket-Live-Kurs-Zugriff (architecture.md P5,
+"die Anzeige-Schicht baut keine eigene Preisanbindung"). Der eigentliche
+Live-Kurs-Socket-Adapter (Broker-Feed) ist NICHT Teil dieser Story — analog
+zu `ExitRegelnBestand` (S-036, oben: liefert `None`-Felder, solange keine
+`exit_rule`-Zeile existiert) liefert die aktuelle Implementierung
+(`app.adapters.marketdata.live_price.NoOpLivePriceProvider`) für jeden
+Titel `None`; das Dashboard behandelt das gemäss `depot.md` Edge-Cases als
+"nicht bewertbar" statt eines veralteten Werts.
 """
 
 from __future__ import annotations
@@ -298,4 +308,18 @@ class PositionRepository(Protocol):
         desselben Titels (FIFO) den ältesten Lot als Titel-Repräsentant
         verwendet). Leere Liste, falls kein offener Lot in diesem Modus
         existiert."""
+        ...
+
+
+class LivePriceProvider(Protocol):
+    """Cross-Cutting Socket-Live-Kurs-Zugriff (AC11, architecture.md P5) —
+    die einzige erlaubte Quelle für aktuelle Kurse im Depot-Dashboard
+    (`app.api.dashboard`); das Dashboard implementiert selbst keine eigene
+    Preisanbindung, sondern liest ausschliesslich über diesen Port."""
+
+    def aktueller_preis(self, titel_id: str) -> Decimal | None:
+        """Liefert den aktuellen Live-Kurs für `titel_id`, oder `None`,
+        falls kein aktueller Kurs vorliegt (`depot.md` Edge-Cases: dann gilt
+        die Position als "nicht bewertbar" statt mit einem veralteten Wert
+        ausgewiesen zu werden)."""
         ...

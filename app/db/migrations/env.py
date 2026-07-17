@@ -5,7 +5,6 @@ fehlt eine Pflicht-Variable, bricht das Skript mit einer klaren Fehlermeldung ab
 statt auf einen Default mit echten Zugangsdaten zurueckzufallen.
 """
 
-import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -23,44 +22,11 @@ if config.config_file_name is not None:
 # ORM-Modelle registrieren, damit target_metadata fuer Autogenerate verfuegbar ist.
 from app.db import models  # noqa: E402,F401 — Import registriert die Modelle bei Base.metadata
 from app.db.base import Base  # noqa: E402
+from app.db.utils import build_db_url  # noqa: E402 — S-054: geteilte DB-URL-Bildung
 
 target_metadata = Base.metadata
 
-
-def _build_db_url() -> str:
-    """Baut die DB-URL aus DB_*/POSTGRES_*-Env-Vars (.env.db-Konvention).
-
-    Liest wahlweise die generischen `DB_*`-Namen oder die Compose-Konvention
-    `POSTGRES_*` (siehe `.env.db.example`). Fehlt eine Pflicht-Variable in
-    beiden Namensschemata, bricht der Start mit Nennung der fehlenden
-    Variable ab (kein stiller Fallback auf Default-Credentials).
-    """
-    name = os.environ.get("DB_NAME") or os.environ.get("POSTGRES_DB")
-    user = os.environ.get("DB_USER") or os.environ.get("POSTGRES_USER")
-    password = os.environ.get("DB_PASSWORD") or os.environ.get("POSTGRES_PASSWORD")
-    host = os.environ.get("DB_HOST", "localhost")
-    port = os.environ.get("DB_PORT", "5432")
-
-    missing = [
-        env_names
-        for value, env_names in (
-            (name, "DB_NAME/POSTGRES_DB"),
-            (user, "DB_USER/POSTGRES_USER"),
-            (password, "DB_PASSWORD/POSTGRES_PASSWORD"),
-        )
-        if not value
-    ]
-    if missing:
-        raise RuntimeError(
-            "Fehlende DB-Umgebungsvariable(n): "
-            + ", ".join(missing)
-            + " — bitte .env.db setzen (siehe .env.db.example)."
-        )
-
-    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{name}"
-
-
-config.set_main_option("sqlalchemy.url", _build_db_url())
+config.set_main_option("sqlalchemy.url", build_db_url())
 
 
 def run_migrations_offline() -> None:
