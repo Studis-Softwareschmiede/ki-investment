@@ -1,7 +1,7 @@
 """Tests für den FRED-Adapter (Story S-005, konkrete Referenzimplementierung
-von `SocketAdapter`).
+von `SocketAdapter`; Story S-050 ergänzt das Recalculation-Window).
 
-Covers (dateneingang): AC1, AC2, AC3
+Covers (dateneingang): AC1, AC2, AC3, AC12
 
 `app.adapters.sockets.fred.FredAdapter` ist die erste konkrete
 Quellen-Implementierung des Adapter-Ports (AC1). Diese Tests decken: Auth
@@ -10,7 +10,11 @@ erscheint nie im Klartext in Logs, nur maskiert (AC3,
 `app.core.secrets.mask_secret`); FRED-typische fehlende Beobachtungen
 (`"."`) werden mangels Qualitätsindikator verworfen, nicht geschätzt
 (AC2); die normalisierten Datenpunkte tragen alle vier Pflicht-Metadaten
-(AC1/AC2); das Rate-Limit ist im Adapter gekapselt (AC3).
+(AC1/AC2); das Rate-Limit ist im Adapter gekapselt (AC3); das
+Recalculation-Window (AC12/A2) wird bei jedem Abruf als
+`observation_start` an die FRED-API übergeben — konfigurierbar per
+Konstruktor-Parameter oder `Settings.fred_recalculation_window_tage`
+(Default 3 Tage, `FRED_RECALCULATION_WINDOW_TAGE`).
 """
 
 from __future__ import annotations
@@ -19,11 +23,13 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from app.adapters.sockets.base import RateLimiter
 from app.adapters.sockets.fred import FRED_API_KEY_ENV_VAR, FredAdapter, FredConfigError
+from app.config import get_settings
 from app.core.secrets import mask_secret
 
 FRED_PAYLOAD = {
@@ -136,3 +142,84 @@ def test_fetch_respects_rate_limiter() -> None:
     asyncio.run(adapter.fetch())
 
     assert calls == pytest.approx([4.9])
+
+
+def test_fetch_uses_configured_recalculation_window_as_observation_start() -> None:
+    """@trace dateneingang#AC12 — der Adapter übergibt `observation_start`
+    als `jetzt - recalculation_window_tage` an die FRED-API (A2: die
+    letzten Tage werden bei jedem Abruf erneut gezogen, um rückwirkende
+    Korrekturen zu erfassen)."""
+    erfasste_urls: list[str] = []
+
+    def _spy_http_get(url: str) -> bytes:
+        erfasste_urls.append(url)
+        return json.dumps(FRED_PAYLOAD).encode()
+
+    adapter = FredAdapter(
+        series_id="FEDFUNDS",
+        anlageklassen_tag=9,
+        api_key="test-key",
+        http_get=_spy_http_get,
+        rate_limiter=RateLimiter(0.0),
+        recalculation_window_tage=5,
+        jetzt=lambda: datetime(2026, 7, 18, tzinfo=UTC),
+    )
+
+    asyncio.run(adapter.fetch())
+
+    assert len(erfasste_urls) == 1
+    query = parse_qs(urlparse(erfasste_urls[0]).query)
+    assert query["observation_start"] == ["2026-07-13"]
+
+
+def test_fetch_recalculation_window_defaults_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace dateneingang#AC12 — ohne expliziten Konstruktor-Parameter
+    wird die Fensterbreite aus `Settings.fred_recalculation_window_tage`
+    gelesen (Default 3 Tage, ohne Codeänderung über
+    `FRED_RECALCULATION_WINDOW_TAGE` überschreibbar)."""
+    monkeypatch.setenv("FRED_RECALCULATION_WINDOW_TAGE", "7")
+    get_settings.cache_clear()
+    try:
+        erfasste_urls: list[str] = []
+
+        def _spy_http_get(url: str) -> bytes:
+            erfasste_urls.append(url)
+            return json.dumps(FRED_PAYLOAD).encode()
+
+        adapter = FredAdapter(
+            series_id="FEDFUNDS",
+            anlageklassen_tag=9,
+            api_key="test-key",
+            http_get=_spy_http_get,
+            rate_limiter=RateLimiter(0.0),
+            jetzt=lambda: datetime(2026, 7, 18, tzinfo=UTC),
+        )
+
+        asyncio.run(adapter.fetch())
+
+        query = parse_qs(urlparse(erfasste_urls[0]).query)
+        assert query["observation_start"] == ["2026-07-11"]
+    finally:
+        get_settings.cache_clear()
+
+
+def test_fetch_recalculation_window_repull_is_idempotent_on_unchanged_value() -> None:
+    """@trace dateneingang#AC12 — zwei aufeinanderfolgende Abrufe desselben
+    (unveränderten) Fensters liefern inhaltlich identische Datenpunkte
+    (Vorbedingung für die idempotente Bronze-Aktualisierung, S-022) — kein
+    unbeabsichtigter Doppel-/Drift-Effekt allein durch das erneute Ziehen."""
+    adapter = FredAdapter(
+        series_id="FEDFUNDS",
+        anlageklassen_tag=9,
+        api_key="test-key",
+        http_get=_fake_http_get,
+        rate_limiter=RateLimiter(0.0),
+        recalculation_window_tage=3,
+    )
+
+    erster_durchlauf = asyncio.run(adapter.fetch())
+    zweiter_durchlauf = asyncio.run(adapter.fetch())
+
+    assert {p.wert for p in erster_durchlauf} == {p.wert for p in zweiter_durchlauf}
