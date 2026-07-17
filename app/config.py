@@ -70,6 +70,23 @@ benannt) — provisorisch gewählt: **24 Stunden (86400s)**, ohne
 Codeänderung über `DEPOT_UEBERWACHUNG_FRISCHE_FENSTER_SEKUNDEN`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
 
+Aus S-033 (AC4, AC5, AC7, `docs/specs/depot-ueberwachung.md`) kommen
+`depot_ueberwachung_ereignis_keywords`, `depot_ueberwachung_ereignis_schwellen`
+und `depot_ueberwachung_ereignisse_pro_tag_schwellwert` hinzu: die
+Default-Stichwortliste des Keyword-/Ereignis-Filters (AC4, "Die
+Filter-Stichwortliste ist als Parameter konfigurierbar"), die je
+Ereignistyp konfigurierten Schwellen (AC6-Nachbar-Konfiguration, siehe
+`app.domain.depot_ueberwachung.ereignis_erzeugung`) und der Alert-Fatigue-
+Tages-Schwellwert (AC7, Default 10 Ereignisse/Tag). Alle drei sind ohne
+Codeänderung über `DEPOT_UEBERWACHUNG_EREIGNIS_KEYWORDS`/
+`DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN`/
+`DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT` überschreibbar. Keywords
+und Tages-Schwellwert werden bei Angabe vollständig ersetzt; die
+Ereignistyp-Schwellen dagegen werden in
+`app.domain.depot_ueberwachung.ereignis_erzeugung.erzeuge_ueberwachungsereignisse`
+mit `DEFAULT_EREIGNIS_SCHWELLEN` GEMERGT — ein partieller Override setzt nur
+die genannten Ereignistypen, alle übrigen behalten ihren Default.
+
 Aus S-050 (AC12, `docs/specs/dateneingang.md`, A2) kommt
 `fred_recalculation_window_tage` hinzu: die Fensterbreite (in Tagen), die
 `app.adapters.sockets.fred.FredAdapter` bei jedem Abruf als
@@ -116,6 +133,7 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.contracts.depot_ueberwachung import DEFAULT_EREIGNIS_KEYWORDS, DEFAULT_EREIGNIS_SCHWELLEN
 from app.contracts.kandidatensuche import (
     QuerschnittFilter,
     SuchprofilOverrides,
@@ -260,6 +278,31 @@ class Settings(BaseSettings):
     #: `DEPOT_UEBERWACHUNG_FRISCHE_FENSTER_SEKUNDEN` überschreibbar (siehe
     #: Modul-Docstring).
     depot_ueberwachung_frische_fenster_sekunden: int = Field(default=86400, gt=0)
+
+    #: Keyword-/Ereignis-Filter-Stichwortliste (AC4, S-033) — Default-
+    #: Auslöser-Menge (provisorisch), ohne Codeänderung über
+    #: `DEPOT_UEBERWACHUNG_EREIGNIS_KEYWORDS` überschreibbar (JSON-Array).
+    depot_ueberwachung_ereignis_keywords: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_EREIGNIS_KEYWORDS)
+    )
+
+    #: Ereignistyp-Schwellen (AC6-Nachbar-Konfiguration, S-033) — je
+    #: Ereignistyp EIN Schwellwert (provisorisch, klassenunabhängig
+    #: einheitlich, s. Modul-Docstring); ein Override via
+    #: `DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN` wird in
+    #: `ereignis_erzeugung.erzeuge_ueberwachungsereignisse` mit
+    #: `DEFAULT_EREIGNIS_SCHWELLEN` GEMERGT — ein partieller Override setzt nur
+    #: die genannten Ereignistypen, alle übrigen behalten ihren Default.
+    depot_ueberwachung_ereignis_schwellen: dict[str, Decimal] = Field(
+        default_factory=lambda: dict(DEFAULT_EREIGNIS_SCHWELLEN)
+    )
+
+    #: Alert-Fatigue-Tages-Schwellwert (AC7, S-033): überschreitet die
+    #: Anzahl je Tag erzeugter Überwachungs-Ereignisse diesen Wert STRIKT,
+    #: gilt der Zyklus als "zu sensibel". Provisorischer Default 10, ohne
+    #: Codeänderung über
+    #: `DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT` überschreibbar.
+    depot_ueberwachung_ereignisse_pro_tag_schwellwert: int = Field(default=10, ge=0)
 
 
 @lru_cache
