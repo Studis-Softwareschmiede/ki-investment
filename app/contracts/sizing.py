@@ -14,8 +14,9 @@ und die Pre-Trade-Kostenkalkulation voraus (AC5/AC6 der Spec) — beides
 ist NICHT Teil dieser Story ("Position-Sizing-Kern: Kelly-Formel,
 Fraktionen, hartes Cap, Scharfschaltung", ohne Kosten-/Mindestgrössen-
 Prüfung). Dieses Modul liefert ausschliesslich den **Risiko-Anteil des
-Kapitals** (`risiko_pct`, 0–1) als Prozentsatz; eine Folgestory
-kombiniert das mit Kapitalbasis + Kosten zur absoluten `ordergroesse`.
+Kapitals** (`risiko_pct`, 0–1) als Prozentsatz; `OrdergroessenKonfiguration`/
+`OrdergroessenErgebnis` (Story S-041, unten) kombinieren das additiv mit
+Kapitalbasis + Kosten zur absoluten `ordergroesse`.
 """
 
 from __future__ import annotations
@@ -100,4 +101,52 @@ class PositionSizingErgebnis(BaseModel):
     verworfen: str | None = None
 
 
-__all__ = ["KellyFraktionsKonfiguration", "PositionSizingErgebnis"]
+class OrdergroessenKonfiguration(BaseModel):
+    """AC6 (Story S-041): die konfigurierbare Mindest-Ordergrösse
+    (Verträge: "Mindest-Ordergrösse" — "Default, provisorisch,
+    konfigurierbar", Mindestgebühr-Effekt, deckt E2). Bewusst ein
+    eigenständiges Modell statt einer Erweiterung von
+    `KellyFraktionsKonfiguration` (S-039, additiv/unverändert)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: AC6: Mindest-Ordergrösse in CHF (Netto, nach Kostenabzug, AC5).
+    #: Unterschreitet die geplante Ordergrösse diesen Wert, wird kein
+    #: Auftrag erzeugt (Default provisorisch).
+    mindest_ordergroesse_chf: Decimal = Field(default=Decimal("50"), gt=0)
+
+
+class OrdergroessenErgebnis(BaseModel):
+    """AC5/AC6-Ausschnitt (Story S-041) des "Position-Sizing Output"-
+    Vertrags: `{ titel_id, ordergroesse, verworfen? }` — kombiniert
+    `risiko_pct` (S-039, `PositionSizingErgebnis`) + Kapitalbasis +
+    erwartete Kosten (S-017, `ErwarteteKosten`) zur absoluten
+    Netto-Ordergrösse.
+
+    `ordergroesse_chf` ist die finale, um die erwarteten Kosten (AC5)
+    reduzierte Ordergrösse — `0`, sobald `verworfen` gesetzt ist.
+    `ordergroesse_brutto_chf` ist die ungekürzte Grösse vor Kostenabzug
+    (`risiko_pct * kapitalbasis_chf`), zu Nachvollziehbarkeitszwecken.
+
+    `verworfen` trägt `"kosten-uebersteigen-ertrag"`, wenn nach
+    Kostenabzug keine positive Netto-Grösse verbleibt (AC5, deckt E1-
+    Analogon "kein positiver erwarteter Gewinn"), bzw.
+    `"unter-mindest-ordergroesse"`, wenn die verbleibende Netto-Grösse
+    die konfigurierte Mindest-Ordergrösse unterschreitet (AC6, deckt
+    E2)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    titel_id: str = Field(min_length=1)
+    ordergroesse_chf: Decimal = Field(ge=0)
+    ordergroesse_brutto_chf: Decimal = Field(ge=0)
+    kosten_chf: Decimal = Field(ge=0)
+    verworfen: str | None = None
+
+
+__all__ = [
+    "KellyFraktionsKonfiguration",
+    "OrdergroessenErgebnis",
+    "OrdergroessenKonfiguration",
+    "PositionSizingErgebnis",
+]
