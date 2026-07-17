@@ -101,10 +101,15 @@ class DepotStand:
 @dataclass(frozen=True)
 class TitelStrategieExitRegeln:
     """AC9: Output an die Depot-Überwachung — je gehaltenem Titel
-    Strategie + die beim Kauf fixierten Exit-Regeln (Verträge-Vertrag
-    "Output an Depot-Überwachung")."""
+    Anlageklasse + Strategie + die beim Kauf fixierten Exit-Regeln
+    (Verträge-Vertrag "Output an Depot-Überwachung"). `anlageklasse`
+    ergänzt in S-032 (`docs/specs/depot-ueberwachung.md` AC1 benötigt sie
+    zur Bestimmung der je Klasse überwachten Grössen, AC3) — stammt
+    unverändert aus `PositionsBestand.asset_class_id` des Titel-
+    repräsentierenden (ältesten) Lots."""
 
     titel_id: str
+    anlageklasse: int
     strategie: str | None
     exit_regeln: ExitRegelnBestand
 
@@ -171,6 +176,7 @@ def ermittle_titel_strategie_exit_regeln(
             continue
         ergebnis[position.titel_id] = TitelStrategieExitRegeln(
             titel_id=position.titel_id,
+            anlageklasse=position.asset_class_id,
             strategie=position.strategie,
             exit_regeln=position.exit_regeln,
         )
