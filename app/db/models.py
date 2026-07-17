@@ -1226,3 +1226,152 @@ class PlatformAssetClass(Base):
             f"PlatformAssetClass(platform_id={self.platform_id!r}, "
             f"asset_class_id={self.asset_class_id!r}, bevorzugt={self.bevorzugt!r})"
         )
+
+
+# data-model.md §1 `risk_profile`: CHECK name ∈ {...} (C-015, 3 Presets,
+# Spec `docs/specs/risikomanagement.md` AC3) — einzige Quelle fuer den
+# CHECK-Constraint unten (kein separates hartkodiertes SQL-Duplikat ausserhalb
+# der Migration, analog STRATEGY_CLUSTER_VALUES).
+RISK_PROFILE_NAMES = ("konservativ", "ausgewogen", "offensiv")
+_RISK_PROFILE_NAMES_SQL = ", ".join(repr(name) for name in RISK_PROFILE_NAMES)
+
+
+class RiskProfile(Base):
+    """Risikoprofil — 3 Presets (data-model.md §1 `risk_profile`, C-015;
+    Spec `docs/specs/risikomanagement.md` AC3/AC4, Story S-043).
+
+    Reine Stammdaten-Zeile (Name der Profil-Stufe); die eigentlichen
+    Grenzwerte je Profil trägt `PortfolioStrategy` (1:1 über
+    `risk_profile_id`, siehe dort).
+    """
+
+    __tablename__ = "risk_profile"
+    __table_args__ = (
+        CheckConstraint(f"name IN ({_RISK_PROFILE_NAMES_SQL})", name="ck_risk_profile_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"RiskProfile(id={self.id!r}, name={self.name!r})"
+
+
+class PortfolioStrategy(Base):
+    """Depotstrategie / Makro-Grenzwerte (data-model.md §1 `portfolio_strategy`,
+    C-015; Spec `docs/specs/risikomanagement.md` AC1/AC3/AC4/AC11, Story
+    S-043).
+
+    Trägt das AC1-Grenzwert-Regelwerk (max. Einzelposition, max. Gewicht je
+    Branche/Sektor — GICS, EIN flacher Wert je Depotstrategie statt
+    sektor-spezifischer Einzelwerte, siehe Spec-Verträge — sowie die
+    Cash-Quote). `gesamt_exposure_cap_pct` ist der AC10-Kelly-Cap-Platzhalter
+    (Spalte bereits Teil des bindenden data-model.md-Schemas; die
+    eigentliche Gate-Durchsetzung — AC5-AC10 — ist ausserhalb dieser Story).
+
+    `aktiv`: genau eine Zeile darf `aktiv=True` tragen (BR-117). DB-seitig
+    durch einen partiellen UNIQUE-Index erzwungen (`ux_portfolio_strategy_
+    aktiv`, siehe Migration — bewusst NICHT hier im `__table_args__`
+    dupliziert, analog `CategoryWeightVersion`/`AnalysisMethodVersion`:
+    reine Migrations-DDL, kein ORM-Autogenerate-Anspruch für diesen
+    Index-Typ); App-seitig durch `app.db.depotstrategie.
+    waehle_risikoprofil_preset()` (deaktiviert die bisher aktive Zeile,
+    bevor die gewählte aktiviert wird — Muster von `app.db.config_versions.
+    _markiere_bisherige_version_als_veraltet` übernommen).
+
+    "Nutzer wählt ein Preset" (AC3) heisst strukturell: eine der (per Seed
+    vorbereiteten) Presets aktivieren — die übrigen zwei bleiben inaktiv
+    verfügbar. "Feinjustieren" (AC3) aktualisiert die Felder der gewählten
+    Zeile direkt (In-Place-UPDATE, keine Versionierung — anders als
+    `category_weight`/`analysis_method`, die Depotstrategie hat keinen
+    AC10-Historienbedarf).
+    """
+
+    __tablename__ = "portfolio_strategy"
+    __table_args__ = (
+        CheckConstraint(
+            "max_einzelposition_pct >= 0 AND max_einzelposition_pct <= 100",
+            name="ck_portfolio_strategy_max_einzelposition_pct_range",
+        ),
+        CheckConstraint(
+            "max_sektor_pct >= 0 AND max_sektor_pct <= 100",
+            name="ck_portfolio_strategy_max_sektor_pct_range",
+        ),
+        CheckConstraint(
+            "cash_quote_ziel_pct >= 0 AND cash_quote_ziel_pct <= 100",
+            name="ck_portfolio_strategy_cash_quote_ziel_pct_range",
+        ),
+        CheckConstraint(
+            "gesamt_exposure_cap_pct >= 0 AND gesamt_exposure_cap_pct <= 100",
+            name="ck_portfolio_strategy_gesamt_exposure_cap_pct_range",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    risk_profile_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("risk_profile.id"), nullable=False
+    )
+    max_einzelposition_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    max_sektor_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    cash_quote_ziel_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    gesamt_exposure_cap_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    aktiv: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"PortfolioStrategy(id={self.id!r}, risk_profile_id={self.risk_profile_id!r}, "
+            f"aktiv={self.aktiv!r})"
+        )
+
+
+class PortfolioClassLimit(Base):
+    """Klassen-Limit je Depotstrategie (data-model.md §1 `portfolio_class_limit`,
+    C-015; Spec `docs/specs/risikomanagement.md` AC1/AC4, Story S-043).
+
+    AC1 "max. Gewicht je Anlageklasse (der 11 Klassen)": eine Zeile je
+    (Depotstrategie, Anlageklasse)-Kombination — nicht alle 11 Klassen
+    müssen befüllt sein (nur Krypto ist per AC4 mit einem konkreten,
+    profilabhängigen Bereich [5-15 %] belegt; die übrigen Klassen bleiben
+    unbelegte Konfiguration, siehe Migrations-Docstring — keine coder-eigene
+    Erfindung unbelegter Prozentzahlen, analog dem `trading_platform`/
+    `platform_asset_class`-Präzedenzfall).
+
+    Bewusst OHNE dedizierten `(asset_class_id)`-Index (data-model.md §8,
+    Zeile `strategy`: "analog `risk_profile`/`portfolio_class_limit`-
+    Stammdatentabellen" — bei dieser geringen Kardinalität ist ein
+    Full-Table-Scan günstiger als ein zusätzlicher Index, sql/R05-Ausnahme).
+    """
+
+    __tablename__ = "portfolio_class_limit"
+    __table_args__ = (
+        CheckConstraint(
+            "max_klasse_pct >= 0 AND max_klasse_pct <= 100",
+            name="ck_portfolio_class_limit_max_klasse_pct_range",
+        ),
+    )
+
+    portfolio_strategy_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("portfolio_strategy.id"), primary_key=True
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), primary_key=True
+    )
+    max_klasse_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"PortfolioClassLimit(portfolio_strategy_id={self.portfolio_strategy_id!r}, "
+            f"asset_class_id={self.asset_class_id!r}, max_klasse_pct={self.max_klasse_pct!r})"
+        )
