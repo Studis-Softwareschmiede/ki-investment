@@ -1,7 +1,7 @@
 id: S-058
 parent: F-016
 title: 'Research: Hypothesen-Erzeugung mit Mindest-Evidenz-Protokoll & Marktlogik-Filter'
-status: To Do
+status: Done
 priority: P3
 spec: docs/specs/lernschleife.md
 implements:
@@ -24,9 +24,9 @@ estimate_note: Cold-Start; Research liefert nur Hypothesen (BR-024), marktlogisc
   Erklärbarkeit filtert Zufallsmuster; LLM als Input, Stufe 2.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-058
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:52Z'
-updated_at: '2026-07-12T10:10:56Z'
-done_at: null
+updated_at: '2026-07-17T23:39:37Z'
+done_at: '2026-07-17T23:39:36Z'

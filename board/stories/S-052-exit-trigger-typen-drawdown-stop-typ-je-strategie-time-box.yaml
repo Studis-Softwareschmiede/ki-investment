@@ -1,7 +1,7 @@
 id: S-052
 parent: F-008
 title: 'Exit-Trigger-Typen: Drawdown, Stop-Typ je Strategie, Time-Box'
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/analyse-pipelines.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: 'Cold-Start: mehrere provisorische, konfigurierbare Trigger — D
   (AC10). Ausbau-Charakter, daher P2.'
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-052
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:28Z'
-updated_at: '2026-07-12T10:10:34Z'
-done_at: null
+updated_at: '2026-07-17T23:39:35Z'
+done_at: '2026-07-17T23:39:32Z'
