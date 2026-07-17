@@ -1493,12 +1493,13 @@ class TrialRegistry(Base):
     `archived=True` gesetzt (`app.db.trial_registry.archiviere_trial`),
     **nie gelöscht**.
 
-    **`hypothesis_id` bewusst OHNE FK:** data-model.md §6 modelliert
-    `hypothesis_id` als `FK → rule_hypothesis.id`; `rule_hypothesis`
-    entsteht erst mit S-058 (AC1/AC2, keine Story-Abhängigkeit zu S-059).
-    Bis dahin ist `hypothesis_id` ein reiner `UUID NOT NULL`-Wert ohne
-    referentielle Integrität (siehe Migrations-Docstring
-    `e4f7a1c9b2d3_create_trial_registry_ac3`).
+    **`hypothesis_id` FK auf `rule_hypothesis.id` (nachgerüstet, S-058):**
+    data-model.md §6 modelliert `hypothesis_id` als
+    `FK → rule_hypothesis.id`; die Migration `e4f7a1c9b2d3` (S-059) legte
+    die Spalte mangels existierender `rule_hypothesis`-Tabelle noch ohne
+    FK an. Die additive Folge-Migration `3c0ecd3737cb` (S-058) rüstet den
+    Constraint nach, sobald `rule_hypothesis` existiert (siehe deren
+    Migrations-Docstring).
 
     **Append-only-Durchsetzung (BR-118), zwei Schichten:**
     - **DB:** die Migration legt unter Postgres einen `BEFORE DELETE`-
@@ -1526,7 +1527,9 @@ class TrialRegistry(Base):
         default=uuid.uuid4,
         server_default=sa.text("gen_random_uuid()"),
     )
-    hypothesis_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    hypothesis_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rule_hypothesis.id"), nullable=False
+    )
     variant_hash: Mapped[str] = mapped_column(String, nullable=False)
     params: Mapped[Any] = mapped_column(sa.JSON().with_variant(JSONB, "postgresql"), nullable=False)
     archived: Mapped[bool] = mapped_column(
@@ -1540,4 +1543,67 @@ class TrialRegistry(Base):
         return (
             f"TrialRegistry(hypothesis_id={self.hypothesis_id!r}, "
             f"variant_hash={self.variant_hash!r}, archived={self.archived!r})"
+        )
+
+
+class RuleHypothesis(Base):
+    """Regel-Hypothese aus Research (data-model.md §6 `rule_hypothesis`,
+    C-012; Spec `docs/specs/lernschleife.md` AC1/AC2, Story S-058).
+
+    Trägt das von AC1 geforderte Mindest-Evidenz-Protokoll
+    (`anzahl_faelle`, `zeitraum_von`/`zeitraum_bis`, `signalquelle`,
+    `asset_class_id`) sowie `marktlogik` (AC2 — nur marktlogisch
+    begründete Muster werden überhaupt als Zeile hier angelegt, siehe
+    `app.domain.research.hypothesen_erzeugung.erzeuge_hypothesen`) als
+    NOT-NULL-Pflichtfelder — DB-seitige zweite Sicherungsebene neben dem
+    Pydantic-Vertrag `app.contracts.research.Hypothese`/
+    `Evidenzprotokoll` (→ BR-136).
+
+    **Spec-Präzisierung (S-058):** die ursprüngliche `data-model.md`-
+    Fassung dieser Tabelle führte nur `beschreibung`/`params`/
+    `free_param_count` — die AC1-Evidenzprotokoll-Felder und `marktlogik`
+    wurden bei der Umsetzung dieser Story ergänzt, um den Spec-Vertrag
+    "Hypothese (Research → Gate): `{ hypothese_id, beschreibung,
+    marktlogik, evidenz{...} }`" vollständig abzubilden (siehe
+    `docs/data-model.md` §6).
+
+    `params`/`free_param_count` bleiben wie ursprünglich modelliert:
+    Regelparameter-Kandidat der Hypothese und Overfit-Sanity-Zähler:
+    Schwellenwert-Auswertung ist NICHT Teil dieser Story (künftige
+    Trial-Registry-/Gate-Story)."""
+
+    __tablename__ = "rule_hypothesis"
+    __table_args__ = (
+        CheckConstraint("anzahl_faelle > 0", name="ck_rule_hypothesis_anzahl_faelle_positive"),
+        CheckConstraint(
+            "zeitraum_bis >= zeitraum_von", name="ck_rule_hypothesis_zeitraum_konsistent"
+        ),
+        Index("ix_rule_hypothesis_asset_class_id", "asset_class_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    beschreibung: Mapped[str] = mapped_column(String, nullable=False)
+    marktlogik: Mapped[str] = mapped_column(String, nullable=False)
+    anzahl_faelle: Mapped[int] = mapped_column(Integer, nullable=False)
+    zeitraum_von: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    zeitraum_bis: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    signalquelle: Mapped[str] = mapped_column(String, nullable=False)
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    params: Mapped[Any] = mapped_column(sa.JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    free_param_count: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"RuleHypothesis(id={self.id!r}, beschreibung={self.beschreibung!r}, "
+            f"asset_class_id={self.asset_class_id!r})"
         )

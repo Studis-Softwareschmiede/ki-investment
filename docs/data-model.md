@@ -35,6 +35,7 @@ erDiagram
     asset_class ||--o{ platform_asset_class : "handelbar auf"
     asset_class ||--o{ instrument : "klassifiziert"
     asset_class ||--o{ portfolio_class_limit : "begrenzt durch"
+    asset_class ||--o{ rule_hypothesis : "Anlageklasse je Hypothese"
 
     data_source ||--o{ data_source_asset_class : "deckt ab"
     data_source ||--o{ market_data_bronze : "liefert roh"
@@ -630,13 +631,21 @@ bislang nicht führte).
 
 ## 6 · Lernschleife / Validierungs-Gate (Stufe 2, Datenmodell jetzt — C-012)
 
-### `rule_hypothesis` — Regel-Hypothese aus Research (C-012)
+### `rule_hypothesis` — Regel-Hypothese aus Research (C-012, Spec `docs/specs/lernschleife.md` AC1/AC2, S-058)
+> **Präzisierung (S-058):** die ursprüngliche Fassung dieser Tabelle führte nur `beschreibung`/`params`/`free_param_count` — das bildete den Spec-Vertrag „Hypothese (Research → Gate): `{ hypothese_id, beschreibung, marktlogik, evidenz{ anzahl_faelle, zeitraum, signalquelle, anlageklasse } }`" (Verträge-Abschnitt) noch nicht vollständig ab. Die AC1-Mindest-Evidenz-Protokoll-Felder (`anzahl_faelle`, `zeitraum_von`/`zeitraum_bis`, `signalquelle`, `asset_class_id`) sowie `marktlogik` (AC2) wurden ergänzt — beide Feldgruppen sind NOT NULL: eine Hypothese ohne vollständiges Protokoll bzw. ohne marktlogische Begründung wird von `app.domain.research.hypothesen_erzeugung.erzeuge_hypothesen` gar nicht erst als `Hypothese` gebaut und erreicht diese Tabelle nie (App-Filter, → BR-136).
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
 | beschreibung | TEXT | NOT NULL |
-| params | JSONB | NOT NULL (Regelparameter) |
-| free_param_count | SMALLINT | NOT NULL (Overfit-Sanity: > 5–6 → Verdacht) |
+| marktlogik | TEXT | NOT NULL (AC2 — marktlogische Erklärbarkeit; nur begründete Muster werden überhaupt persistiert) |
+| anzahl_faelle | INTEGER | NOT NULL, CHECK > 0 (AC1 Mindest-Evidenz-Protokoll) |
+| zeitraum_von | TIMESTAMPTZ | NOT NULL (AC1) |
+| zeitraum_bis | TIMESTAMPTZ | NOT NULL (AC1), CHECK ≥ zeitraum_von |
+| signalquelle | TEXT | NOT NULL (AC1) |
+| asset_class_id | SMALLINT | FK → asset_class.id, NOT NULL (AC1 „Anlageklasse") |
+| params | JSONB | NOT NULL (Regelparameter-Kandidat) |
+| free_param_count | SMALLINT | NOT NULL (Overfit-Sanity: > 5–6 → Verdacht; Schwellenwert-Auswertung selbst ist Folge-Story) |
 | created_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
 
 ### `trial_registry` — Trial-Registry: JEDE getestete Variante (C-012, **nie löschen** → BR-118)
@@ -735,6 +744,7 @@ bislang nicht führte).
 | risk_check_log | (position_id), (created_at) | Risiko-Audit |
 | depot_fill_dedup | PK (client_order_id), (instrument_id) | Idempotenz-Lookup (ADR-011/BR-134) + Fills je Titel |
 | portfolio_weight | (snapshot_id) | Gewichtungen je Snapshot |
+| rule_hypothesis | (asset_class_id) | Hypothesen je Anlageklasse |
 | trial_registry | (hypothesis_id), UNIQUE (hypothesis_id, variant_hash) | DSR-Zählung |
 | gate_result | (trial_id), (ampel) | Gate-Auswertung |
 | alert_log | (created_at), (typ, acknowledged) | offene Alerts |
@@ -802,6 +812,7 @@ bislang nicht führte).
 | BR-133 | category_weight_version / analysis_method_version | Genau eine Zeile mit `is_current = true` je Versionsregister (AC10) | DB (partieller UNIQUE-Index `WHERE is_current`) |
 | BR-134 | depot_fill_dedup.client_order_id | Idempotenz: PK/UNIQUE auf `client_order_id` — ein Fill wird nie zweimal gegen den Bestand verbucht (ADR-011, P8, at-least-once). *(Beim Merge von F-011 von BR-132 auf BR-134 umnummeriert — BR-132/BR-133 waren parallel durch S-018 vergeben.)* | DB-UNIQUE + App |
 | BR-135 | strategy.cluster / strategy_cluster.freigeschaltet | Eine Strategie-Zuordnung ausserhalb des freigeschalteten Clusters wird abgelehnt (MVP: nur passiv_regelbasiert); deterministisch, ohne LLM-Beteiligung (`docs/specs/strategie-exit-regeln.md` AC2/E2, S-037). *(Beim Merge von F-012 von BR-132 auf BR-135 umnummeriert.)* | App |
+| BR-136 | rule_hypothesis | Mindest-Evidenz-Protokoll (`anzahl_faelle > 0`, `zeitraum_bis >= zeitraum_von`, `signalquelle`, `asset_class_id` alle Pflicht) UND marktlogische Begründung (`marktlogik` Pflicht) — ohne beides wird keine Hypothese ans Gate übergeben (`docs/specs/lernschleife.md` AC1/AC2, S-058) | DB-NOT NULL/CHECK + App (`app.domain.research.hypothesen_erzeugung.erzeuge_hypothesen`) |
 
 ---
 
