@@ -4,6 +4,7 @@ die Einstand-Methode-Default-Konfiguration (Story S-016).
 Covers (llm-grounding): AC5
 Covers (depot): AC5
 Covers (kandidatensuche): AC6, AC7, AC10
+Covers (depot-ueberwachung): AC4, AC6, AC7
 
 `app.config.Settings.toleranz_config` trägt die konfigurierbaren
 Toleranzschwellen je Kennzahl-Typ (absolut/relativ) — provisorische
@@ -22,6 +23,14 @@ Titels — Default `gleitender_durchschnitt` (CH-Kontext), per
 die Querschnitt-Filter-Schwellen; `kandidatensuche_profil_overrides` (S-029,
 AC7/AC10) trägt die je Anlageklasse gemergten Suchprofil-Overrides — alle
 ohne Codeänderung per Env-Variable überschreibbar.
+
+`app.config.Settings.depot_ueberwachung_ereignis_keywords` (S-033, AC4)
+trägt die Keyword-/Ereignis-Filter-Stichwortliste,
+`depot_ueberwachung_ereignis_schwellen` (S-033, AC6-Nachbar-Konfiguration)
+die je Ereignistyp konfigurierten Schwellen und
+`depot_ueberwachung_ereignisse_pro_tag_schwellwert` (S-033, AC7) den
+Alert-Fatigue-Tages-Schwellwert — alle drei ohne Codeänderung per
+Env-Variable überschreibbar.
 """
 
 from __future__ import annotations
@@ -31,6 +40,7 @@ from decimal import Decimal
 import pytest
 
 from app.config import DEFAULT_TOLERANZEN, Settings, get_settings, lade_querschnitt_filter
+from app.contracts.depot_ueberwachung import DEFAULT_EREIGNIS_KEYWORDS, DEFAULT_EREIGNIS_SCHWELLEN
 
 
 @pytest.fixture(autouse=True)
@@ -160,3 +170,60 @@ def test_settings_ueberschreibt_suchprofil_overrides_ohne_codeaenderung(
     override = settings.kandidatensuche_profil_overrides[1]
     assert override.modus == "periodisch"
     assert override.schwellen == {"rvol_faktor": Decimal("2.5")}
+
+
+def test_settings_liefert_default_ereignis_keywords_und_schwellen_ohne_env() -> None:
+    """@trace depot-ueberwachung#AC4,AC6 — ohne Env-Override liefert
+    `Settings` die Default-Auslöser-Menge (AC4) und die Default-
+    Ereignistyp-Schwellen."""
+    settings = Settings(_env_file=None)
+
+    assert list(settings.depot_ueberwachung_ereignis_keywords) == list(DEFAULT_EREIGNIS_KEYWORDS)
+    assert settings.depot_ueberwachung_ereignis_schwellen == DEFAULT_EREIGNIS_SCHWELLEN
+
+
+def test_settings_ueberschreibt_ereignis_keywords_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace depot-ueberwachung#AC4 — die Filter-Stichwortliste ist über
+    `DEPOT_UEBERWACHUNG_EREIGNIS_KEYWORDS` (JSON-Array) ersetzbar."""
+    monkeypatch.setenv("DEPOT_UEBERWACHUNG_EREIGNIS_KEYWORDS", '["Bussgeld"]')
+
+    settings = Settings(_env_file=None)
+
+    assert settings.depot_ueberwachung_ereignis_keywords == ["Bussgeld"]
+
+
+def test_settings_ueberschreibt_ereignis_schwellen_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace depot-ueberwachung#AC6 — die Ereignistyp-Schwellen sind über
+    `DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN` (JSON-Mapping) ersetzbar."""
+    monkeypatch.setenv("DEPOT_UEBERWACHUNG_EREIGNIS_SCHWELLEN", '{"relativer_kurssturz": 0.03}')
+
+    settings = Settings(_env_file=None)
+
+    assert settings.depot_ueberwachung_ereignis_schwellen == {
+        "relativer_kurssturz": Decimal("0.03")
+    }
+
+
+def test_settings_liefert_default_alert_fatigue_schwellwert_ohne_env() -> None:
+    """@trace depot-ueberwachung#AC7 — ohne Env-Override ist der
+    Alert-Fatigue-Tages-Schwellwert 10 (provisorischer Spec-Default)."""
+    settings = Settings(_env_file=None)
+
+    assert settings.depot_ueberwachung_ereignisse_pro_tag_schwellwert == 10
+
+
+def test_settings_ueberschreibt_alert_fatigue_schwellwert_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace depot-ueberwachung#AC7 — der Alert-Fatigue-Tages-Schwellwert
+    ist über `DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT`
+    ersetzbar."""
+    monkeypatch.setenv("DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT", "3")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.depot_ueberwachung_ereignisse_pro_tag_schwellwert == 3

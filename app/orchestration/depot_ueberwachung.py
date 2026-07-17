@@ -38,16 +38,38 @@ Deckt Main-Success-Scenario Schritte 1-3 sowie A1 (AC8) und E1 (AC9):
   als nicht bewertbar protokolliert und NICHT in `ueberwachte_titel`
   aufgenommen — kein Ereignis wird aus fehlenden Daten fabriziert.
 
-**Nicht Teil dieser Story** (Main-Success-Scenario Schritte 4-6, AC4-AC7):
-Keyword-/Ereignis-Filter, Marktkontext-Normierung, Ereignis-Erzeugung/
--Weitergabe an die Analyse bestehender Titel und die
-Alert-Fatigue-Kennzahl — `UeberwachterTitel.signal_buendel` +
-`ueberwachte_groessen` sind die Grundlage, auf der eine Folge-Story diese
-Schritte aufbaut. Ebenfalls nicht Teil dieser Story: das periodische/
-eventbasierte AUSLÖSEN eines Zyklus (Scheduler-Integration, NFR
-"Prüffrequenz je Anlageklasse") — analog
-`app.domain.kandidatensuche.kandidatensuche`-Docstring "das tatsächliche
-Auslösen ... ist Sache der Folge-Stories bzw. der Scheduler-Integration".
+Ebenfalls nicht Teil dieser Story: das periodische/eventbasierte AUSLÖSEN
+eines Zyklus (Scheduler-Integration, NFR "Prüffrequenz je Anlageklasse")
+— analog `app.domain.kandidatensuche.kandidatensuche`-Docstring "das
+tatsächliche Auslösen ... ist Sache der Folge-Stories bzw. der
+Scheduler-Integration".
+
+**Story S-033 (AC4-AC7)** ergänzt Main-Success-Scenario Schritte 4-6:
+
+- `werte_monitoring_ereignisse_aus` filtert eingehende News gegen den
+  Keyword-/Ereignis-Filter (AC4, `app.domain.depot_ueberwachung
+  .ereignis_filter`), normiert Kursbewegungen gegen den Marktkontext
+  (AC5, `.marktkontext`), erzeugt bei Schwellenüberschreitung
+  Überwachungs-Ereignisse (AC6, `.ereignis_erzeugung` — kein eigener
+  Kauf-/Verkaufs-Entscheid) und aktualisiert die Alert-Fatigue-
+  Tageskennzahl (AC7, `app.core.monitoring_kennzahlen`).
+- Input: `app.contracts.depot_ueberwachung.TitelSignalRohdaten` je Titel
+  — ein **Cold-Start-Vertrag** (siehe dortiger Docstring): es existiert
+  noch kein News-Text-Adapter/Markt-Referenz-Adapter, der ihn befüllt
+  (analog `ExitRegelnBestand`, AC1 oben). Diese Funktion ist unabhängig
+  davon bereits vollständig korrekt und getestet; sie ist bewusst NICHT
+  an `fuehre_monitoring_zyklus_aus` verdrahtet (dessen
+  `UeberwachterTitel.signal_buendel` liefert je Quelle nur einen
+  aggregierten Zahlenwert, keine je Ereignistyp getaggten Rohsignale oder
+  News-Freitext — die Ableitung dieser Rohsignale aus den vorhandenen
+  Gold-Daten ist eine eigene, in dieser Story nicht spezifizierte
+  Quant-Entscheidung, kein Bestandteil von AC4-AC7).
+- Output: `MonitoringEreignisAuswertung` — die erzeugten
+  `UeberwachungsEreignis`-Objekte (AC6) plus die aktualisierte
+  `MonitoringTagesKennzahl` (AC7). Die tatsächliche "Weitergabe" an die
+  Analyse bestehender Titel (`[[analyse-pipelines]]`, Sell-Pfad) ist noch
+  nicht gebaut (S-034) — der Rückgabewert ist der vollständige,
+  testbare Output dieser Story (analog `BuySignal`).
 
 Analog `app.orchestration.datasource_query` (I/O-Layer, P2): SQLAlchemy-
 Zugriff ist hier erlaubt, der reine Domain-Kern
@@ -55,6 +77,7 @@ Zugriff ist hier erlaubt, der reine Domain-Kern
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -65,9 +88,17 @@ from app.adapters.repositories.position_repository import SqlAlchemyPositionRepo
 from app.config import get_settings
 from app.contracts.dateneingang import SignalBuendel, SignalBuendelAnfrage, TitelAnfrage
 from app.contracts.depot import Modus
-from app.contracts.depot_ueberwachung import MonitoringProtokollEintrag, MonitoringProtokollGrund
+from app.contracts.depot_ueberwachung import (
+    MonitoringProtokollEintrag,
+    MonitoringProtokollGrund,
+    MonitoringTagesKennzahl,
+    TitelSignalRohdaten,
+    UeberwachungsEreignis,
+)
 from app.core.monitoring_audit_log import protokolliere
+from app.core.monitoring_kennzahlen import berechne_tageskennzahl, registriere_ereignisse
 from app.db.models import AssetClass
+from app.domain.depot_ueberwachung.ereignis_erzeugung import erzeuge_ueberwachungsereignisse
 from app.domain.depot_ueberwachung.frische import ist_titel_bewertbar
 from app.domain.depot_ueberwachung.toggle import ist_ueberwachung_erlaubt
 from app.domain.depot_ueberwachung.ueberwachte_groessen import ermittle_ueberwachte_groessen
@@ -102,6 +133,16 @@ class MonitoringZyklusErgebnis:
 
     ueberwachte_titel: tuple[UeberwachterTitel, ...]
     protokoll: tuple[MonitoringProtokollEintrag, ...]
+
+
+@dataclass(frozen=True)
+class MonitoringEreignisAuswertung:
+    """Ergebnis von `werte_monitoring_ereignisse_aus` (AC4-AC7): die in
+    diesem Aufruf erzeugten Überwachungs-Ereignisse (AC6) plus die
+    aktualisierte Alert-Fatigue-Tageskennzahl (AC7)."""
+
+    ereignisse: tuple[UeberwachungsEreignis, ...]
+    kennzahl: MonitoringTagesKennzahl
 
 
 def fuehre_monitoring_zyklus_aus(
@@ -211,4 +252,32 @@ def _ist_anlageklasse_aktiv(session: Session, anlageklasse: int) -> bool:
     return bool(aktiv)
 
 
-__all__ = ["MonitoringZyklusErgebnis", "UeberwachterTitel", "fuehre_monitoring_zyklus_aus"]
+def werte_monitoring_ereignisse_aus(
+    rohdaten: Sequence[TitelSignalRohdaten], *, jetzt: datetime | None = None
+) -> MonitoringEreignisAuswertung:
+    """Main-Success-Scenario Schritte 4-6 (AC4-AC7), siehe Moduldocstring
+    für die volle AC-Zuordnung. Filtert News (AC4), normiert
+    Kursbewegungen gegen den Marktkontext (AC5), erzeugt Überwachungs-
+    Ereignisse bei Schwellenüberschreitung (AC6, kein eigener Kauf-/
+    Verkaufs-Entscheid) und aktualisiert die Alert-Fatigue-Tageskennzahl
+    (AC7). `rohdaten` ist der Cold-Start-Input, siehe Moduldocstring."""
+    jetzt = jetzt or datetime.now(UTC)
+    settings = get_settings()
+    ereignisse = erzeuge_ueberwachungsereignisse(
+        rohdaten,
+        schwellen=settings.depot_ueberwachung_ereignis_schwellen,
+        keywords=settings.depot_ueberwachung_ereignis_keywords,
+        jetzt=jetzt,
+    )
+    registriere_ereignisse(len(ereignisse), zeitpunkt=jetzt)
+    kennzahl = berechne_tageskennzahl(tag=jetzt.date())
+    return MonitoringEreignisAuswertung(ereignisse=ereignisse, kennzahl=kennzahl)
+
+
+__all__ = [
+    "MonitoringEreignisAuswertung",
+    "MonitoringZyklusErgebnis",
+    "UeberwachterTitel",
+    "fuehre_monitoring_zyklus_aus",
+    "werte_monitoring_ereignisse_aus",
+]
