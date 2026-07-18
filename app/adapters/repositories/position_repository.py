@@ -72,6 +72,14 @@ den Zeithorizont je Lot mit — Grundlage für die spätere «Analyse
 bestehende Titel» (These gegen die aktuelle Lage prüfen, AC10) sowie für
 die vollständige, an das Risikomanagement weitergereichte Bündel-Sicht
 (AC11).
+
+Story S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
+`historie_depotweit`: liest dieselbe `transaction`-Tabelle wie
+`historie_je_titel`, aber ohne `instrument_id`-Filter (depotweit statt
+titel-spezifisch) und mit optionalen Titel-/Zeitraum-Filtern — schliesst
+das Cockpit-Read-Modell-Gap für die Trade-Historie-View (AC7), rein
+lesend, kein neues Order-Pfad-Verhalten. Beide Methoden teilen sich jetzt
+das Zeilen-Mapping (`_transaktionseintrag_aus_zeile`).
 """
 
 from __future__ import annotations
@@ -338,24 +346,36 @@ class SqlAlchemyPositionRepository:
             .order_by(Transaction.booked_at.asc())
         )
         zeilen = self._session.scalars(stmt).all()
-        return [
-            TransaktionsEintrag(
-                trade_id=str(z.id),
-                titel_id=str(z.instrument_id),
-                richtung="kauf" if z.typ == "buy" else "verkauf",
-                menge=z.menge,
-                fill_preis=z.preis,
-                arrival_price=z.arrival_price,
-                slippage=z.slippage_abs,
-                kosten=z.kosten_chf,
-                waehrung=z.waehrung,
-                zeitstempel=z.booked_at,
-                fx_rate=z.fx_rate,
-                kapital_gv_chf=z.kapital_gv_chf,
-                waehrungs_gv_chf=z.waehrungs_gv_chf,
-            )
-            for z in zeilen
-        ]
+        return [_transaktionseintrag_aus_zeile(z) for z in zeilen]
+
+    def historie_depotweit(
+        self,
+        *,
+        mode: Modus,
+        titel_id: str | None = None,
+        von: datetime | None = None,
+        bis: datetime | None = None,
+    ) -> list[TransaktionsEintrag]:
+        """AC6/AC7 (S-067): depotweite Transaktionshistorie — Gegenstück zu
+        `historie_je_titel` ohne `instrument_id`-Filter, optional zusätzlich
+        gefiltert nach Titel und/oder Zeitraum (siehe Port-Docstring). Ist
+        `titel_id` gesetzt, aber keine gültige UUID, liefert dies eine leere
+        Liste statt eines Fehlers (analog `historie_je_titel`/
+        `aktuelle_menge`)."""
+        bedingungen = [Transaction.mode == mode]
+        if titel_id is not None:
+            instrument_id = _als_uuid(titel_id)
+            if instrument_id is None:
+                return []
+            bedingungen.append(Transaction.instrument_id == instrument_id)
+        if von is not None:
+            bedingungen.append(Transaction.booked_at >= von)
+        if bis is not None:
+            bedingungen.append(Transaction.booked_at <= bis)
+
+        stmt = select(Transaction).where(*bedingungen).order_by(Transaction.booked_at.asc())
+        zeilen = self._session.scalars(stmt).all()
+        return [_transaktionseintrag_aus_zeile(z) for z in zeilen]
 
     def alle_offenen_positionen(self, *, mode: Modus) -> list[PositionsBestand]:
         """AC8/AC9 (S-036): depotweite Sicht auf ALLE offenen Lots **im
@@ -480,6 +500,28 @@ def _exit_regeln_aus_zeile(zeile: ExitRule | None) -> ExitRegelnBestand:
         atr_multiplikator=zeile.atr_multiplikator,
         thesis_invalidation=zeile.thesis_invalidation,
         time_box=zeile.time_box,
+    )
+
+
+def _transaktionseintrag_aus_zeile(z: Transaction) -> TransaktionsEintrag:
+    """Bildet eine `transaction`-Zeile auf `TransaktionsEintrag` ab (S-035,
+    ergänzt S-053/S-067) — gemeinsames Mapping für `historie_je_titel` und
+    `historie_depotweit`, damit beide Lesepfade garantiert dieselben Felder
+    liefern."""
+    return TransaktionsEintrag(
+        trade_id=str(z.id),
+        titel_id=str(z.instrument_id),
+        richtung="kauf" if z.typ == "buy" else "verkauf",
+        menge=z.menge,
+        fill_preis=z.preis,
+        arrival_price=z.arrival_price,
+        slippage=z.slippage_abs,
+        kosten=z.kosten_chf,
+        waehrung=z.waehrung,
+        zeitstempel=z.booked_at,
+        fx_rate=z.fx_rate,
+        kapital_gv_chf=z.kapital_gv_chf,
+        waehrungs_gv_chf=z.waehrungs_gv_chf,
     )
 
 

@@ -10,6 +10,7 @@ in `app/web/templates_setup.py` (`configure_web`)."""
 from fastapi import FastAPI
 
 from app.api.dashboard import router as dashboard_router
+from app.api.trades import router as trades_router
 from app.api.ui import router as ui_router
 from app.web.templates_setup import configure_web
 
@@ -19,6 +20,7 @@ configure_web(app)
 # --- cockpit routers (append-only) ---
 app.include_router(dashboard_router)
 app.include_router(ui_router)
+app.include_router(trades_router)
 # --- end cockpit routers ---
 
 
