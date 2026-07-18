@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Betriebs-Cockpit{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/shell.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <a class="skip-link" href="#main">Zum Inhalt springen</a>
+
+  <header role="banner" class="statusleiste" data-testid="statusleiste">
+    {% include "partials/statusleiste.html" %}
+  </header>
+
+  <div class="shell-body">
+    <nav aria-label="Hauptnavigation" class="nav-main" data-testid="nav-main">
+      <ul>
+        {% for view in kern_views %}
+        <li>
+          <a
+            href="{{ url_for(view.route_name) }}"
+            class="nav-link{% if view.slug == active_view %} nav-link--active{% endif %}"
+            {% if view.slug == active_view %}aria-current="page"{% endif %}
+            data-testid="nav-link-{{ view.slug }}"
+          >{{ view.label }}</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+
+    <main id="main" tabindex="-1">
+      <h1>{% block view_title %}Betriebs-Cockpit{% endblock %}</h1>
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  <script src="{{ url_for('static', path='vendor/htmx.min.js') }}"></script>
+</body>
+</html>
