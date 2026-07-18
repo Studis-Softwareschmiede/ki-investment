@@ -53,7 +53,9 @@ def registriere_gate_ergebnis(
     )
     min_trl: Decimal | None = None
     if stufe_b_report is not None and stufe_b_report.mintrl_restlaufzeit is not None:
-        min_trl = Decimal(stufe_b_report.mintrl_restlaufzeit.total_seconds()) / _SEKUNDEN_PRO_TAG
+        min_trl = (
+            Decimal(str(stufe_b_report.mintrl_restlaufzeit.total_seconds())) / _SEKUNDEN_PRO_TAG
+        )
     begruendung = (
         stufe_b_report.begruendung if stufe_b_report is not None else stufe_a_report.begruendung
     )
