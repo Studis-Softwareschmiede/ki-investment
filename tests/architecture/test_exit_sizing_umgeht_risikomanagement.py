@@ -56,7 +56,7 @@ def test_exit_sizing_module_importieren_kein_risikomanagement() -> None:
     `app.contracts.risikomanagement` oder `app.db.depotstrategie`."""
     verstoesse = {
         str(pfad.relative_to(_APP_ROOT)): treffer
-        for pfad in (_APP_ROOT / "domain" / "sizing").glob("*.py")
+        for pfad in (_APP_ROOT / "domain" / "sizing").glob("**/*.py")
         if (treffer := _importiert_risikomanagement(pfad)) is not None
     }
     assert not verstoesse, (
