@@ -76,6 +76,8 @@ Das Kauf-&-Verkaufsmodul führt gebilligte Käufe (vom Risikomanagement-Gate) un
 
 > **AC11-Präzisierung (S-017):** Die "geschätzte Slippage" der Pre-Trade-Kalkulation (AC11) ist NICHT dasselbe wie das Paper-Fill-Slippage-/Spread-Modell aus AC9 (das modelliert die tatsächliche Fill-Slippage einer bereits gesendeten Order, nicht die Vorab-Schätzung an das Sizing). Für AC11 ist ein eigener, einfacher **provisorischer, konfigurierbarer** Default-Prozentsatz vorgesehen (`Settings.erwartete_slippage_pct_default`, Default 0.05 % — Konzept/Spec nennen keinen konkreten Wert), unabhängig von den (Folge-Story S-049) Fill-Modell-Parametern.
 
+> **AC9-Präzisierung (S-049):** Das provisorische Paper-Fill-Slippage-/Spread-Modell ist rein additiv und richtungsabhängig: der Referenzpreis (Limit-/Stop-Preis der Order, sonst der Arrival-Price bei einer Market-Order) wird um `(spread_pct + slippage_pct) / 100` verschoben — bei einem Kauf nach oben (teurer), bei einem Verkauf nach unten (günstiger). Beide Prozent-Parameter sind unabhängig konfigurierbar (`Settings.paper_fill_spread_pct_default`/`paper_fill_slippage_pct_default`, je Default 0.05 % — 5 Basispunkte), deterministisch (keine Zufallskomponente, P3) und unabhängig von der Pre-Trade-Schätzung `erwartete_slippage_pct_default` (AC11, S-017).
+
 
 
 ## Edge-Cases & Fehlerverhalten
@@ -97,7 +99,7 @@ Das Kauf-&-Verkaufsmodul führt gebilligte Käufe (vom Risikomanagement-Gate) un
 
 ## Offene Punkte (aus dem Konzept übernommen)
 - Krypto-Anbindung: über IBKR vs. separater Broker (z. B. Kraken) vs. brokerlose Paper-Simulation — offen.
-- Fill-/Slippage-Modell der Simulation im Detail — offen.
+- Fill-/Slippage-Modell der Simulation im Detail — provisorisch parametrisiert (siehe AC9-Präzisierung, S-049); Kalibrierung anhand realer Marktdaten bleibt offen.
 - FINMA-Frequenzgrenze; CH-Steuern/Stempelabgabe bei US-Brokern — offen.
 
 ## Abhängigkeiten
