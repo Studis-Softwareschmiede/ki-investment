@@ -1,7 +1,9 @@
-"""Tests für den Depot-Read-Endpunkt (`app.api.depot`, Story S-065,
-`docs/specs/frontend-cockpit.md` AC1/AC3/AC10).
+"""Tests für den Depot-Read-Endpunkt (`app.api.depot`, Story S-065/S-071,
+`docs/specs/frontend-cockpit.md` AC1/AC3/AC10/AC14).
 
-Covers (frontend-cockpit): AC1, AC3, AC10
+Covers (frontend-cockpit): AC1, AC3, AC10, AC14 (Titel-Anlageklasse/
+-Gewichtung + Portfolio-Wert-Kostenbasis/aggregierter unrealisierter G/V,
+Story S-071 — reine additive DTO-Felder, kein neues Verhalten)
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Response-Body für `GET /api/depot` ab (Status-Code +
@@ -130,6 +132,8 @@ def test_leeres_depot_liefert_leere_titel_liste_und_leere_aggregate():
             "cash_quote": "0",
         },
         "realisierter_gv_gesamt": "0",
+        "portfolio_wert_kostenbasis": "0",
+        "unrealisierter_gv_gesamt": "0",
     }
     assert repository.abgefragte_modi == ["echt"]
     assert repository.realisierter_gv_modi == ["echt"]
@@ -153,8 +157,12 @@ def test_gefuelltes_depot_liefert_bestand_aggregat_und_realisierten_gv():
     assert eintrag["aktueller_preis"] == "120"
     # (120 - 100) * 10 = 200
     assert eintrag["unrealisierter_gv"] == "200"
+    assert eintrag["anlageklasse"] == 1
+    assert eintrag["gewichtung"] == "100.000"
     assert body["portfolio_aggregat"]["klassen_gewichtung"] == {"1": "100.000"}
     assert body["realisierter_gv_gesamt"] == "150"
+    assert body["portfolio_wert_kostenbasis"] == "1000"
+    assert body["unrealisierter_gv_gesamt"] == "200"
 
 
 def test_mode_query_param_wird_an_beide_repository_methoden_durchgereicht():

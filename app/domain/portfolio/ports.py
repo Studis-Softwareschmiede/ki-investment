@@ -212,7 +212,17 @@ class PositionsBestand:
     Cluster-Konzentrationsprüfung im Risikomanagement-Gate. `None` mit
     Default (analog `gics_branche` NULLable), da keine Story die
     Erst-Anlage der Korrelations-Cluster-Zuordnung besitzt (siehe
-    `app.db.models.Instrument`-Docstring)."""
+    `app.db.models.Instrument`-Docstring).
+
+    `symbol`/`name` (S-071, `docs/specs/frontend-cockpit.md` AC14,
+    Review-Finding Iteration 1): lesbarer Titel-Bezeichner
+    (`Instrument.symbol`/`.name`, beide NOT NULL am Instrument) für die
+    Depot-Tabellen-Spalte "Titel" (statt der rohen `titel_id`-UUID).
+    `None` mit Default (analog `these`/`zeithorizont_id`), um bestehende
+    Aufrufer/Test-Fakes, die diese Felder nicht setzen, nicht zu brechen —
+    bei einer real über `SqlAlchemyPositionRepository
+    .alle_offenen_positionen` gelesenen Position sind beide stets
+    gesetzt."""
 
     position_id: str
     titel_id: str
@@ -225,6 +235,8 @@ class PositionsBestand:
     these: str | None = None
     zeithorizont_id: int | None = None
     korrelations_cluster: str | None = None
+    symbol: str | None = None
+    name: str | None = None
 
 
 class PositionRepository(Protocol):
@@ -360,7 +372,11 @@ class PositionRepository(Protocol):
         existiert.
 
         **S-040 (AC10/AC11):** liefert zusätzlich `these`/`zeithorizont_id`
-        je Lot — vervollständigt das beim Kauf fixierte Attribut-Bündel."""
+        je Lot — vervollständigt das beim Kauf fixierte Attribut-Bündel.
+
+        **S-071 (AC14):** liefert zusätzlich `symbol`/`name`
+        (`Instrument.symbol`/`.name`) je Lot — lesbarer Titel-Bezeichner
+        für die Depot-Tabelle (statt der rohen `titel_id`-UUID)."""
         ...
 
     def historie_depotweit(

@@ -1,9 +1,10 @@
 /* Design-Tokens (docs/design.md §2-§4) — Story S-064 (Cockpit-Shell-
    Fundament, AC11/AC13) legt hier NUR die von der Shell (Statusleiste,
    Nav, Hauptbereich, Skip-Link, Fokus) tatsächlich konsumierten Tokens an.
-   Weitere Tokens (G/V-Kodierung §2.3, Anlageklassen-Chip-Palette §2.4,
-   Chart-Tokens §8) kommen mit den Content-View-Stories dazu, die sie
-   zuerst brauchen — kein Vorratsanlegen ungenutzter Custom Properties. */
+   Story S-071 (Depot-View, AC14) ergänzt die G/V-Kodierung (§2.3) und die
+   Anlageklassen-Chip-Palette (§2.4) — die ersten Content-View-Tokens.
+   Chart-Tokens (§8) bleiben offen (kein Chart in dieser Story, siehe
+   `app/api/ui.py`-Moduldocstring). */
 
 :root {
   color-scheme: light dark;

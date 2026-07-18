@@ -1,5 +1,10 @@
 # requirement — projekt-lokale Prozess-Lessons (newest-first)
 
+## 2026-07-19 — Anzeige-AC nie an ein noch nicht existierendes Read-Modell koppeln
+Beim Schneiden von UI-/Cockpit-ACs (frontend-cockpit) wurde ein Zeitreihen-Chart (Depot-Verlauf, AC14/§8.2) in eine Anzeige-AC gepackt, ohne dass die **Datengrundlage** existiert: der `LivePriceProvider` liefert nur den aktuellen Kurs, es gibt kein aufgezeichnetes Portfolio-Wert-Snapshot-Read-Modell. Ergebnis: die Story (S-071) war strukturell nicht umsetzbar und blockierte erst im `/flow`-Review — nicht bei der Planung.
+- **Regel:** Verlangt eine Anzeige-/View-AC eine **Zeitreihe/Historie/Aggregat, die nicht bereits als Lese-Port existiert** (nur aktueller Wert vorhanden), ist die dafür nötige **Persistenz + Aufzeichnungs-Mechanik** eine **eigene, vorgelagerte Story mit `db`-Label** (dba-pflichtig) — nicht implizit in die Anzeige-AC bündeln. Die reine Read-Projektion aus vorhandenen Rechnungen (AC7-Muster) davon klar trennen.
+- **Zusatz:** Aufzeichnungs-Schreibpfad NIE als Write-on-Read in die Query-/UI-Schicht legen (verletzt die read-only-Boundary) — konservativ: periodischer Scheduler-Snapshot-Job.
+
 ## 2026-07-18 — Story-IDs werden in Anlage-Reihenfolge vergeben, nicht nach Wunsch-Label
 Beim Batch-Anlegen mehrerer Stories über `board story add` weist das CLI die IDs **strikt sequenziell in Aufruf-Reihenfolge** zu (S-064, S-065, …) — unabhängig davon, welche Story man gedanklich mit welcher Nummer verknüpft hat. Wer `--depends` mit **geratenen, noch nicht angelegten** IDs füttert, verdrahtet den DAG falsch (Selbst-Referenz, Verweis auf die falsche Story) und muss hinterher korrigieren.
 - **Regel:** Forward-Dependencies nie raten. Entweder (a) Stories so ordnen, dass jede Story nur auf **bereits angelegte** (kleinere) IDs zeigt und `--depends` erst mit den **tatsächlich zurückgegebenen** IDs setzen, oder (b) alle Stories ohne kritische Forward-Depends anlegen und die Dependencies danach per `board set <id> depends "…"` nachziehen.

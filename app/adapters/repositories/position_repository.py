@@ -412,12 +412,18 @@ class SqlAlchemyPositionRepository:
 
         **S-045 (AC9):** liefert zusätzlich `korrelations_cluster`
         (`Instrument.korrelations_cluster`, → BR-138) — Grundlage der
-        Cluster-Konzentrationsprüfung des Risikomanagement-Gates."""
+        Cluster-Konzentrationsprüfung des Risikomanagement-Gates.
+
+        **S-071 (AC14, Review-Finding Iteration 1):** liefert zusätzlich
+        `Instrument.symbol`/`.name` (lesbarer Titel-Bezeichner, `Instrument`
+        ist ohnehin per Inner-Join angebunden — kein zusätzlicher Join)."""
         stmt = (
             select(
                 Position,
                 Instrument.gics_sector,
                 Instrument.korrelations_cluster,
+                Instrument.symbol,
+                Instrument.name,
                 Strategy.name,
                 ExitRule,
             )
@@ -441,10 +447,18 @@ class SqlAlchemyPositionRepository:
                 these=position.these,
                 zeithorizont_id=position.time_horizon_id,
                 korrelations_cluster=korrelations_cluster,
+                symbol=instrument_symbol,
+                name=instrument_name,
             )
-            for position, gics_sector, korrelations_cluster, strategie_name, exit_rule_zeile in (
-                zeilen
-            )
+            for (
+                position,
+                gics_sector,
+                korrelations_cluster,
+                instrument_symbol,
+                instrument_name,
+                strategie_name,
+                exit_rule_zeile,
+            ) in zeilen
         ]
 
     def realisierter_gv_gesamt(self, *, mode: Modus) -> Decimal:

@@ -1,10 +1,15 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
-DBA-Zweit-Review + S-045 + S-065).
+DBA-Zweit-Review + S-045 + S-065 + S-071).
 
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 Covers (strategie-exit-regeln): AC1, AC10, AC11
 Covers (risikomanagement): AC9
-Covers (frontend-cockpit): AC6, AC7, AC3, AC16
+Covers (frontend-cockpit): AC6, AC7, AC3, AC16, AC14
+
+S-071 (`docs/specs/frontend-cockpit.md` AC14, Review-Finding
+Iteration 1) ergänzt: `alle_offenen_positionen` liefert zusätzlich
+`symbol`/`name` (`Instrument.symbol`/`.name`) je Lot — lesbarer
+Titel-Bezeichner für die Depot-Tabelle statt der rohen `titel_id`-UUID.
 
 S-065 (`docs/specs/frontend-cockpit.md` AC3) ergänzt
 `realisierter_gv_gesamt`: depotweite Summe von `Position.realisierter_gv`
@@ -982,7 +987,11 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
     `zeithorizont_id` je Lot (S-040).
 
     @trace risikomanagement#AC9 — zusätzlich `korrelations_cluster` je Lot
-    (S-045, → BR-138)."""
+    (S-045, → BR-138).
+
+    @trace frontend-cockpit#AC14 — zusätzlich `symbol`/`name`
+    (`Instrument.symbol`/`.name`) je Lot (S-071, Review-Finding
+    Iteration 1: lesbarer Titel-Bezeichner statt roher `titel_id`-UUID)."""
     engine = _make_engine()
     with Session(engine) as session:
         _seed_stammdaten(session)
@@ -1015,9 +1024,13 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
         assert eintrag_a.these == "These."
         assert eintrag_a.zeithorizont_id == 8
         assert eintrag_a.korrelations_cluster == "growth_tech"
+        assert eintrag_a.symbol == "TECH"
+        assert eintrag_a.name == "TECH Inc"
         eintrag_b = next(p for p in bestand if p.titel_id == str(instrument_b))
         assert eintrag_b.gics_branche == "Healthcare"
         assert eintrag_b.korrelations_cluster is None
+        assert eintrag_b.symbol == "PHARMA"
+        assert eintrag_b.name == "PHARMA Inc"
 
 
 def test_alle_offenen_positionen_ignoriert_geschlossene_positionen() -> None:
