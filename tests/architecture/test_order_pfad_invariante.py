@@ -7,22 +7,28 @@ Signal, Position-/Exit-Sizing, Risiko-Gate und Order-Ausführung sind
 ausschließlich deterministische Module — keines von ihnen darf
 `app.adapters.llm` importieren oder sich sonst vom LLM übersteuern lassen.
 architecture.md §9 nennt explizit die zu scannenden Modulpfade:
-`domain/sizing`, `domain/risk`, `orchestration/*_pipeline`,
-`orchestration/execution_service` — und benennt den Grep-/Import-Linter-
-Test als Prüfmethode.
+`domain/sizing`, `domain/risikomanagement`, `domain/execution`,
+`orchestration/*_pipeline`, `orchestration/execution_service` — und
+benennt den Grep-/Import-Linter-Test als Prüfmethode.
 
-Cold-Start-Hinweis (S-014, estimate_note): keines dieser Order-Pfad-Module
-existiert im Repo bisher (sie folgen in späteren Stories — sizing,
-risikomanagement, ausfuehrung-paper). Die Prüfung läuft trotzdem schon
-jetzt als AST-Scan über genau die Glob-Pfadmuster, die mit den künftigen
-Modulen matchen werden: sobald `app/domain/sizing/`, `app/domain/risk/`,
-`app/orchestration/*_pipeline.py` oder
+Cold-Start-Hinweis (S-014, estimate_note): die Order-Pfad-Module folgten
+zunächst in späteren Stories (sizing, risikomanagement, ausfuehrung-paper)
+und existieren inzwischen im Repo. Die Prüfung läuft als AST-Scan über
+die Glob-Pfadmuster, die mit den Modulen matchen: sobald weitere Dateien
+unter `app/domain/sizing/`, `app/domain/risikomanagement/`,
+`app/domain/execution/`, `app/orchestration/*_pipeline.py` oder
 `app/orchestration/execution_service.py` angelegt werden, greift dieser
-Test automatisch, ohne Änderung an dieser Datei. Damit der (heute leere)
-Scan nicht bloß trivial grün ist, belegt ein zweiter Test
+Test automatisch, ohne Änderung an dieser Datei. Damit der Scan nicht
+bloß trivial grün ist, belegt ein zweiter Test
 (`test_scan_erkennt_llm_import_in_order_pfad_datei`) an einer
 synthetischen Fixture, dass die Scan-Logik einen echten Verstoß tatsächlich
 erkennt.
+
+Review-Fix (S-046): `domain/risk/**` war seit der S-044-Umbenennung auf
+`domain/risikomanagement/` ein toter Glob (BR-001 scannte damit
+stillschweigend nichts) — der Katalog nennt jetzt beide aktuellen
+Modulpfade (`domain/risikomanagement/**` UND `domain/execution/**`, das
+neue Order-Ausführungs-Modul aus S-046).
 """
 
 from __future__ import annotations
@@ -37,7 +43,8 @@ _APP_ROOT = _REPO_ROOT / "app"
 #: relativ zu `app/`.
 _ORDER_PFAD_GLOBS: tuple[str, ...] = (
     "domain/sizing/**/*.py",
-    "domain/risk/**/*.py",
+    "domain/risikomanagement/**/*.py",
+    "domain/execution/**/*.py",
     "orchestration/*_pipeline.py",
     "orchestration/execution_service.py",
 )
@@ -77,12 +84,12 @@ def _order_pfad_dateien() -> list[Path]:
 
 def test_order_pfad_module_importieren_kein_llm() -> None:
     """@trace llm-grounding#AC7 — scannt alle bereits existierenden
-    Order-Pfad-Module (BR-001: domain/sizing, domain/risk,
-    orchestration/*_pipeline, orchestration/execution_service) auf einen
-    Import aus `app.adapters.llm`. Existieren die Module noch nicht
-    (Cold-Start, S-014), ist die Dateiliste leer und die Assertion
-    trivial erfüllt — der Beleg, dass der Scan bei einem echten Verstoß
-    tatsächlich anschlägt, liefert
+    Order-Pfad-Module (BR-001: domain/sizing, domain/risikomanagement,
+    domain/execution, orchestration/*_pipeline,
+    orchestration/execution_service) auf einen Import aus
+    `app.adapters.llm`. Existieren einzelne Module noch nicht (Cold-Start),
+    liefert der jeweilige Glob keine Treffer — der Beleg, dass der Scan
+    bei einem echten Verstoß tatsächlich anschlägt, liefert
     `test_scan_erkennt_llm_import_in_order_pfad_datei`."""
     verstoesse = {
         str(pfad.relative_to(_APP_ROOT)): treffer

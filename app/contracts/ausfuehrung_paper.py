@@ -1,5 +1,6 @@
 """Modul-Verträge Handelsplattform-Stammdaten & erwartete Kosten (Story
-S-017, Spec `docs/specs/ausfuehrung-paper.md` AC10/AC11).
+S-017, Spec `docs/specs/ausfuehrung-paper.md` AC10/AC11) + Order-
+Ausführungs-Kern (Story S-046, AC1/AC4/AC5/AC6).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO. Dieses Modul bildet den Verträge-Abschnitt
@@ -21,12 +22,35 @@ an Position-/Exit-Sizing" ab, soweit diese Story (AC10, AC11) ihn betrifft:
 Die Position-/Exit-Sizing-Module selbst existieren in dieser Codebasis noch
 nicht (Cold-Start, spätere Story) — `app.db.trading_platform` ist der
 erzeugende Endpunkt dieser Verträge, kein Konsument ist Teil dieser Story.
+
+**S-046 ergänzt** (`app.domain.execution.order_ausfuehrung`, siehe dortiger
+Moduldocstring für die vollständige AC1/AC4/AC5/AC6-Herleitung):
+
+- `ExecutionOrderTyp` — die vollen AC6-Order-Typen (Market, Limit, Stop,
+  Stop-Limit, Trailing, TWAP), die der Order-Ausführungs-Kern "umsetzt".
+- `OrderRichtung` — kauf | verkauf (AC1: das Modul führt beide aus).
+- `BrokerEndpunktTyp` + `BrokerRoutingKonfiguration` — die AC5-Auswahl
+  zwischen IBKR-Paper (Broker angebunden) und brokerloser Krypto-Simulation
+  (kein Broker angebunden), analog dem P6-Konfigurationsmuster
+  `app.contracts.sizing.KellyFraktionsKonfiguration
+  .volatile_anlageklassen_ids` (Anlageklassen sind Konfiguration, keine
+  Code-Grenze).
+- `OrderAnfrage` — die vereinheitlichte Order-Anfrage, auf die sowohl Kauf-
+  als auch Verkaufs-Eingaben normalisiert werden, BEVOR sie den
+  gemeinsamen Order-Code-Pfad durchlaufen (AC4: "derselbe Order-Code-Pfad
+  ... nicht in getrennter Order-Logik").
+- `OrderBestaetigung` — die minimale Bestätigung eines Broker-Ports, dass
+  eine `OrderAnfrage` angenommen wurde. Bewusst OHNE Fill-/Reject-/
+  Timeout-Status (AC7/AC8, eigene Folge-Story S-048) und ohne Slippage-
+  /Spread-Simulation (AC9, S-049) — dieser Vertrag deckt nur die
+  Order-ANNAHME durch den gewählten Endpunkt.
 """
 
 from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -72,3 +96,102 @@ class ErwarteteKosten(BaseModel):
     spread_kosten_chf: Decimal
     geschaetzte_slippage_chf: Decimal
     gesamtkosten_chf: Decimal
+
+
+#: AC6 (S-046): der volle Order-Typ-Wertebereich, den der Order-
+#: Ausführungs-Kern "umsetzt" (Spec-Wortlaut: "Market, Limit, Stop,
+#: Stop-Limit, Trailing und TWAP"). Bewusst EIGENSTÄNDIG neben
+#: `app.contracts.sizing.OrderTyp` (4 Werte, `market|stop_market|limit|
+#: twap`) statt dessen Erweiterung: `sizing.OrderTyp` ist der Vertrag EINES
+#: bereits gebauten Erzeugers (Exit-Sizing, S-042/S-055) mit eigenem,
+#: engerem Wertebereich — dieser Order-Typ hier ist der VOLLE, vom
+#: Order-Ausführungs-Kern zu handhabende Bereich (Verkaufsaufträge werden
+#: über `_VERKAUF_ORDER_TYP_MAP` hineingemappt, `stop_market -> stop`,
+#: siehe `app.domain.execution.order_ausfuehrung`-Moduldocstring). Analog
+#: zu `Verkaufsauftrag.order_typ`, dessen `"market"`-Wert laut eigenem
+#: Docstring ebenfalls "Teil des vollen Vertrags-Wertebereichs" ist, ohne
+#: dass der aktuelle Erzeuger ihn je liefert.
+ExecutionOrderTyp = Literal["market", "limit", "stop", "stop_limit", "trailing", "twap"]
+
+#: AC1 (S-046): die Order-Richtung — deckt "sowohl Käufe ... als auch
+#: Verkäufe" ab.
+OrderRichtung = Literal["kauf", "verkauf"]
+
+#: AC5 (S-046): die beiden MVP-Broker-Endpunkt-Typen — IBKR im Paper-Modus
+#: (Default, Broker angebunden) bzw. brokerlose Krypto-Simulation (kein
+#: Broker angebunden, deckt A3). Weitere Broker (Live, ein zweiter
+#: Krypto-Broker à la Kraken, → "Offene Punkte") sind Nicht-Ziel des MVP.
+BrokerEndpunktTyp = Literal["ibkr_paper", "krypto_sim_brokerless"]
+
+#: AC5-Default: Anlageklassen-IDs ohne angebundenen Broker (Krypto = 7,
+#: `docs/concept.md`, analog `app.contracts.sizing
+#: .DEFAULT_VOLATILE_ANLAGEKLASSEN_IDS`). Bewusst konfigurierbarer Default
+#: statt hartkodierter Code-Grenze (architecture.md §2 P6).
+DEFAULT_BROKERLOSE_ANLAGEKLASSEN_IDS: frozenset[int] = frozenset({7})
+
+
+class BrokerRoutingKonfiguration(BaseModel):
+    """AC5: die konfigurierbare Zuordnung "welche Anlageklassen haben
+    keinen angebundenen Broker" (Verträge/Edge-Cases: "Ist für Krypto kein
+    Broker angebunden, wird die Order im Paper-Modus brokerlos
+    simuliert") — ein Aufrufer kann die Menge überschreiben (z.B. sobald
+    ein künftiger Krypto-Broker angebunden ist, → "Offene Punkte:
+    Krypto-Anbindung ... offen")."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    brokerlose_anlageklassen_ids: frozenset[int] = Field(
+        default=DEFAULT_BROKERLOSE_ANLAGEKLASSEN_IDS
+    )
+
+
+class OrderAnfrage(BaseModel):
+    """AC1/AC4: die vereinheitlichte Order-Anfrage — Kauf- UND
+    Verkaufs-Eingaben werden auf DIESES EINE DTO normalisiert
+    (`app.domain.execution.order_ausfuehrung
+    .erstelle_order_anfrage_fuer_kauf`/`_fuer_verkauf`), bevor sie den
+    gemeinsamen Order-Code-Pfad (`fuehre_order_aus`) durchlaufen — der
+    Unterschied zwischen den beiden Modi «echt»/«simuliert» (AC4) liegt
+    ausschliesslich darin, WELCHER `BrokerPort` injiziert wird, nicht in
+    einer Fallunterscheidung innerhalb dieses Codepfads.
+
+    `groesse` trägt die von der jeweiligen Quelle bereits fixierte
+    Ordergrösse — bei `richtung="kauf"` ein CHF-Betrag
+    (`GateEntscheid.freigegebene_groesse`, Position-Sizing-Kette), bei
+    `richtung="verkauf"` eine Stückzahl (`Verkaufsauftrag.menge`,
+    Exit-Sizing). Die Umrechnung CHF-Betrag → Stückzahl (setzt einen
+    Fill-/Marktpreis voraus, der vor einer Market-Order-Ausführung gar
+    nicht bekannt ist) ist NICHT Teil dieser Story — die vorgelagerten
+    Sizing-Module liefern für Käufe bewusst nur einen Geldbetrag (siehe
+    `app.contracts.sizing.OrdergroessenErgebnis`-Docstring), keine
+    Stückzahl."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    titel_id: str = Field(min_length=1)
+    asset_class_id: int = Field(ge=1, le=11)
+    richtung: OrderRichtung
+    groesse: Decimal = Field(gt=0)
+    order_typ: ExecutionOrderTyp
+    preis: Decimal | None = None
+
+
+class OrderBestaetigung(BaseModel):
+    """AC1/AC5: die Bestätigung eines `BrokerPort`, dass eine
+    `OrderAnfrage` am gewählten Endpunkt angenommen wurde — echofasst die
+    Anfrage plus den tatsächlich gewählten `broker_endpunkt_typ` (AC5-
+    Beleg) und eine broker-seitig vergebene `order_id`.
+
+    Bewusst OHNE Fill-Status (`gefuellt|teilfill|reject|timeout`, AC7/AC8
+    — eigene Folge-Story S-048) und ohne Slippage-/Spread-Simulation
+    (AC9 — S-049): dieses DTO deckt ausschliesslich die Order-ANNAHME."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    order_id: str = Field(min_length=1)
+    broker_endpunkt_typ: BrokerEndpunktTyp
+    titel_id: str = Field(min_length=1)
+    richtung: OrderRichtung
+    order_typ: ExecutionOrderTyp
+    groesse: Decimal = Field(gt=0)
+    preis: Decimal | None = None

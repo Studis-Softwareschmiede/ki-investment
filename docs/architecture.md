@@ -241,7 +241,7 @@ Format kurz (Kontext → Entscheidung → Konsequenz/verworfene Alternative), MA
 > Zentrale, feature-übergreifende **Verhaltensinvarianten**. Jede lebt hier **einmal**; Specs referenzieren via `(→ BR-NNN)`, Tests taggen via `#BR-NNN`. IDs sind **stabil** (nicht umnummerieren). Namensraum ist **fortlaufend über `architecture.md` und `data-model.md`**: die hier vergebenen Verhaltensregeln enden bei **BR-025**; **datenvalidierende** Regeln in `data-model.md` beginnen bei **BR-026**. `BR-NNN` (Projekt-Geschäftsregel) ≠ `python/R<NN>` / `architecture/R<NN>` (Fabrik-Qualitätsregel).
 
 ### BR-001: LLM nie im Order-Pfad
-Buy-Signal-Berechnung, Position-/Exit-Sizing, Risiko-Gate und Order-Ausführung sind **ausschließlich deterministische Module** ohne LLM-Aufruf. Ein LLM-Ergebnis darf nie direkt eine Order auslösen. (C-008 · harte Architektur-Regel · prüfbar: kein Import aus `adapters/llm` in `domain/sizing`, `domain/risk`, `orchestration/*_pipeline`, `execution_service`.)
+Buy-Signal-Berechnung, Position-/Exit-Sizing, Risiko-Gate und Order-Ausführung sind **ausschließlich deterministische Module** ohne LLM-Aufruf. Ein LLM-Ergebnis darf nie direkt eine Order auslösen. (C-008 · harte Architektur-Regel · prüfbar: kein Import aus `adapters/llm` in `domain/sizing`, `domain/risikomanagement`, `domain/execution`, `orchestration/*_pipeline`, `execution_service`.)
 
 ### BR-002: Grounding-Pflicht
 Jede Zahl in einer Analyse stammt aus einer Datenquelle und trägt **Quellen-ID + Timestamp**; das LLM erzeugt keine Kennzahlen selbst. Kennzahlen ohne Herkunft werden nicht verarbeitet. (C-008.1)
