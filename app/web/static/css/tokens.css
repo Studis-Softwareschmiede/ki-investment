@@ -1,0 +1,59 @@
+/* Design-Tokens (docs/design.md §2-§4) — Story S-064 (Cockpit-Shell-
+   Fundament, AC11/AC13) legt hier NUR die von der Shell (Statusleiste,
+   Nav, Hauptbereich, Skip-Link, Fokus) tatsächlich konsumierten Tokens an.
+   Weitere Tokens (G/V-Kodierung §2.3, Anlageklassen-Chip-Palette §2.4,
+   Chart-Tokens §8) kommen mit den Content-View-Stories dazu, die sie
+   zuerst brauchen — kein Vorratsanlegen ungenutzter Custom Properties. */
+
+:root {
+  color-scheme: light dark;
+
+  /* §2.1 Neutrale Flächen & Text */
+  --bg: light-dark(#F6F8FA, #0E1116);
+  --surface-1: light-dark(#FFFFFF, #161B22);
+  --surface-2: light-dark(#FFFFFF, #1C2129);
+  --surface-3: light-dark(#EFF2F5, #262C36);
+  --border: light-dark(#D0D7DE, #2D333B);
+  --border-strong: light-dark(#AFB8C1, #3D444D);
+  --text-1: light-dark(#1F2328, #E6EDF3);
+  --text-2: light-dark(#656D76, #9DA7B3);
+  --text-3: light-dark(#8C959F, #6E7681);
+
+  /* §2.2 Semantische Status-/Ampel-Farben (Statusleiste, §7.2-§7.5) */
+  --ok-fg: light-dark(#1A7F37, #3FB950);
+  --warn-fg: light-dark(#9A6700, #D29922);
+  --danger-fg: light-dark(#CF222E, #F85149);
+  --info-fg: light-dark(#0969DA, #58A6FF);
+
+  /* §2.5 Interaktion & Fokus */
+  --accent: light-dark(#0969DA, #58A6FF);
+  --accent-hover: light-dark(#0550AE, #79C0FF);
+  --focus-ring: light-dark(#0969DA, #58A6FF);
+
+  /* §3 Typografie */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Consolas,
+    "Liberation Mono", monospace;
+  --fs-lg: 1.25rem;
+  --fs-md: 1rem;
+  --fs-base: 0.875rem;
+  --fs-sm: 0.8125rem;
+  --fs-xs: 0.75rem;
+
+  /* §4 Spacing (4px-Basis) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* §4 Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-full: 999px;
+
+  /* §4 Motion */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+}
