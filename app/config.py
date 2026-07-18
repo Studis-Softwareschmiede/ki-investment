@@ -59,6 +59,21 @@ Pre-Trade-Schätzung dieser Story) — provisorisch gewählt: **5 Basispunkte
 (0.05 %)**, ohne Codeänderung über `ERWARTETE_SLIPPAGE_PCT_DEFAULT`
 überschreibbar (Muster von `HALLUZINATIONS_KPI_SCHWELLWERT` folgend).
 
+Aus S-049 (AC9, `docs/specs/ausfuehrung-paper.md`) kommen
+`paper_fill_spread_pct_default`/`paper_fill_slippage_pct_default` hinzu: die
+zwei unabhängig konfigurierbaren Prozent-Parameter des eigenen Paper-Fill-
+Slippage-/Spread-Modells, das `app.adapters.brokers.paper._PaperBrokerAdapter
+.ermittle_fill` auf den Referenzpreis anwendet (Kauf-Fills teurer,
+Verkaufs-Fills günstiger als der Signal-/Limit-Preis, statt unverändert zum
+Referenzpreis zu füllen — A2 "Paper-Fills sind sonst zu optimistisch").
+Bewusst GETRENNT von `erwartete_slippage_pct_default` (AC11, S-017): jener
+schätzt VORAB für die Sizing-Module, dieser hier modelliert den
+TATSÄCHLICHEN, bereits gesendeten Fill (siehe AC11-Präzisierung in der
+Spec). Beide Parameter sind provisorisch gewählt: **je 5 Basispunkte
+(0.05 %)**, ohne Codeänderung über `PAPER_FILL_SPREAD_PCT_DEFAULT`/
+`PAPER_FILL_SLIPPAGE_PCT_DEFAULT` überschreibbar (Muster von
+`ERWARTETE_SLIPPAGE_PCT_DEFAULT` folgend).
+
 Aus S-032 (AC9, `docs/specs/depot-ueberwachung.md`) kommt
 `depot_ueberwachung_frische_fenster_sekunden` hinzu: das Frische-Fenster,
 gegen das `app.domain.depot_ueberwachung.frische.ist_titel_bewertbar` das
@@ -258,6 +273,24 @@ class Settings(BaseSettings):
     #: Default 0.05 % (5 Basispunkte), ohne Codeänderung über
     #: `ERWARTETE_SLIPPAGE_PCT_DEFAULT` überschreibbar.
     erwartete_slippage_pct_default: float = Field(default=0.05, ge=0)
+
+    #: Paper-Fill-Modell (AC9, S-049): typischer Spread-Anteil, Prozent-Zahl
+    #: des Referenzpreises (z.B. `0.05` = 0.05 %, analog
+    #: `erwartete_slippage_pct_default` — NICHT als Anteil 0-1 zu lesen),
+    #: den `app.adapters.brokers.paper._PaperBrokerAdapter.ermittle_fill`
+    #: richtungsabhängig auf den Fill-Preis aufschlägt (Kauf) bzw. abzieht
+    #: (Verkauf). Getrennt von `paper_fill_slippage_pct_default` (eigener
+    #: additiver Markt-Impact-Anteil). Provisorischer Default 0.05 % (5
+    #: Basispunkte), ohne Codeänderung über `PAPER_FILL_SPREAD_PCT_DEFAULT`
+    #: überschreibbar.
+    paper_fill_spread_pct_default: float = Field(default=0.05, ge=0)
+
+    #: Paper-Fill-Modell (AC9, S-049): zusätzlicher Markt-Impact-/
+    #: Slippage-Anteil, Prozent-Zahl des Referenzpreises (gleiche Konvention
+    #: wie `paper_fill_spread_pct_default`), additiv zum Spread-Anteil.
+    #: Provisorischer Default 0.05 % (5 Basispunkte), ohne Codeänderung über
+    #: `PAPER_FILL_SLIPPAGE_PCT_DEFAULT` überschreibbar.
+    paper_fill_slippage_pct_default: float = Field(default=0.05, ge=0)
 
     #: Querschnitt-Filter-Liquiditätsmindestschwelle (AC6, S-029) — bewusst
     #: weit gefasster, unkalibrierter Default (siehe Modul-Docstring), ohne
