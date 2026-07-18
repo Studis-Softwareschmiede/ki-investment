@@ -2,7 +2,7 @@ id: S-048
 parent: F-015
 title: 'Fill-Handling: Teilfills/Rejects/Timeouts & Arrival-Price-Slippage/TCA an
   Depot'
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/ausfuehrung-paper.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: Cold-Start; Kern-Fehlerbehandlung (häufigste Verlustquelle), ide
   Fill→Depot-Fortschreibung (P8), Order-Lifecycle-Zustände.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-048
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:09Z'
-updated_at: '2026-07-12T10:10:12Z'
-done_at: null
+updated_at: '2026-07-18T02:04:26Z'
+done_at: '2026-07-18T02:04:25Z'
