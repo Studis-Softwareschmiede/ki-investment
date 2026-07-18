@@ -16,7 +16,16 @@ services:
       timeout: 3s
       retries: 20
   migrations:
-    image: postgres:17-alpine
+    # Kein postgres:17-alpine-Image (Skeleton-Konvention aus
+    # templates/_shared/db-postgres/compose.fragment.yml) — dieses Projekt
+    # nutzt db_migration_tool: alembic (docs/specs/projekt-setup.md AC1),
+    # dessen Migrationen Python-Code sind (app/db/migrations/versions/*.py).
+    # Der `build`-Stage-Ziel des Projekt-Dockerfile enthaelt bereits den
+    # vollen App-Quellcode inkl. alembic.ini + app/db/migrations sowie das
+    # .venv mit installiertem alembic (die schlanke Runtime-Stage NICHT).
+    build:
+      context: .
+      target: build
     container_name: ${PROJECT_NAME:-app}_migrations
     restart: 'no'
     depends_on:
