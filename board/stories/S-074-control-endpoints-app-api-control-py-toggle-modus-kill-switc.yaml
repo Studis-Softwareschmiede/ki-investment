@@ -2,7 +2,7 @@ id: S-074
 parent: F-017
 title: Control-Endpoints (app/api/control.py) — Toggle/Modus/Kill-Switch POSTs gegen
   app/core/**, MVP-Live-Sperre, Bestätigungs-Dialog
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -23,9 +23,9 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
   estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-074-control-endpoints
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/54
 blocked_reason: null
 created_at: '2026-07-18T04:24:21Z'
-updated_at: '2026-07-18T04:26:48Z'
-done_at: null
+updated_at: '2026-07-18T23:51:47Z'
+done_at: '2026-07-18T23:51:42Z'
