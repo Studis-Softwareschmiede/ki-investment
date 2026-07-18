@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from app.api.config import router as config_router
 from app.api.dashboard import router as dashboard_router
 from app.api.depot import router as depot_router
+from app.api.system_status import router as system_status_router
 from app.api.trades import router as trades_router
 from app.api.ui import router as ui_router
 from app.web.templates_setup import configure_web
@@ -25,6 +26,7 @@ app.include_router(depot_router)
 app.include_router(ui_router)
 app.include_router(trades_router)
 app.include_router(config_router)
+app.include_router(system_status_router)
 # --- end cockpit routers ---
 
 

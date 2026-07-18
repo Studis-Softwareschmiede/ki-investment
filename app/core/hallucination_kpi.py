@@ -51,6 +51,16 @@ einmal je Übergang, analog zum Audit-Eintrag) einen
 `Alert(typ="halluzination", schwere="critical")` über
 `app.core.alerts.melde()` — die Andockstelle des Benachrichtigungskanals
 (AC7).
+
+**Update S-068** (`docs/specs/frontend-cockpit.md` AC8): ergänzt
+`aktueller_kpi()` — eine reine, seiteneffektfreie Zustandsabfrage für
+read-only Konsumenten (Betriebs-Cockpit System-Status): berechnet dieselbe
+Quote über die registrierten Cross-Check-Ergebnisse und liest den
+aktuellen Kill-Latch-Zustand, löst aber NIE selbst einen Alarm-Übergang
+(Audit-Eintrag/`Alert`/Latch-Wechsel) aus — ein Status-Seiten-Aufruf darf
+den Halluzinations-Kill-Latch nicht als Nebenwirkung verändern. Das
+bestehende `berechne_kpi()` bleibt unverändert die einzige Stelle, die
+tatsächlich einen Alarm-Übergang auslöst.
 """
 
 from __future__ import annotations
@@ -90,6 +100,22 @@ def registriere_ergebnis(
         _registrierungen.append((ts, ergebnis.status == "verworfen"))
 
 
+def _zaehle_relevante_unlocked(seit: datetime | None) -> tuple[int, int, float]:
+    """NUR unter `_lock` aufrufen: `(geprueft, verworfen, quote)` über alle
+    seit `seit` registrierten Cross-Check-Ergebnisse. Gemeinsamer Zähl-Kern
+    von `berechne_kpi()` UND dem seiteneffektfreien `aktueller_kpi()`
+    (S-068) — reine Arithmetik, kein Alarm-/Latch-Zustand."""
+    relevant = [
+        war_verworfen
+        for zeitpunkt, war_verworfen in _registrierungen
+        if seit is None or zeitpunkt >= seit
+    ]
+    geprueft = len(relevant)
+    verworfen = sum(relevant)
+    quote = (verworfen / geprueft) if geprueft else 0.0
+    return geprueft, verworfen, quote
+
+
 def berechne_kpi(*, seit: datetime | None = None) -> HalluzinationsKpiErgebnis:
     """Berechnet die Halluzinations-Quote (AC8) über alle seit `seit`
     registrierten Cross-Check-Ergebnisse (Default: die gesamte Historie seit
@@ -109,14 +135,7 @@ def berechne_kpi(*, seit: datetime | None = None) -> HalluzinationsKpiErgebnis:
     alarm_zeitpunkt = datetime.now(UTC)
 
     with _lock:
-        relevant = [
-            war_verworfen
-            for zeitpunkt, war_verworfen in _registrierungen
-            if seit is None or zeitpunkt >= seit
-        ]
-        geprueft = len(relevant)
-        verworfen = sum(relevant)
-        quote = (verworfen / geprueft) if geprueft else 0.0
+        geprueft, verworfen, quote = _zaehle_relevante_unlocked(seit)
         alarm = quote > schwellwert
 
         neu_ausgeloest = alarm and _status == "aktiv"
@@ -156,6 +175,34 @@ def berechne_kpi(*, seit: datetime | None = None) -> HalluzinationsKpiErgebnis:
         quote=quote,
         schwellwert=schwellwert,
         alarm=alarm,
+        llm_status=aktueller_status,
+    )
+
+
+def aktueller_kpi(*, seit: datetime | None = None) -> HalluzinationsKpiErgebnis:
+    """Reine Zustandsabfrage (S-068, `docs/specs/frontend-cockpit.md` AC8)
+    — Gegenstück zu `berechne_kpi()` für read-only Konsumenten (Betriebs-
+    Cockpit System-Status): berechnet dieselbe Quote über die registrierten
+    Cross-Check-Ergebnisse und liest den AKTUELLEN Kill-Latch-Zustand
+    (`aktiv`/`deaktiviert`), löst aber NIE selbst einen Alarm-Übergang aus
+    (kein Audit-Eintrag, kein `Alert`, keine Latch-Änderung) — ein
+    Status-Seiten-Aufruf darf den Halluzinations-Kill-Latch nicht als
+    Nebenwirkung verändern. `alarm` spiegelt hier nur die rein informative
+    Aussage „Quote überschreitet aktuell den Schwellwert" — sie kann `True`
+    sein, während `llm_status` noch `"aktiv"` bleibt, weil DIESER Read den
+    Übergang nicht auslöst (für den tatsächlichen Alarm-Übergang bleibt
+    ausschliesslich `berechne_kpi()` zuständig)."""
+    schwellwert = get_settings().halluzinations_kpi_schwellwert
+    with _lock:
+        geprueft, verworfen, quote = _zaehle_relevante_unlocked(seit)
+        aktueller_status = _status
+
+    return HalluzinationsKpiErgebnis(
+        geprueft=geprueft,
+        verworfen=verworfen,
+        quote=quote,
+        schwellwert=schwellwert,
+        alarm=quote > schwellwert,
         llm_status=aktueller_status,
     )
 
