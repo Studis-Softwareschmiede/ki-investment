@@ -1778,3 +1778,48 @@ class RuleHypothesis(Base):
             f"RuleHypothesis(id={self.id!r}, beschreibung={self.beschreibung!r}, "
             f"asset_class_id={self.asset_class_id!r})"
         )
+
+
+class GateResult(Base):
+    """Gate-Ergebnis mit Ampel + Metriken (data-model.md §6 `gate_result`,
+    C-012; Spec `docs/specs/lernschleife.md` AC10/AC11/AC12, Story S-062;
+    → BR-119/BR-120).
+
+    Eine Zeile je Gate-Auswertung eines `trial_registry`-Eintrags: nach
+    Stufe A (`stufe="A_historisch"`, `ampel` "rot"/"gelb"/`None`-Fall wird
+    NICHT persistiert, siehe `app.domain.lernschleife.gate.leite_ampel_ab`)
+    oder nach Stufe B (`stufe="B_paper"`, `ampel` "gruen"/"rot"). `psr`/
+    `min_trl` bleiben `NULL`, solange nur Stufe A ausgewertet wurde — AC9
+    verlangt MinTRL nur "bei jeder [Stufe-B-]Auswertung" (→ BR-120)."""
+
+    __tablename__ = "gate_result"
+    __table_args__ = (
+        CheckConstraint("stufe IN ('A_historisch', 'B_paper')", name="ck_gate_result_stufe"),
+        CheckConstraint("ampel IN ('gruen', 'gelb', 'rot')", name="ck_gate_result_ampel"),
+        Index("ix_gate_result_trial_id", "trial_id"),
+        Index("ix_gate_result_ampel", "ampel"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    trial_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trial_registry.id"), nullable=False
+    )
+    stufe: Mapped[str] = mapped_column(String, nullable=False)
+    ampel: Mapped[str] = mapped_column(String, nullable=False)
+    sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wfe: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
+    dsr: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+    psr: Mapped[Decimal | None] = mapped_column(Numeric(6, 4), nullable=True)
+    min_trl: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    begruendung: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"GateResult(trial_id={self.trial_id!r}, stufe={self.stufe!r}, ampel={self.ampel!r})"
