@@ -2,7 +2,7 @@ id: S-044
 parent: F-014
 title: 'Gate-Framework: Drei-Wege-Entscheid, nur-Kauf/Verkauf-umgeht, Sektor-Konzentration,
   Fail-safe'
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/risikomanagement.md
 implements:
@@ -26,9 +26,9 @@ estimate_note: 'Cold-Start; Kern-Gate (BR-014): Deckelung ohne Rück-Durchlauf, 
   über alle Positionen, kein-Depot-Stand→keine Freigabe.'
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-044
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:58Z'
-updated_at: '2026-07-12T10:09:59Z'
-done_at: null
+updated_at: '2026-07-18T00:40:46Z'
+done_at: '2026-07-18T00:40:46Z'
