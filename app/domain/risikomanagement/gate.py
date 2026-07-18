@@ -167,6 +167,25 @@ def pruefe_kauf_gate(
         Decimal("0"),
     )
 
+    if gesamtwert_bestehend == 0:
+        # Cold-Start: leeres (aber erfolgreich geladenes) Depot — es gibt noch
+        # keine bestehende Sektor-Konzentration, gegen die der allererste Kauf
+        # verstossen könnte. Die Gewichtung einer einzelnen ersten Position ist
+        # rechnerisch immer 100% des Depots, das ist aber KEIN Konzentrations-
+        # RISIKO im Sinne von AC2 (Diversifikation baut sich erst über weitere
+        # Käufe auf); die Einzelpositions-Obergrenze ist AC8 und ausserhalb
+        # dieser Story. Ohne diesen Sonderfall würde die Sektor-Formel jede
+        # erste Order auf 100% werfen und permanent blockieren.
+        return GateEntscheid(
+            entscheid="durchwinken",
+            freigegebene_groesse=_quantize_geld(kauf_order.ordergroesse),
+            begruendung=(
+                f"Erster Kauf in ein leeres Depot (Branche {branche!r}) — keine "
+                "bestehende Sektor-Konzentration, volle Grösse freigegeben "
+                "(AC2/AC6; Einzelpositions-Grenze ist AC8, ausserhalb dieser Story)."
+            ),
+        )
+
     max_sektor_anteil = depotstrategie.max_sektor_pct / Decimal("100")
 
     if max_sektor_anteil >= _VOLLER_ANTEIL:

@@ -133,6 +133,25 @@ def test_ac12_keine_aktive_depotstrategie_blockiert() -> None:
     assert entscheid.freigegebene_groesse == Decimal("0")
 
 
+def test_ac6_erster_kauf_in_leeres_depot_wird_durchgewinkt() -> None:
+    """@trace risikomanagement#AC6 — Cold-Start: ein leeres (aber erfolgreich
+    geladenes) Depot MIT aktiver Depotstrategie hat noch keine Sektor-
+    Konzentration; der allererste Kauf muss durchgewinkt werden (volle
+    Grösse), nicht blockiert — sonst wäre der erste Kauf in ein neues Depot
+    strukturell unmöglich, sobald ein Sektor-Limit < 100% konfiguriert ist."""
+    depot_stand = ermittle_depot_stand([])  # leerer, aber nicht-None DepotStand
+
+    entscheid = pruefe_kauf_gate(
+        _kauf_order(ordergroesse=Decimal("100")),
+        gics_branche="Technology",
+        depotstrategie=_depotstrategie(max_sektor_pct=Decimal("20")),
+        depot_stand=depot_stand,
+    )
+
+    assert entscheid.entscheid == "durchwinken"
+    assert entscheid.freigegebene_groesse == Decimal("100")
+
+
 # --- AC6: Edge-Case Ordergrösse <= 0 ----------------------------------------
 
 
