@@ -1,7 +1,7 @@
 id: S-056
 parent: F-014
 title: Warteliste beim Blockieren
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/risikomanagement.md
 implements:
@@ -19,9 +19,9 @@ estimate_note: Cold-Start; kleine Zusatzmechanik, Re-Prüf-Logik der Warteliste 
   (Ausbau).
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-056
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:43Z'
-updated_at: '2026-07-12T10:10:45Z'
-done_at: null
+updated_at: '2026-07-18T01:30:45Z'
+done_at: '2026-07-18T01:30:44Z'

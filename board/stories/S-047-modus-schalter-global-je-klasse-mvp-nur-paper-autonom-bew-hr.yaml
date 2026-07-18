@@ -1,7 +1,7 @@
 id: S-047
 parent: F-015
 title: Modus-Schalter (global + je Klasse), MVP-nur-Paper autonom & Bewährungsregel-Config
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/ausfuehrung-paper.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: Cold-Start; spezifischste-Ebene-Auflösung des Modus (BR-019), Li
   hart gesperrt, informative Notifs.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-047
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:07Z'
-updated_at: '2026-07-12T10:10:09Z'
-done_at: null
+updated_at: '2026-07-18T01:30:44Z'
+done_at: '2026-07-18T01:30:43Z'
