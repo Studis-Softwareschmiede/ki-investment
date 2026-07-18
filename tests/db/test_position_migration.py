@@ -1,7 +1,7 @@
 """Tests für die Positions-Grundgerüst-Migration (Story S-015 + S-053 + S-040).
 
 Covers (depot): AC1, AC10, AC6
-Covers (strategie-exit-regeln): AC1
+Covers (strategie-exit-regeln): AC1, AC5
 
 S-053 (AC6, FX-Attribution) ergänzt Tests für die drei neuen, nullable
 Spalten `einstand_fx_rate`/`fx_kapital_gv`/`fx_waehrungs_gv` (Migration
@@ -16,6 +16,20 @@ gelingt) ist bereits über `tests/adapters/repositories
 /test_position_repository.py
 ::test_lege_position_an_fixiert_exit_rule_stop_typ_technisch` gedeckt;
 hier die negative Seite (weiterhin ungültige Werte werden abgelehnt).
+
+S-040 (AC5, Review-Fix) ergänzt eine Quelltext-Prüfung derselben Migration
+`d19a6f5c7b3e` (analog zu `tests/db/test_market_data_bronze_migration.py
+::test_migration_declares_immutability_trigger_for_update_and_delete`):
+die BEIDEN Postgres-`BEFORE UPDATE`-Trigger (`exit_rule` append-only/
+BR-111 UND `position.strategy_id`/`time_horizon_id`/`these` gesperrt/
+BR-137) sind strukturell in der Migrationsdatei vorhanden —
+Regressionsschutz gegen versehentliches Entfernen. Der eigentliche
+Trigger-EFFEKT (ein UPDATE/DELETE-Versuch wird tatsächlich mit einer
+Exception abgelehnt) ist unter SQLite nicht abbildbar (die Migration legt
+die Trigger bewusst nur unter `dialect.name == "postgresql"` an, siehe
+Migrations-Docstring) und wurde daher nur MANUELL gegen eine echte
+Postgres-17-Instanz verifiziert (Coder-Self-Test, Konvention wie
+`tests/db/test_trial_registry_migration.py`).
 
 `instrument`/`strategy`/`time_horizon` sind leere FK-Voraussetzungen (kein
 Seed — siehe Docstring von `app/db/migrations/versions/
@@ -36,6 +50,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -49,6 +64,15 @@ from app.db.models import AssetClass, ExitRule, Instrument, Position, Strategy, 
 # Postgres verfügbar) — unter SQLite (In-Memory-Strukturtests, Konvention
 # aus `test_data_source_migration.py`) wird `id` daher immer explizit
 # gesetzt, statt sich auf den Server-Default zu verlassen.
+
+_AC5_MIGRATION_PATH = (
+    Path(__file__).parents[2]
+    / "app"
+    / "db"
+    / "migrations"
+    / "versions"
+    / "d19a6f5c7b3e_attribut_buendel_unveraenderlichkeit_ac1_ac5.py"
+)
 
 
 def _engine():
@@ -290,3 +314,29 @@ def test_exit_rule_rejects_stop_typ_ausserhalb_erweiterter_wertemenge() -> None:
         session.add(ExitRule(position_id=position.id, stop_typ="ungueltig"))
         with pytest.raises(IntegrityError):
             session.commit()
+
+
+def test_migration_declares_immutability_triggers_for_exit_rule_and_position() -> None:
+    """@trace strategie-exit-regeln#AC5 — Review-Fix: die Migration
+    `d19a6f5c7b3e` definiert strukturell BEIDE `BEFORE UPDATE`-Trigger
+    (`exit_rule` vollständig append-only/BR-111, `position` gesperrt auf
+    `strategy_id`/`time_horizon_id`/`these`/BR-137) — Quelltext-Prüfung
+    analog zu `tests/db/test_market_data_bronze_migration.py`, da Postgres-
+    `plpgsql`-Trigger unter SQLite nicht ausführbar sind. Der eigentliche
+    Trigger-EFFEKT (ein UPDATE/DELETE-Versuch scheitert tatsächlich mit
+    einer Exception) wurde MANUELL gegen eine echte Postgres-17-Instanz
+    verifiziert (Coder-Self-Test, Konvention wie
+    `tests/db/test_trial_registry_migration.py`), nicht hier automatisiert
+    nachgestellt."""
+    source = _AC5_MIGRATION_PATH.read_text(encoding="utf-8")
+
+    assert "BEFORE UPDATE OR DELETE ON exit_rule" in source
+    assert "exit_rule ist nach Position-Open unveraenderlich (BR-111)" in source
+
+    assert "BEFORE UPDATE ON position" in source
+    assert "strategy_id/time_horizon_id/these sind nach Kauf" in source
+    assert "unveraenderlich (BR-137)" in source
+
+    # Beide Trigger-Funktionen lehnen tatsächlich ab (RAISE EXCEPTION),
+    # nicht nur ein stilles No-Op.
+    assert source.count("RAISE EXCEPTION") == 2

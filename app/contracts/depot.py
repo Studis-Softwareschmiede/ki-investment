@@ -5,12 +5,22 @@ Bildet aus der Spec ab, soweit von dieser Story (S-015, AC1 + AC10) benötigt:
 
 - `Richtung` — Kauf/Verkauf (Fill-Input-Vertrag).
 - `ExitRegeln` — das beim Kauf fixierte Exit-Regel-Bündel (Feld
-  `exit_regeln` des Fill-Inputs). Depot behandelt es als durchgereichten
-  Wert und prüft nur dessen **Präsenz** bei einem Kauf (AC1) — die
-  inhaltliche Vollständigkeit der einzelnen Exit-Regel-Kategorien
-  (Stop-Trigger/Thesis-Invalidierung Pflicht, Time-Box optional) ist Sache
-  von `strategie-exit-regeln` (eigene Spec/Story-Reihe, AC6) und wird hier
-  NICHT dupliziert.
+  `exit_regeln` des Fill-Inputs). Depot behandelt es grösstenteils als
+  durchgereichten Wert; die feinere Kategorien-Interpretation (ATR-
+  Multiplikator, Default-Sets je Strategie/Klasse) ist weiterhin Sache von
+  `strategie-exit-regeln` (eigene Spec/Story-Reihe). **Seit S-040
+  (Review-Fix, `docs/specs/strategie-exit-regeln.md` Edge-Case "Fehlende
+  oder unvollständige Exit-Regeln ... verhindern die Weitergabe an das
+  Risikomanagement") prüft `FillInput._pruefe_kauf_pflichtfelder` bei
+  einem Kauf zusätzlich zur reinen Präsenz auch die INHALTLICHE
+  Vollständigkeit von `exit_regeln`** — mindestens `stop_typ` und
+  `thesis_invalidierung` müssen gesetzt (nicht-leer) sein. Grund: dies ist
+  der tatsächliche Schreibpfad (`app.adapters.repositories
+  .position_repository.SqlAlchemyPositionRepository.lege_position_an` →
+  `_exit_rule_aus_fill`) in die `exit_rule`-Zeile, die seit S-040 (AC5,
+  Migration `d19a6f5c7b3e`) durch einen `BEFORE UPDATE OR DELETE`-Trigger
+  für immer unveränderlich ist — ein leeres `ExitRegeln()`-Bündel darf
+  diesen Schreibpfad nie unbeanstandet passieren.
 - `FillInput` — das Ausführungsergebnis vom Kauf-/Verkaufsmodul. Die
   universellen Pflichtfelder (**Client-Order-ID** — Dedup-Schlüssel, ADR-011/
   P8, nachgezogen im DBA-Zweit-Review von S-016, siehe unten —, Titel-Identität,
@@ -147,11 +157,30 @@ class FillInput(BaseModel):
         """AC1: fehlt bei einem Kauf eines der Positions-Attribute
         (Strategie, Zeithorizont, Exit-Regeln, These), verweigert pydantic
         die Instanziierung — die Position wird dadurch nie mit einer
-        stillschweigenden Lücke angelegt."""
+        stillschweigenden Lücke angelegt.
+
+        **Review-Fix (S-040):** ist `exit_regeln` zwar als Objekt vorhanden,
+        aber inhaltlich unvollständig (`stop_typ`/`thesis_invalidierung`
+        fehlen/leer), wird das ebenfalls abgelehnt — nicht nur die reine
+        Objekt-Präsenz. Ohne diese Prüfung könnte ein leeres `ExitRegeln()`
+        (alle Unterfelder `None`) unbemerkt bis zum tatsächlichen
+        Schreibpfad (`SqlAlchemyPositionRepository.lege_position_an` →
+        `_exit_rule_aus_fill`) durchgereicht werden und dort eine
+        `exit_rule`-Zeile erzeugen, die durch den seit S-040 (AC5) aktiven
+        `BEFORE UPDATE OR DELETE`-Trigger (Migration `d19a6f5c7b3e`, BR-111)
+        für immer unkorrigierbar wäre (Edge-Case
+        `docs/specs/strategie-exit-regeln.md`: "Fehlende oder unvollständige
+        Exit-Regeln ... verhindern die Weitergabe an das
+        Risikomanagement")."""
         if self.richtung == "kauf":
             fehlend = [
                 feldname for feldname in _KAUF_PFLICHTFELDER if _ist_leer(getattr(self, feldname))
             ]
+            if self.exit_regeln is not None:
+                if _ist_leer(self.exit_regeln.stop_typ):
+                    fehlend.append("exit_regeln.stop_typ")
+                if _ist_leer(self.exit_regeln.thesis_invalidierung):
+                    fehlend.append("exit_regeln.thesis_invalidierung")
             if fehlend:
                 raise ValueError("Bei Kauf fehlende Pflichtfelder (AC1): " + ", ".join(fehlend))
         return self
