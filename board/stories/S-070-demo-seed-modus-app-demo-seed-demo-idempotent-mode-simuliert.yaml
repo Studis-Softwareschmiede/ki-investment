@@ -2,7 +2,7 @@ id: S-070
 parent: F-017
 title: Demo-/Seed-Modus (app/demo/, SEED_DEMO, idempotent, mode=simuliert, order-frei)
   — füllt alle Views
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
   estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-070-demo-seed
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/51
 blocked_reason: null
 created_at: '2026-07-18T04:24:19Z'
-updated_at: '2026-07-18T04:26:24Z'
-done_at: null
+updated_at: '2026-07-18T23:27:22Z'
+done_at: '2026-07-18T23:27:20Z'
