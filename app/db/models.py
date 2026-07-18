@@ -163,6 +163,24 @@ ORDER_EXIT_URGENCY_VALUES = ("hard", "soft", "none")
 # (Nicht-Ziel dieser Story, kein Erzeuger-Pfad hier).
 ORDER_STATUS_VALUES = ("offen", "teilfill", "filled", "rejected", "timeout", "cancelled")
 
+# data-model.md §3 `analysis_result`: CHECK analyse_typ ∈ {...} (zwei
+# getrennte Pfade, C-011; Story S-066, Read-Modell-Gap AC4/AC5/AC7)
+ANALYSIS_RESULT_ANALYSE_TYP_VALUES = ("neue_titel", "bestehende_titel")
+
+# data-model.md §3 `analysis_result`: CHECK signal_enum ∈ {...} (→ BR-105) —
+# identisch zum `Signal`-Literal in `app.contracts.analyse_framework`; hier
+# bewusst als eigenständige DB-Wertemenge geführt (P1/P3: `app/db/**` darf
+# nicht von `app/contracts/**` abhängen).
+ANALYSIS_RESULT_SIGNAL_VALUES = ("KAUF", "BEOBACHTEN", "HALTEN", "REDUZIEREN", "VERKAUF")
+
+# data-model.md §3 `analysis_result`: CHECK exit_urgency ∈ {...} (nur
+# Sell-Pfad, C-011)
+ANALYSIS_RESULT_EXIT_URGENCY_VALUES = ("hard_exit", "soft_exit", "none")
+
+# data-model.md §3 `analysis_fact`: CHECK cross_check_status ∈ {...} (C-008
+# Sicherung 3)
+ANALYSIS_FACT_CROSS_CHECK_STATUS_VALUES = ("ok", "abweichung", "nicht_pruefbar")
+
 
 class AssetClass(Base):
     """Anlageklasse — Stammdaten + Feature-Toggle (data-model.md `asset_class`, BR-100).
@@ -1042,6 +1060,182 @@ class Instrument(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"Instrument(symbol={self.symbol!r}, asset_class_id={self.asset_class_id!r})"
+
+
+class AnalysisResult(Base):
+    """Analyse-Ergebnis — Buy- oder Sell-Pfad (data-model.md §3
+    `analysis_result`, C-007, C-011; Story S-066, Read-Modell-Gap
+    `docs/specs/frontend-cockpit.md` AC4/AC5/AC7).
+
+    Schliesst den in `architecture.md` §13.3-Fussnote benannten
+    Read-Modell-Gap: Kandidaten-Analysen lagen bislang nur als reine
+    Domänen-Rechnung vor (`app.domain.scoring.score_engine
+    .fuehre_analyse_durch`, `app.domain.analysis_new.buy_pfad
+    .bewerte_kandidat`) — diese Tabelle ist die erste persistente,
+    HTTP-abfragbare Ablage eines Analyse-Ergebnisses. Kein Order-Pfad-
+    Verhalten: diese Story legt ausschliesslich das Read-Modell + die
+    lesenden Endpunkte an (AC7, "ohne neues Order-Pfad-Verhalten").
+
+    `gesamtscore`/`signal_enum` bleiben `NULL`, wenn die Analyse wegen
+    fehlender Evidenz einer ganzen Kategorie übersprungen wurde
+    (No-Evidence-No-Trade, → BR-108, S-011 `AnalyseErgebnis.uebersprungen`)
+    — `app.api.queries.kandidaten` listet unter `/api/kandidaten` nur
+    Zeilen mit gesetztem `gesamtscore`/`signal_enum` ("Liste bewerteter
+    Kandidaten", AC4); `/api/kandidaten/{id}` liefert auch eine
+    übersprungene Analyse (AC5, deckt E3).
+
+    `category_weight_version_id`/`analysis_method_version_id` (data-model.md
+    §11-Vorgabe): welche Konfigurationsversion der Analyse zugrunde lag —
+    beide NOT NULL, kein Erzeuger-Pfad legt derzeit eine Zeile ohne diese
+    Referenzen an (analog zur `instrument`-Tabelle: leeres Schema, kein
+    Seed, siehe `Instrument`-Docstring — auch hier hat noch keine Story die
+    Erst-Anlage einer `analysis_result`-Zeile; diese Story liefert nur
+    Schema + Lese-Pfad).
+
+    `begruendung` (S-066-Präzisierung, AC5 "die Begründung"): identisch zum
+    `AnalyseOutput.begruendung`-Vertrag (`app.contracts.llm_grounding`).
+    """
+
+    __tablename__ = "analysis_result"
+    __table_args__ = (
+        CheckConstraint(
+            f"analyse_typ IN ({', '.join(repr(v) for v in ANALYSIS_RESULT_ANALYSE_TYP_VALUES)})",
+            name="ck_analysis_result_analyse_typ",
+        ),
+        CheckConstraint(
+            "gesamtscore IS NULL OR (gesamtscore >= 0 AND gesamtscore <= 10)",
+            name="ck_analysis_result_gesamtscore_range",
+        ),
+        CheckConstraint(
+            f"signal_enum IN ({', '.join(repr(v) for v in ANALYSIS_RESULT_SIGNAL_VALUES)})",
+            name="ck_analysis_result_signal_enum",
+        ),
+        CheckConstraint(
+            f"exit_urgency IN ({', '.join(repr(v) for v in ANALYSIS_RESULT_EXIT_URGENCY_VALUES)})",
+            name="ck_analysis_result_exit_urgency",
+        ),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_analysis_result_mode"),
+        Index("ix_analysis_result_instrument_id_created_at", "instrument_id", "created_at"),
+        Index("ix_analysis_result_analyse_typ", "analyse_typ"),
+        Index("ix_analysis_result_mode", "mode"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    analyse_typ: Mapped[str | None] = mapped_column(String, nullable=True)
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    category_weight_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("category_weight_version.id"), nullable=False
+    )
+    analysis_method_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis_method_version.id"), nullable=False
+    )
+    gesamtscore: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    signal_enum: Mapped[str | None] = mapped_column(String, nullable=True)
+    exit_urgency: Mapped[str | None] = mapped_column(String, nullable=True)
+    sanity_cap_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+    schema_valid: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    llm_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    begruendung: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisResult(id={self.id!r}, instrument_id={self.instrument_id!r}, "
+            f"signal_enum={self.signal_enum!r})"
+        )
+
+
+class AnalysisCategoryScore(Base):
+    """Score je Analysekategorie einer Analyse (data-model.md §3
+    `analysis_category_score`, C-007; Story S-066).
+
+    `score IS NULL` markiert eine Kategorie ohne verwertbare Evidenz
+    (`evidence_present = false`, → BR-108, No-Evidence-No-Trade) — identisch
+    zur `None`-Semantik von `app.contracts.analyse_framework.KategorieScores`
+    (S-009/S-010 Score-Engine)."""
+
+    __tablename__ = "analysis_category_score"
+    __table_args__ = (
+        CheckConstraint(
+            "score IS NULL OR (score >= 0 AND score <= 10)",
+            name="ck_analysis_category_score_range",
+        ),
+        Index("ix_analysis_category_score_analysis_result_id", "analysis_result_id"),
+    )
+
+    analysis_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_result.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    category_code: Mapped[str] = mapped_column(
+        String, ForeignKey("analysis_category.code"), primary_key=True
+    )
+    score: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    evidence_present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisCategoryScore(analysis_result_id={self.analysis_result_id!r}, "
+            f"category_code={self.category_code!r}, score={self.score!r})"
+        )
+
+
+class AnalysisFact(Base):
+    """Geerdete Fakten einer Analyse (data-model.md §3 `analysis_fact`,
+    LLM-Grounding-Vertrag, C-008 Sicherung 1+3; Story S-066).
+
+    `source_id`/`source_timestamp` sind NOT NULL (→ BR-107,
+    Grounding-Pflicht → BR-002): jede Zahl trägt ihre Quelle — identisch zur
+    Pflichtfeld-Struktur von `app.contracts.llm_grounding.AnalyseFakt`
+    (`quellen_id`, `timestamp`)."""
+
+    __tablename__ = "analysis_fact"
+    __table_args__ = (
+        CheckConstraint(
+            f"cross_check_status IN "
+            f"({', '.join(repr(v) for v in ANALYSIS_FACT_CROSS_CHECK_STATUS_VALUES)})",
+            name="ck_analysis_fact_cross_check_status",
+        ),
+        Index("ix_analysis_fact_analysis_result_id", "analysis_result_id"),
+        Index("ix_analysis_fact_source_id", "source_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    analysis_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis_result.id", ondelete="CASCADE"), nullable=False
+    )
+    kennzahl: Mapped[str] = mapped_column(String, nullable=False)
+    wert: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_timestamp: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
+    cross_check_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    abweichung_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisFact(id={self.id!r}, analysis_result_id={self.analysis_result_id!r}, "
+            f"kennzahl={self.kennzahl!r})"
+        )
 
 
 class Position(Base):

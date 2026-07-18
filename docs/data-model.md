@@ -50,6 +50,8 @@ erDiagram
     analysis_result ||--o{ analysis_category_score : "Score je Kategorie"
     analysis_result ||--o{ analysis_fact : "geerdete Fakten"
     analysis_result ||--o{ hallucination_log : "Cross-Check"
+    category_weight_version ||--o{ analysis_result : "Konfig-Version zugrunde"
+    analysis_method_version ||--o{ analysis_result : "Konfig-Version zugrunde"
 
     risk_profile ||--o{ portfolio_strategy : "prägt"
     portfolio_strategy ||--o{ portfolio_class_limit : "je Klasse"
@@ -412,14 +414,17 @@ erDiagram
 | id | UUID | PK |
 | instrument_id | UUID | FK → instrument.id, NOT NULL |
 | analyse_typ | TEXT | CHECK ∈ {neue_titel, bestehende_titel} (zwei getrennte Pfade C-011) |
-| asset_class_id | SMALLINT | FK → asset_class.id |
-| gesamtscore | NUMERIC(6,3) | CHECK `0 ≤ gesamtscore ≤ 10` (→ BR-104) |
-| signal_enum | TEXT | CHECK ∈ {KAUF, BEOBACHTEN, HALTEN, REDUZIEREN, VERKAUF} (Score-Schwellen → BR-105) |
+| asset_class_id | SMALLINT | FK → asset_class.id, **NOT NULL** (S-066-Präzisierung: jede Analyse hängt an einem Instrument mit fixer, NOT-NULL-Anlageklasse — spiegelt `instrument.asset_class_id` wider, denormalisiert für Filter/Anzeige ohne Join) |
+| category_weight_version_id | UUID | FK → category_weight_version.id, **NOT NULL** (§11-Vorgabe: welche Kategoriegewichte-Version dieser Analyse zugrunde lag, AC10 `anlageklassen-config`) |
+| analysis_method_version_id | UUID | FK → analysis_method_version.id, **NOT NULL** (§11-Vorgabe: welche Methodentabellen-Version zugrunde lag) |
+| gesamtscore | NUMERIC(6,3) | CHECK `0 ≤ gesamtscore ≤ 10` (→ BR-104); NULL bei No-Evidence-No-Trade-Übersprung (→ BR-108) |
+| signal_enum | TEXT | CHECK ∈ {KAUF, BEOBACHTEN, HALTEN, REDUZIEREN, VERKAUF} (Score-Schwellen → BR-105); NULL bei Übersprung |
 | exit_urgency | TEXT | CHECK ∈ {hard_exit, soft_exit, none} (nur Sell-Pfad, C-011) |
 | sanity_cap_applied | BOOLEAN | NOT NULL DEFAULT false (Risiko-Score < 3 → max HALTEN, → BR-106) |
 | schema_valid | BOOLEAN | NOT NULL (JSON-Schema-Validierung bestanden, C-008 Sicherung 2) |
 | llm_model | TEXT | verwendetes Modell (Audit) |
 | mode | TEXT | CHECK ∈ {echt, simuliert} |
+| begruendung | TEXT | S-066-Präzisierung (`docs/specs/frontend-cockpit.md` AC5, "die Begründung"): Freitext-Begründung der Analyse, identisch zum `AnalyseOutput.begruendung`-Vertrag (`app.contracts.llm_grounding`) — analog `gate_result.begruendung` |
 | created_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
 
 ### `analysis_category_score` — Score je Kategorie (C-007)
