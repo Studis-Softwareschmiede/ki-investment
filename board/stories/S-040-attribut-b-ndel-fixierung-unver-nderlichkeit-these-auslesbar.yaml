@@ -2,7 +2,7 @@ id: S-040
 parent: F-012
 title: Attribut-Bündel-Fixierung, Unveränderlichkeit, These-Auslesbarkeit & Weitergabe
   an Risiko
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/strategie-exit-regeln.md
 implements:
@@ -26,9 +26,9 @@ estimate_note: 'Cold-Start; Kern der Disciplined-Exit-Regel (BR-010/BR-111): unv
   Fixierung + Vollständigkeits-Gate vor Risiko, append-only-Durchsetzung.'
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-040
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:48Z'
-updated_at: '2026-07-12T10:09:53Z'
-done_at: null
+updated_at: '2026-07-18T00:22:01Z'
+done_at: '2026-07-18T00:21:59Z'

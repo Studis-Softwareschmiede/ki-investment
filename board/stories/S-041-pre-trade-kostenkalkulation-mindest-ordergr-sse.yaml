@@ -1,7 +1,7 @@
 id: S-041
 parent: F-013
 title: Pre-Trade-Kostenkalkulation & Mindest-Ordergrösse
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/sizing.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: Cold-Start; Kosten (Courtage+Spread+Slippage) reduzieren/verwerfe
   Trade, Mindestgebühr-Effekt, klare Regeln.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-041
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:09:53Z'
-updated_at: '2026-07-12T10:09:56Z'
-done_at: null
+updated_at: '2026-07-18T00:21:57Z'
+done_at: '2026-07-18T00:21:56Z'
