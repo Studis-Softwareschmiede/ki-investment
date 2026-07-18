@@ -49,6 +49,8 @@ def hole_trade_historie(
             fx_rate=eintrag.fx_rate,
             kapital_gv_chf=eintrag.kapital_gv_chf,
             waehrungs_gv_chf=eintrag.waehrungs_gv_chf,
+            titel=eintrag.titel,
+            name=eintrag.name,
         )
         for eintrag in eintraege
     ]

@@ -1,0 +1,91 @@
+{# Trade-Historie-Tabellen-Partial (design.md §7.6 dichte Datentabelle,
+   §2.3 G/V-Dreifach-Kodierung für Slippage/TCA) — Story S-073, AC16.
+
+   Eigenständiges HTMX-Swap-Ziel: wird sowohl beim initialen Seitenaufruf
+   (views/trades.html, per {% include %}) als auch bei jedem Filter-Submit
+   (GET /ui/trades/tabelle, hx-target="this" hx-swap="outerHTML") komplett
+   neu gerendert — die Wurzel-`<div>` trägt deshalb die stabile
+   `data-testid`/`id`, damit der Swap dasselbe Element ersetzt statt es zu
+   duplizieren.
+
+   `aria-live="polite"`: HTMX aktualisiert diesen Bereich ohne Seiten-
+   Neuladen (design.md §9 "HTMX-aktualisierte Statuswerte in
+   aria-live=polite").
+
+   "Titel" zeigt die aufgelöste Instrument-Bezeichnung (`trade.titel`,
+   `Instrument.symbol` — Review-Fix Iteration 2, AC16); Fallback auf die
+   rohe `titel_id`, falls eine Quelle (Fake-Repository in Tests) sie nicht
+   liefert. #}
+<div id="trades-tabelle-container" data-testid="trades-tabelle-container" aria-live="polite">
+  {% if trades %}
+  <div class="table-scroll">
+    <table class="table-dense" data-testid="table-trades">
+      <caption class="sr-only">Trade-Historie im Modus {{ mode|upper }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Titel</th>
+          <th scope="col">Richtung</th>
+          <th scope="col" class="num">Menge</th>
+          <th scope="col" class="num">Fill-Preis</th>
+          <th scope="col" class="num">Arrival-Price</th>
+          <th scope="col" class="num">Slippage/TCA</th>
+          <th scope="col" class="num">Kosten</th>
+          <th scope="col">FX-Split</th>
+          <th scope="col">Zeit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for trade in trades %}
+        <tr data-row-id="{{ trade.trade_id }}">
+          <td class="col-titel">{{ trade.titel if trade.titel else trade.titel_id }}</td>
+          <td>
+            <span
+              class="badge-richtung badge-richtung--{{ trade.richtung }}"
+              data-testid="richtung-badge"
+              data-richtung="{{ trade.richtung }}"
+            >{{ "Kauf" if trade.richtung == "kauf" else "Verkauf" }}</span>
+          </td>
+          <td class="num">{{ "%.4f"|format(trade.menge) }}</td>
+          <td class="num">{{ "%.4f"|format(trade.fill_preis) }}</td>
+          <td class="num">{{ "%.4f"|format(trade.arrival_price) }}</td>
+          <td class="num">
+            {% set vz = "±0" if trade.slippage == 0 else ("+" if trade.slippage > 0 else "−") %}
+            {% set glyph = "▬" if trade.slippage == 0 else ("▲" if trade.slippage > 0 else "▼") %}
+            {% set farbklasse = "num-neutral" if trade.slippage == 0 else ("num-gain" if trade.slippage > 0 else "num-loss") %}
+            <span
+              class="slippage-wert {{ farbklasse }}"
+              data-testid="slippage"
+              data-value="{{ trade.slippage }}"
+            >
+              <span aria-hidden="true">{{ glyph }}</span>
+              {{ vz if trade.slippage == 0 else vz + "%.4f"|format(trade.slippage|abs) }}
+            </span>
+          </td>
+          <td class="num">{{ "%.2f"|format(trade.kosten) }}</td>
+          <td class="col-fx-split">
+            {% if trade.fx_rate is none %}
+            <span class="text-3">—</span>
+            {% else %}
+            <span data-testid="fx-split">
+              Kurs {{ "%.4f"|format(trade.fx_rate) }}
+              {% if trade.kapital_gv_chf is not none %}
+              · K {{ "%.2f"|format(trade.kapital_gv_chf) }}
+              {% endif %}
+              {% if trade.waehrungs_gv_chf is not none %}
+              · W {{ "%.2f"|format(trade.waehrungs_gv_chf) }}
+              {% endif %}
+            </span>
+            {% endif %}
+          </td>
+          <td class="col-zeit">{{ trade.zeitstempel.isoformat() }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="table-empty-state" data-testid="trades-empty">
+    Keine Trades im Modus {{ mode|upper }}
+  </p>
+  {% endif %}
+</div>

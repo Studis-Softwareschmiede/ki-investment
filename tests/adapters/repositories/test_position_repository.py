@@ -4,7 +4,7 @@ DBA-Zweit-Review + S-045 + S-065).
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 Covers (strategie-exit-regeln): AC1, AC10, AC11
 Covers (risikomanagement): AC9
-Covers (frontend-cockpit): AC6, AC7, AC3
+Covers (frontend-cockpit): AC6, AC7, AC3, AC16
 
 S-065 (`docs/specs/frontend-cockpit.md` AC3) ergänzt
 `realisierter_gv_gesamt`: depotweite Summe von `Position.realisierter_gv`
@@ -74,6 +74,11 @@ S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
 `historie_depotweit`: das depotweite (nicht titel-spezifische) Gegenstück
 zu `historie_je_titel` — schliesst das AC7-Read-Modell-Gap für die
 Cockpit-Trade-Historie-View, optional gefiltert nach Titel und Zeitraum.
+
+S-073 Review-Fix (Iteration 2, AC16, Critical) ergänzt `historie_depotweit`
+zusätzlich um einen `Instrument`-Join (analog `alle_offenen_positionen`):
+die Trade-Historie-View zeigte bislang die rohe `titel_id`-UUID statt des
+Titels — `historie_je_titel` bleibt bewusst unverändert.
 """
 
 from __future__ import annotations
@@ -876,6 +881,25 @@ def test_historie_depotweit_mit_ungueltiger_titel_id_ist_leer() -> None:
         session.commit()
 
         assert repository.historie_depotweit(mode="simuliert", titel_id="keine-uuid") == []
+
+
+def test_historie_depotweit_liefert_aufgeloeste_titel_bezeichnung() -> None:
+    """@trace frontend-cockpit#AC16 — Review-Fix Iteration 2 (Critical):
+    `historie_depotweit` liefert zusätzlich `titel`/`name`
+    (`Instrument.symbol`/`Instrument.name` über einen Join) statt nur die
+    rohe `titel_id` (analog `alle_offenen_positionen`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        repository.schreibe_transaktion(_kauf_fill(instrument_id), position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(mode="simuliert")
+
+        assert len(historie) == 1
+        assert historie[0].titel == "ACME"
+        assert historie[0].name == "Acme Corp"
 
 
 def test_historie_depotweit_filtert_nach_zeitraum() -> None:
