@@ -2,7 +2,7 @@ id: S-067
 parent: F-017
 title: Read-Modell + Endpoint Trade-Historie (/api/trades) — depotweites Historien-Read-Modell
   (Gap-Schluss), Filter mode/Titel/Zeitraum
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -21,9 +21,9 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
   estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-067-api-trades
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/45
 blocked_reason: null
 created_at: '2026-07-18T04:24:17Z'
-updated_at: '2026-07-18T04:26:09Z'
-done_at: null
+updated_at: '2026-07-18T22:16:22Z'
+done_at: '2026-07-18T22:16:20Z'
