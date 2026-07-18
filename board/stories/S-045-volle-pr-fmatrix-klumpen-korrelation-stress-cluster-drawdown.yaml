@@ -2,7 +2,7 @@ id: S-045
 parent: F-014
 title: 'Volle Prüfmatrix: Klumpen, Korrelation (Stress/Cluster), Drawdown & portfolio-weiter
   Kelly-Cap'
-status: To Do
+status: Done
 priority: P1
 spec: docs/specs/risikomanagement.md
 implements:
@@ -27,9 +27,9 @@ estimate_note: Cold-Start; Korrelations-/Stress-Cluster-Prüfung mit offener Dat
   (konservativer Fallback), Kelly-Cap 20–30% provisorisch → hohe Unsicherheit.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-045
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:10:00Z'
-updated_at: '2026-07-12T10:10:04Z'
-done_at: null
+updated_at: '2026-07-18T01:09:30Z'
+done_at: '2026-07-18T01:09:28Z'
