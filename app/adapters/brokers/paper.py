@@ -5,24 +5,44 @@ paper/live/sim (IBKR-Paper MVP; sim für brokerlose Krypto)").
 Beide Implementierungen sind reine, deterministische MVP-Paper-
 Simulationen — kein Netzwerk-I/O, keine echte IBKR-/Broker-Anbindung
 (Nicht-Ziel der Spec: "Kein Live-/Echtgeld-Handel im MVP (nur Paper)").
-Die tatsächliche Fill-/Slippage-Simulation (AC7/AC8/AC9) ist NICHT Teil
-dieser Story (S-048/S-049): `platziere_order` liefert ausschliesslich die
-Annahme-Bestätigung einer `OrderAnfrage` (`OrderBestaetigung`, siehe
-`app.contracts.ausfuehrung_paper`-Docstring) — keinen Fill-Preis, keinen
-Status jenseits der Annahme.
+`platziere_order` liefert ausschliesslich die Annahme-Bestätigung einer
+`OrderAnfrage` (`OrderBestaetigung`, siehe `app.contracts.ausfuehrung_paper`-
+Docstring) — keinen Fill-Preis, keinen Status jenseits der Annahme.
 
 `IbkrPaperBrokerAdapter` und `KryptoSimBrokerAdapter` unterscheiden sich
 ausschliesslich im zurückgemeldeten `broker_endpunkt_typ` (AC5) — beide
 implementieren denselben `app.domain.execution.ports.BrokerPort` und
 werden von `app.domain.execution.order_ausfuehrung.fuehre_order_aus`
 identisch aufgerufen (AC4: der Unterschied liegt einzig im injizierten
-Adapter, nicht in separater Order-Logik)."""
+Adapter, nicht in separater Order-Logik).
+
+**S-048 ergänzt** `ermittle_fill` (AC7/AC8): die MVP-Paper-Simulation
+"füllt" jede angenommene Order deterministisch VOLLSTÄNDIG (`status=
+"filled"`) zum bereits bekannten Preis (`anfrage.preis`, sofern gesetzt —
+Limit/Stop/Stop-Limit; sonst `arrival_price` als einziger für die
+Simulation verfügbarer Referenzpreis bei einer Market-Order — Nicht-Ziel
+dieser Story: ein eigenes Slippage-/Spread-Modell, das den Fill-Preis vom
+Signal-Kurs abweichen liesse, ist AC9/S-049) ohne Kosten
+(`tatsaechliche_kosten=0` — die eigentliche Kostenberechnung ist die
+Plattform-Pre-Trade-Kalkulation, AC10/AC11, S-017, nicht Teil dieser
+Fill-Meldung). Teilfill/Reject/Timeout (E1-E3) treten in dieser
+deterministischen Happy-Path-Simulation strukturell nie auf — die
+domain-seitige Verarbeitung dieser drei Fälle
+(`app.domain.execution.order_ausfuehrung.verarbeite_fill`, AC7/AC8) ist
+unabhängig von dieser Simulation vollständig getestet (Fake-`BrokerPort`,
+siehe `tests/domain/execution/test_order_ausfuehrung_fill.py`)."""
 
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
-from app.contracts.ausfuehrung_paper import BrokerEndpunktTyp, OrderAnfrage, OrderBestaetigung
+from app.contracts.ausfuehrung_paper import (
+    BrokerEndpunktTyp,
+    BrokerFillMeldung,
+    OrderAnfrage,
+    OrderBestaetigung,
+)
 
 
 class _PaperBrokerAdapter:
@@ -43,6 +63,20 @@ class _PaperBrokerAdapter:
             order_typ=anfrage.order_typ,
             groesse=anfrage.groesse,
             preis=anfrage.preis,
+        )
+
+    def ermittle_fill(
+        self, anfrage: OrderAnfrage, bestaetigung: OrderBestaetigung, *, arrival_price: Decimal
+    ) -> BrokerFillMeldung:
+        """AC7/AC8 (S-048): deterministischer Happy-Path — vollständiger
+        Fill zum bereits bekannten Preis (`anfrage.preis`, sonst
+        `arrival_price`), siehe Moduldocstring."""
+        fill_preis = anfrage.preis if anfrage.preis is not None else arrival_price
+        return BrokerFillMeldung(
+            status="filled",
+            ausgefuehrte_menge=anfrage.groesse,
+            fill_preis=fill_preis,
+            tatsaechliche_kosten=Decimal("0"),
         )
 
 

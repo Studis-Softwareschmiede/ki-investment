@@ -45,6 +45,33 @@ Moduldocstring für die vollständige AC1/AC4/AC5/AC6-Herleitung):
   /Spread-Simulation (AC9, S-049) — dieser Vertrag deckt nur die
   Order-ANNAHME durch den gewählten Endpunkt.
 
+**S-048 ergänzt** (`app.domain.execution.order_ausfuehrung.verarbeite_fill`,
+AC7/AC8):
+
+- `AusfuehrungsStatus` — der volle Fill-Status-Wertebereich einer Order
+  (`filled|partial|rejected|timeout`, deckt E1–E3).
+- `RestmengeVerhalten` — E1 ("weiter offen / storniert je Order-Typ"): wie
+  eine bei einem Teilfill verbleibende Restmenge behandelt wird.
+- `BrokerFillMeldung` — die ROHE Fill-Meldung eines Broker-Endpunkts (WAS
+  wurde ausgeführt: Status, Menge, Preis, Kosten) — bewusst OHNE Slippage-
+  Berechnung oder Restmengen-Entscheidung (P1: der Adapter kennt weder
+  Arrival-Price-Semantik noch die Order-Typ-abhängige Restmengen-
+  Konvention, das ist Domain-Sache).
+- `Ausfuehrungsergebnis` — der vollständige Verträge/Output-Vertrag
+  "Ausführungsergebnis an das Depotmodul" (`{ fill_preis, ausgefuehrte_menge,
+  tatsaechliche_kosten, arrival_price, slippage, status }`), domain-
+  angereichert um `restmenge`/`restmenge_verhalten` (E1) und
+  `ablehnungsgrund` (E2). Die tatsächliche Weitergabe an das Depotmodul
+  (Bau eines `app.contracts.depot.FillInput`) ist NICHT Teil dieser Story —
+  ein künftiger Orchestrierungs-Layer (analog zur bereits bestehenden
+  Konvention aus S-046/S-047, siehe `order_ausfuehrung`-Moduldocstring)
+  übersetzt dieses DTO in einen `FillInput`-Aufruf, sobald
+  `status ∈ {"filled", "partial"}` — bei `"rejected"`/`"timeout"` liefert
+  dieses DTO strukturell KEINEN Fill-Preis/keine ausgeführte Menge (beide
+  `None`/`0`), sodass ein Aufrufer sie nicht versehentlich als Fill
+  fehlinterpretieren kann (BR-139, deckt AC8 "Bestand nicht ohne
+  bestätigten Fill verändert").
+
 **S-047 ergänzt** (`app.domain.execution.order_ausfuehrung
 .bestimme_wirksamen_modus`, AC2/AC3, BR-019):
 
@@ -227,6 +254,67 @@ class OrderAnfrage(BaseModel):
     groesse: Decimal = Field(gt=0)
     order_typ: ExecutionOrderTyp
     preis: Decimal | None = None
+
+
+#: AC7/AC8 (S-048): der volle Fill-Status-Wertebereich (deckt E1-E3) —
+#: `"filled"` (vollständig ausgeführt), `"partial"` (Teilfill, E1),
+#: `"rejected"` (abgelehnt, E2), `"timeout"` (keine Antwort binnen Frist,
+#: E3).
+AusfuehrungsStatus = Literal["filled", "partial", "rejected", "timeout"]
+
+#: E1 (S-048): wie die bei einem Teilfill verbleibende Restmenge behandelt
+#: wird — `"weiter_offen"` (die Order bleibt zur weiteren Ausführung
+#: bestehen, typischerweise resting Limit-/Stop-Limit-/Trailing-/TWAP-
+#: Order) oder `"storniert"` (die Restmenge wird verworfen, typischerweise
+#: Market-/Stop-Order, deren "sofort oder gar nicht"-Charakter kein
+#: Weiterbestehen vorsieht).
+RestmengeVerhalten = Literal["weiter_offen", "storniert"]
+
+
+class BrokerFillMeldung(BaseModel):
+    """AC7/AC8 (S-048): die ROHE Fill-Meldung eines Broker-Endpunkts (WAS
+    wurde ausgeführt) — OHNE Slippage-Berechnung oder Restmengen-
+    Entscheidung (P1: das ist Domain-Sache, siehe Moduldocstring).
+
+    `ausgefuehrte_menge`/`fill_preis`/`tatsaechliche_kosten` sind nur bei
+    `status ∈ {"filled", "partial"}` fachlich sinnvoll gesetzt — bei
+    `"rejected"`/`"timeout"` bleiben `ausgefuehrte_menge=0`,
+    `fill_preis=None`, `tatsaechliche_kosten=0` (kein Fill fand statt)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    status: AusfuehrungsStatus
+    ausgefuehrte_menge: Decimal = Field(default=Decimal("0"), ge=0)
+    fill_preis: Decimal | None = None
+    tatsaechliche_kosten: Decimal = Field(default=Decimal("0"), ge=0)
+    ablehnungsgrund: str | None = None
+
+
+class Ausfuehrungsergebnis(BaseModel):
+    """AC7/AC8 (S-048): der vollständige Verträge/Output-Vertrag
+    "Ausführungsergebnis an das Depotmodul" — domain-angereichert um
+    `restmenge`/`restmenge_verhalten` (E1) und `ablehnungsgrund` (E2), siehe
+    Moduldocstring.
+
+    `slippage` ist NUR bei `status ∈ {"filled", "partial"}` gesetzt
+    (`fill_preis - arrival_price`, BR-114) — bei `"rejected"`/`"timeout"`
+    bleibt sie `None` (kein Fill, keine Slippage messbar)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    order_id: str = Field(min_length=1)
+    titel_id: str = Field(min_length=1)
+    richtung: OrderRichtung
+    status: AusfuehrungsStatus
+    angefragte_menge: Decimal = Field(gt=0)
+    ausgefuehrte_menge: Decimal = Field(ge=0)
+    fill_preis: Decimal | None = None
+    tatsaechliche_kosten: Decimal = Field(ge=0)
+    arrival_price: Decimal
+    slippage: Decimal | None = None
+    restmenge: Decimal = Field(ge=0)
+    restmenge_verhalten: RestmengeVerhalten | None = None
+    ablehnungsgrund: str | None = None
 
 
 class OrderBestaetigung(BaseModel):

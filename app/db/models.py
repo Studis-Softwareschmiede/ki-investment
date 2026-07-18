@@ -142,6 +142,27 @@ _ATR_MULTIPLIER_VOLATILITAETSKLASSE_VALUES_SQL = ", ".join(
 # data-model.md §4 `transaction`: CHECK typ ∈ {...} (C-017, Story S-035)
 TRANSACTION_TYP_VALUES = ("buy", "sell", "dividend", "fee", "fx_adjust")
 
+# data-model.md §4 `order`: CHECK richtung ∈ {...} (C-016, Story S-048)
+ORDER_RICHTUNG_VALUES = ("buy", "sell")
+
+# data-model.md §4 `order`: CHECK order_typ ∈ {...} (C-016, Story S-048,
+# S-048-präzisiert — deckungsgleich mit `ExecutionOrderTyp`/AC6, siehe
+# data-model.md §4 `order`-Präzisierungsnote: die Tabelle protokolliert
+# JEDE `OrderAnfrage` des gemeinsamen Order-Code-Pfads, nicht nur den
+# schmaleren verkaufsseitigen `sizing.OrderTyp`-Wertebereich).
+ORDER_TYP_VALUES = ("market", "limit", "stop", "stop_limit", "trailing", "twap")
+
+# data-model.md §4 `order`: CHECK exit_urgency ∈ {...} (Exit-Sizing, C-013)
+ORDER_EXIT_URGENCY_VALUES = ("hard", "soft", "none")
+
+# data-model.md §4 `order`: CHECK status ∈ {...} (C-016, Story S-048) — diese
+# Story (AC7/AC8) erzeugt ausschliesslich `filled`/`teilfill`/`rejected`/
+# `timeout` (die synchrone MVP-Paper-Ausführung kennt keine schwebende
+# Order); `offen`/`cancelled` bleiben gültige Werte des vollen
+# Lifecycle-Vokabulars für eine künftige asynchrone/Live-Order-Verwaltung
+# (Nicht-Ziel dieser Story, kein Erzeuger-Pfad hier).
+ORDER_STATUS_VALUES = ("offen", "teilfill", "filled", "rejected", "timeout", "cancelled")
+
 
 class AssetClass(Base):
     """Anlageklasse — Stammdaten + Feature-Toggle (data-model.md `asset_class`, BR-100).
@@ -1163,6 +1184,117 @@ class ExitRule(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"ExitRule(position_id={self.position_id!r}, stop_typ={self.stop_typ!r})"
+
+
+class Order(Base):
+    """Order-Lifecycle-Zustand (data-model.md §4 `order`, C-016; Spec
+    `docs/specs/ausfuehrung-paper.md`, Story S-048, AC6/AC7/AC8).
+
+    Ein Insert je über den Order-Ausführungs-Kern
+    (`app.domain.execution.order_ausfuehrung.verarbeite_fill`) verarbeiteten
+    `OrderAnfrage` — `status` trägt den nach AC7/AC8 ermittelten
+    Endzustand (`filled|teilfill|rejected|timeout`; `offen`/`cancelled`
+    bleiben Teil des CHECK-Vokabulars für eine künftige asynchrone/Live-
+    Order-Verwaltung, kein Schreibpfad dieser Story, siehe
+    `ORDER_STATUS_VALUES`). `position_id` bleibt in dieser Story immer
+    `NULL` (die Positions-Zuordnung geschieht erst nach der — hier NICHT
+    verdrahteten — Fill→Depot-Meldung im Depotmodul, S-016/S-035; ein
+    künftiger Orchestrierungs-Layer kann die Spalte nachträglich setzen).
+    `arrival_price` ist NOT NULL (Kurs bei Signal, C-016 TCA) — der
+    Edge-Case "Signal-Kurs nicht verfügbar" (Spec `Edge-Cases &
+    Fehlerverhalten`) setzt eine Live-Kurs-Anbindung voraus, die noch nicht
+    gebaut ist (Nicht-Ziel dieser Story, siehe Spec-Abhängigkeiten "Socket
+    (Live-Kurse/Arrival Price)")."""
+
+    __tablename__ = "order"
+    __table_args__ = (
+        Index("ix_order_position_id", "position_id"),
+        Index("ix_order_status", "status"),
+        Index("ix_order_mode", "mode"),
+        Index("ix_order_created_at", "created_at"),
+        CheckConstraint(f"richtung IN {ORDER_RICHTUNG_VALUES!r}", name="ck_order_richtung"),
+        CheckConstraint(f"order_typ IN {ORDER_TYP_VALUES!r}", name="ck_order_order_typ"),
+        CheckConstraint("menge > 0", name="ck_order_menge_positive"),
+        CheckConstraint(
+            f"exit_urgency IN {ORDER_EXIT_URGENCY_VALUES!r}", name="ck_order_exit_urgency"
+        ),
+        CheckConstraint(f"status IN {ORDER_STATUS_VALUES!r}", name="ck_order_status"),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_order_mode"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    position_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("position.id"), nullable=True
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    platform_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("trading_platform.id"), nullable=True
+    )
+    richtung: Mapped[str] = mapped_column(String, nullable=False)
+    order_typ: Mapped[str] = mapped_column(String, nullable=False)
+    menge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    limit_preis: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    arrival_price: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    exit_urgency: Mapped[str | None] = mapped_column(String, nullable=True)
+    tranche_index: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    tranche_total: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"Order(instrument_id={self.instrument_id!r}, status={self.status!r})"
+
+
+class TradeFill(Base):
+    """Ausführung / Teilfill (data-model.md §4 `trade_fill`, C-016 TCA;
+    Spec `docs/specs/ausfuehrung-paper.md`, Story S-048, AC7/AC8; → BR-114,
+    BR-139).
+
+    Ein Insert je tatsächlich ausgeführtem (Teil-)Fill — wird NUR angelegt,
+    wenn `Order.status ∈ {filled, teilfill}` (BR-139: kein `trade_fill`-
+    Eintrag bei `rejected`/`timeout`). `slippage_abs` ist die reine
+    Arrival-Price-Slippage-Formel (BR-114, identisch zu
+    `app.domain.portfolio.transaction_historie.berechne_slippage`, hier auf
+    die Order-Ausführungs-eigene TCA angewandt, C-016). `courtage_chf`
+    übernimmt in dieser Story die vom Broker gemeldete
+    `tatsaechliche_kosten`-Summe (`Ausfuehrungsergebnis.tatsaechliche_kosten`)
+    unaufgeteilt — eine Courtage-/Spread-Aufschlüsselung setzt das AC9-
+    Slippage-/Spread-Modell voraus (S-049, Nicht-Ziel dieser Story);
+    `spread_kosten_chf` bleibt entsprechend beim Schema-Default `0`."""
+
+    __tablename__ = "trade_fill"
+    __table_args__ = (
+        Index("ix_trade_fill_order_id", "order_id"),
+        Index("ix_trade_fill_executed_at", "executed_at"),
+        CheckConstraint("fill_menge > 0", name="ck_trade_fill_menge_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("order.id"), nullable=False
+    )
+    fill_preis: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    fill_menge: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    courtage_chf: Mapped[Decimal] = mapped_column(
+        Numeric(20, 8), nullable=False, default=Decimal("0"), server_default=sa.text("0")
+    )
+    spread_kosten_chf: Mapped[Decimal] = mapped_column(
+        Numeric(20, 8), nullable=False, default=Decimal("0"), server_default=sa.text("0")
+    )
+    slippage_abs: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return f"TradeFill(order_id={self.order_id!r}, fill_menge={self.fill_menge!r})"
 
 
 class Transaction(Base):
