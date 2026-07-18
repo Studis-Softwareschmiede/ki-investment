@@ -1,22 +1,24 @@
 """Tests für die S-046-Order-Ausführungs-Verträge (`app.contracts
 .ausfuehrung_paper.OrderAnfrage`/`OrderBestaetigung`/
-`BrokerRoutingKonfiguration`) + die S-047-`ModusKonfiguration`.
+`BrokerRoutingKonfiguration`) + die S-047-`ModusKonfiguration` + die
+S-048-Fill-Handling-Verträge (`BrokerFillMeldung`/`Ausfuehrungsergebnis`).
 
-Covers (ausfuehrung-paper): AC1, AC2, AC5, AC6
+Covers (ausfuehrung-paper): AC1, AC2, AC5, AC6, AC7, AC8
 
 Reine DTO-Validierungstests (pydantic `frozen`/`extra="forbid"`/
 Feld-Constraints) — das Verhalten der erzeugenden/konsumierenden Funktionen
-liegt in `tests/domain/execution/test_order_ausfuehrung.py` (dort auch die
-AC2/AC3-Auflösungslogik von `bestimme_wirksamen_modus`, S-047, inkl. der
-Allowlist-/Fail-closed-Sperre und der aktiven Verdrahtung in
-`fuehre_order_aus`).
+liegt in `tests/domain/execution/test_order_ausfuehrung.py` (AC1-AC6, S-046/
+S-047) bzw. `tests/domain/execution/test_order_ausfuehrung_fill.py` (AC7/AC8,
+S-048).
 
 - AC2 (Review-Fix, Sicherheit): `ModusKonfiguration.modus_je_anlageklasse`
   ist trotz `frozen=True` NICHT nur top-level unveränderlich — das
   `dict`-Feld selbst wird per `field_validator` in ein echtes
   `types.MappingProxyType` gewandelt, eine nachträgliche Mutation des
   Mappings wird dadurch verhindert (siehe
-  `test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich`)."""
+  `test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich`).
+- AC7/AC8 (S-048): `BrokerFillMeldung`/`Ausfuehrungsergebnis` sind ebenfalls
+  `frozen`/`extra="forbid"` (P2, Modul-Vertrag)."""
 
 from __future__ import annotations
 
@@ -28,6 +30,8 @@ from pydantic import ValidationError
 
 from app.contracts.ausfuehrung_paper import (
     DEFAULT_BROKERLOSE_ANLAGEKLASSEN_IDS,
+    Ausfuehrungsergebnis,
+    BrokerFillMeldung,
     BrokerRoutingKonfiguration,
     ModusKonfiguration,
     OrderAnfrage,
@@ -167,3 +171,83 @@ def test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich() -> Non
     assert isinstance(default_konfiguration.modus_je_anlageklasse, MappingProxyType)
     with pytest.raises(TypeError):
         default_konfiguration.modus_je_anlageklasse[1] = "echt"  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# AC7/AC8 (S-048) — Fill-Handling-Verträge
+# ---------------------------------------------------------------------------
+
+
+def test_ac7_ac8_broker_fill_meldung_ist_unveraenderlich_und_lehnt_unbekannte_felder_ab() -> None:
+    """@trace ausfuehrung-paper#AC7,AC8 — `BrokerFillMeldung` ist `frozen`/
+    `extra="forbid"` (P2, Modul-Vertrag)."""
+    meldung = BrokerFillMeldung(status="filled", ausgefuehrte_menge=Decimal("10"))
+
+    with pytest.raises(ValidationError):
+        meldung.status = "rejected"  # type: ignore[misc]
+
+    with pytest.raises(ValidationError):
+        BrokerFillMeldung(status="filled", unbekanntes_feld="x")
+
+
+def test_ac8_broker_fill_meldung_defaults_passen_zu_keinem_fill() -> None:
+    """@trace ausfuehrung-paper#AC8 — ohne weitere Angabe (z.B. bei einem
+    Reject/Timeout) sind `ausgefuehrte_menge=0`, `fill_preis=None`,
+    `tatsaechliche_kosten=0`."""
+    meldung = BrokerFillMeldung(status="rejected", ablehnungsgrund="Test")
+    assert meldung.ausgefuehrte_menge == Decimal("0")
+    assert meldung.fill_preis is None
+    assert meldung.tatsaechliche_kosten == Decimal("0")
+
+
+def _ausfuehrungsergebnis_kwargs(**overrides: object) -> dict[str, object]:
+    basis: dict[str, object] = dict(
+        order_id="order-1",
+        titel_id="AAPL",
+        richtung="kauf",
+        status="filled",
+        angefragte_menge=Decimal("10"),
+        ausgefuehrte_menge=Decimal("10"),
+        fill_preis=Decimal("151"),
+        tatsaechliche_kosten=Decimal("2"),
+        arrival_price=Decimal("150"),
+        slippage=Decimal("1"),
+        restmenge=Decimal("0"),
+        restmenge_verhalten=None,
+        ablehnungsgrund=None,
+    )
+    basis.update(overrides)
+    return basis
+
+
+def test_ac7_ac8_ausfuehrungsergebnis_ist_unveraenderlich_und_lehnt_unbekannte_felder_ab() -> None:
+    """@trace ausfuehrung-paper#AC7,AC8 — `Ausfuehrungsergebnis` ist ebenfalls
+    `frozen`/`extra="forbid"` (P2, Modul-Vertrag)."""
+    ergebnis = Ausfuehrungsergebnis(**_ausfuehrungsergebnis_kwargs())
+
+    with pytest.raises(ValidationError):
+        ergebnis.status = "rejected"  # type: ignore[misc]
+
+    with pytest.raises(ValidationError):
+        Ausfuehrungsergebnis(**_ausfuehrungsergebnis_kwargs(unbekanntes_feld="x"))
+
+
+def test_ac8_ausfuehrungsergebnis_akzeptiert_reject_ohne_fill_preis() -> None:
+    """@trace ausfuehrung-paper#AC8 — E2/E3: `fill_preis`/`slippage`/
+    `restmenge_verhalten` sind strukturell optional (`None` bei Reject/
+    Timeout, kein Fill)."""
+    ergebnis = Ausfuehrungsergebnis(
+        **_ausfuehrungsergebnis_kwargs(
+            status="rejected",
+            ausgefuehrte_menge=Decimal("0"),
+            fill_preis=None,
+            tatsaechliche_kosten=Decimal("0"),
+            slippage=None,
+            restmenge=Decimal("10"),
+            restmenge_verhalten=None,
+            ablehnungsgrund="Kontingent erschöpft",
+        )
+    )
+    assert ergebnis.fill_preis is None
+    assert ergebnis.slippage is None
+    assert ergebnis.ablehnungsgrund == "Kontingent erschöpft"

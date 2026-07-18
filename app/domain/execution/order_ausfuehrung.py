@@ -89,25 +89,64 @@ noch nicht gebaut) beisteuert.
   griff nur zufällig, weil (noch) kein `"echt"`-`BrokerPort`-Adapter
   existiert (Nicht-Ziel des MVP) — nicht durch eine aktive Prüfung. Ein
   künftiger Live-Adapter wäre damit ohne weitere Sperre erreichbar
-  gewesen."""
+  gewesen.
+
+**S-048 ergänzt** `verarbeite_fill`/`fuehre_order_aus_und_verarbeite_fill`
+(AC7/AC8, Fill-Handling: Teilfills/Rejects/Timeouts & Arrival-Price-
+Slippage/TCA):
+
+- **AC7** — `berechne_arrival_price_slippage` ist die reine Formel
+  (Fill-Preis − Arrival-Price, identisch zu BR-114 `trade_fill.slippage_abs`
+  und zur bereits bestehenden Depot-eigenen `app.domain.portfolio
+  .transaction_historie.berechne_slippage`, hier auf die Order-Ausführungs-
+  eigene TCA angewandt, C-016 statt C-017). `verarbeite_fill` wendet sie NUR
+  bei `status ∈ {"filled", "partial"}` an — bei `"rejected"`/`"timeout"`
+  bleibt `slippage=None` (kein Fill, keine Slippage messbar).
+- **AC8** — `verarbeite_fill` verarbeitet eine rohe `BrokerFillMeldung` zum
+  vollständigen `Ausfuehrungsergebnis`-Vertrag (deckt E1-E3):
+  - **E1 (Teilfill)** — `ausgefuehrte_menge < angefragte_menge` bei
+    `status="partial"`: die Restmenge (`angefragte_menge -
+    ausgefuehrte_menge`) wird über `bestimme_restmenge_verhalten`
+    protokolliert behandelt — "weiter offen" für resting Order-Typen
+    (Limit, Stop-Limit, Trailing, TWAP) bzw. "storniert" für "sofort oder
+    gar nicht"-Order-Typen (Market, Stop) — kein stiller Verlust der
+    Restmenge (`_RESTMENGE_VERHALTEN_JE_ORDER_TYP`).
+  - **E2 (Reject)** / **E3 (Timeout)** — `status ∈ {"rejected",
+    "timeout"}`: `verarbeite_fill` liefert strukturell KEINEN Fill-Preis
+    (`None`) und `ausgefuehrte_menge=0` — ein Aufrufer kann dies nicht
+    versehentlich als Fill fehlinterpretieren (BR-139: kein Bestand wird
+    ohne bestätigten Fill verändert). Die eigentliche Depot-Meldung (Bau
+    eines `FillInput`) bleibt — wie bei `order_typ`/`preis` in S-046 — Sache
+    eines künftigen Orchestrierungs-Layers; für `"rejected"`/`"timeout"`
+    darf dieser Layer strukturell KEINEN `FillInput` bauen (kein
+    `fill_preis` vorhanden).
+  - `fuehre_order_aus_und_verarbeite_fill` kombiniert `fuehre_order_aus`
+    (Order-Annahme) + `BrokerPort.ermittle_fill` (rohe Fill-Meldung) +
+    `verarbeite_fill` (AC7/AC8-Verarbeitung) zu EINEM Aufruf — passend zur
+    synchronen MVP-Paper-Ausführung (kein separater Warte-/Poll-Schritt
+    nötig)."""
 
 from __future__ import annotations
 
 from decimal import Decimal
 
 from app.contracts.ausfuehrung_paper import (
+    Ausfuehrungsergebnis,
     BrokerEndpunktTyp,
+    BrokerFillMeldung,
     BrokerRoutingKonfiguration,
     ExecutionOrderTyp,
     ModusKonfiguration,
     OrderAnfrage,
     OrderBestaetigung,
+    RestmengeVerhalten,
 )
 from app.contracts.depot import Modus
 from app.contracts.risikomanagement import GateEntscheid
 from app.contracts.sizing import OrderTyp as VerkaufOrderTyp
 from app.contracts.sizing import Verkaufsauftrag
 from app.contracts.strategie_exit_regeln import AnnotierteKaufOrder
+from app.core.order_audit_log import protokolliere as protokolliere_ausfuehrung
 from app.domain.execution.ports import BrokerPort
 
 #: AC1/AC6: mappt die 4 von `app.domain.sizing.exit_sizing` erzeugbaren
@@ -121,6 +160,23 @@ _VERKAUF_ORDER_TYP_MAP: dict[VerkaufOrderTyp, ExecutionOrderTyp] = {
     "limit": "limit",
     "stop_market": "stop",
     "twap": "twap",
+}
+
+#: E1 (S-048): wie die bei einem Teilfill verbleibende Restmenge je
+#: `ExecutionOrderTyp` behandelt wird (Spec-Wortlaut "weiter offen /
+#: storniert je Order-Typ"). Market/Stop sind "sofort oder gar nicht"-
+#: Order-Typen (ein Stop löst bei Auslösung einen Market aus, AC6-
+#: Docstring-Vertrag) — eine nicht gedeckte Restmenge wird storniert statt
+#: im Buch zu verbleiben. Limit/Stop-Limit/Trailing/TWAP sind "resting"-
+#: Order-Typen (sie warten definitionsgemäss auf einen Preis bzw. laufen
+#: über einen Zeitraum) — ihre Restmenge bleibt weiter offen.
+_RESTMENGE_VERHALTEN_JE_ORDER_TYP: dict[ExecutionOrderTyp, RestmengeVerhalten] = {
+    "market": "storniert",
+    "limit": "weiter_offen",
+    "stop": "storniert",
+    "stop_limit": "weiter_offen",
+    "trailing": "weiter_offen",
+    "twap": "weiter_offen",
 }
 
 
@@ -294,11 +350,135 @@ def fuehre_order_aus(
     return port.platziere_order(anfrage)
 
 
+def berechne_arrival_price_slippage(fill_preis: Decimal, arrival_price: Decimal) -> Decimal:
+    """AC7: realisierte Arrival-Price-Slippage je Trade = Fill-Preis −
+    Arrival-Price (identische Formel zu BR-114 `trade_fill.slippage_abs`
+    und zur Depot-eigenen `app.domain.portfolio.transaction_historie
+    .berechne_slippage`, hier auf die Order-Ausführungs-eigene TCA
+    angewandt, C-016). Positiv heisst: der Fill war teurer/schlechter als
+    der Signal-Kurs (Kauf-Kontext); negativ heisst günstiger."""
+    return fill_preis - arrival_price
+
+
+def bestimme_restmenge_verhalten(order_typ: ExecutionOrderTyp) -> RestmengeVerhalten:
+    """E1: liefert, ob eine bei einem Teilfill verbleibende Restmenge für
+    `order_typ` weiter offen bleibt oder storniert wird (Spec-Wortlaut
+    "weiter offen / storniert je Order-Typ"), siehe
+    `_RESTMENGE_VERHALTEN_JE_ORDER_TYP`."""
+    return _RESTMENGE_VERHALTEN_JE_ORDER_TYP[order_typ]
+
+
+def verarbeite_fill(
+    anfrage: OrderAnfrage,
+    bestaetigung: OrderBestaetigung,
+    meldung: BrokerFillMeldung,
+    *,
+    arrival_price: Decimal,
+) -> Ausfuehrungsergebnis:
+    """AC7/AC8 (S-048): verarbeitet eine rohe `BrokerFillMeldung` zum
+    vollständigen `Ausfuehrungsergebnis`-Vertrag (Verträge/Output, deckt
+    E1-E3) — siehe Moduldocstring für die vollständige Herleitung je
+    Status.
+
+    Kernanforderung (NFR "Fehlerbehandlung ... ist Kernanforderung"): bei
+    `status ∈ {"rejected", "timeout"}` liefert diese Funktion strukturell
+    KEINEN Fill-Preis (`None`) und `ausgefuehrte_menge=0` — unabhängig
+    davon, was `meldung` an rohen Werten trägt (ein fehlerhafter Adapter
+    könnte theoretisch `fill_preis` bei einem Reject mitliefern; diese
+    Funktion ignoriert ihn in diesem Fall bewusst, BR-139).
+
+    AC8 "protokolliert": ein `status ∈ {"partial", "rejected", "timeout"}`
+    wird über `app.core.order_audit_log.protokolliere` festgehalten (ein
+    `"filled"`-Ergebnis nicht, kein Fehlerfall)."""
+    angefragte_menge = anfrage.groesse
+
+    if meldung.status in ("rejected", "timeout"):
+        ergebnis = Ausfuehrungsergebnis(
+            order_id=bestaetigung.order_id,
+            titel_id=anfrage.titel_id,
+            richtung=anfrage.richtung,
+            status=meldung.status,
+            angefragte_menge=angefragte_menge,
+            ausgefuehrte_menge=Decimal("0"),
+            fill_preis=None,
+            tatsaechliche_kosten=Decimal("0"),
+            arrival_price=arrival_price,
+            slippage=None,
+            restmenge=angefragte_menge,
+            restmenge_verhalten=None,
+            ablehnungsgrund=meldung.ablehnungsgrund,
+        )
+        protokolliere_ausfuehrung(ergebnis)
+        return ergebnis
+
+    # status ∈ {"filled", "partial"}: ein bestätigter Fill liegt vor.
+    if meldung.fill_preis is None:
+        raise ValueError(
+            f"BrokerFillMeldung mit status={meldung.status!r} ohne fill_preis "
+            "ist inkonsistent (ein bestätigter Fill braucht einen Fill-Preis)."
+        )
+
+    restmenge = angefragte_menge - meldung.ausgefuehrte_menge
+    restmenge_verhalten = bestimme_restmenge_verhalten(anfrage.order_typ) if restmenge > 0 else None
+
+    ergebnis = Ausfuehrungsergebnis(
+        order_id=bestaetigung.order_id,
+        titel_id=anfrage.titel_id,
+        richtung=anfrage.richtung,
+        status=meldung.status,
+        angefragte_menge=angefragte_menge,
+        ausgefuehrte_menge=meldung.ausgefuehrte_menge,
+        fill_preis=meldung.fill_preis,
+        tatsaechliche_kosten=meldung.tatsaechliche_kosten,
+        arrival_price=arrival_price,
+        slippage=berechne_arrival_price_slippage(meldung.fill_preis, arrival_price),
+        restmenge=restmenge,
+        restmenge_verhalten=restmenge_verhalten,
+        ablehnungsgrund=None,
+    )
+    protokolliere_ausfuehrung(ergebnis)
+    return ergebnis
+
+
+def fuehre_order_aus_und_verarbeite_fill(
+    anfrage: OrderAnfrage,
+    *,
+    ibkr_paper_port: BrokerPort,
+    krypto_sim_port: BrokerPort,
+    arrival_price: Decimal,
+    konfiguration: BrokerRoutingKonfiguration | None = None,
+    modus_konfiguration: ModusKonfiguration | None = None,
+) -> Ausfuehrungsergebnis:
+    """AC7/AC8 (S-048): kombiniert `fuehre_order_aus` (Order-Annahme, AC1/
+    AC4/AC5/AC6) + `BrokerPort.ermittle_fill` (rohe Fill-Meldung) +
+    `verarbeite_fill` (AC7/AC8-Verarbeitung) zu EINEM Aufruf — passend zur
+    synchronen MVP-Paper-Ausführung (kein separater Warte-/Poll-Schritt
+    nötig, siehe Moduldocstring). Wählt denselben Broker-Endpunkt-Typ
+    (AC5) wie `fuehre_order_aus` für den nachfolgenden `ermittle_fill`-
+    Aufruf — beide Aufrufe MÜSSEN denselben Port ansprechen (derselbe
+    Broker-Endpunkt, der die Order angenommen hat)."""
+    bestaetigung = fuehre_order_aus(
+        anfrage,
+        ibkr_paper_port=ibkr_paper_port,
+        krypto_sim_port=krypto_sim_port,
+        konfiguration=konfiguration,
+        modus_konfiguration=modus_konfiguration,
+    )
+    endpunkt_typ = bestimme_broker_endpunkt_typ(anfrage.asset_class_id, konfiguration=konfiguration)
+    port = krypto_sim_port if endpunkt_typ == "krypto_sim_brokerless" else ibkr_paper_port
+    meldung = port.ermittle_fill(anfrage, bestaetigung, arrival_price=arrival_price)
+    return verarbeite_fill(anfrage, bestaetigung, meldung, arrival_price=arrival_price)
+
+
 __all__ = [
     "LiveModusGesperrtError",
+    "berechne_arrival_price_slippage",
     "bestimme_broker_endpunkt_typ",
+    "bestimme_restmenge_verhalten",
     "bestimme_wirksamen_modus",
     "erstelle_order_anfrage_fuer_kauf",
     "erstelle_order_anfrage_fuer_verkauf",
     "fuehre_order_aus",
+    "fuehre_order_aus_und_verarbeite_fill",
+    "verarbeite_fill",
 ]

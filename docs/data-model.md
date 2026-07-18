@@ -515,6 +515,18 @@ für diese Kategorie `stop_typ == "technisch"` liefert.
 | — | — | **append-only nach Position-Open** — kein UPDATE/DELETE (Disciplined-Exit, → BR-111; unter Postgres per `BEFORE UPDATE OR DELETE`-Trigger durchgesetzt, Migration `d19a6f5c7b3e`, S-040) |
 
 ### `order` — Order (C-016)
+
+> **S-048-Präzisierung (AC6/AC7/AC8):** `order_typ` war ursprünglich auf den
+> schmaleren, verkaufsseitigen `sizing.OrderTyp`-Wertebereich (`{market,
+> limit, stop_market, twap}`) zugeschnitten — die `order`-Tabelle
+> protokolliert aber JEDE `OrderAnfrage` (Kauf **und** Verkauf) des
+> gemeinsamen Order-Code-Pfads (AC4, S-046), deren `order_typ` bereits auf
+> den vollen AC6-Wertebereich (`ExecutionOrderTyp`) normalisiert ist. Der
+> CHECK unten ist entsprechend präzisiert (kein struktureller Bruch, reine
+> Wertemengen-Korrektur: `stop_market` existiert in `ExecutionOrderTyp`
+> nicht — Verkaufsaufträge mappen `stop_market → stop`, siehe
+> `app.domain.execution.order_ausfuehrung._VERKAUF_ORDER_TYP_MAP`).
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
@@ -522,7 +534,7 @@ für diese Kategorie `stop_typ == "technisch"` liefert.
 | instrument_id | UUID | FK → instrument.id, NOT NULL |
 | platform_id | UUID | FK → trading_platform.id |
 | richtung | TEXT | CHECK ∈ {buy, sell} |
-| order_typ | TEXT | CHECK ∈ {market, limit, stop, stop_market, twap} |
+| order_typ | TEXT | CHECK ∈ {market, limit, stop, stop_limit, trailing, twap} (S-048-präzisiert, s.o. — deckungsgleich mit `ExecutionOrderTyp`, AC6) |
 | menge | NUMERIC(20,8) | NOT NULL, CHECK > 0 |
 | limit_preis | NUMERIC(20,8) | (bei limit/stop) |
 | arrival_price | NUMERIC(20,8) | NOT NULL (Kurs bei Signal — Slippage-Basis, C-016 TCA) |
@@ -825,6 +837,7 @@ bislang nicht führte).
 | BR-136 | rule_hypothesis | Mindest-Evidenz-Protokoll (`anzahl_faelle > 0`, `zeitraum_bis >= zeitraum_von`, `signalquelle`, `asset_class_id` alle Pflicht) UND marktlogische Begründung (`marktlogik` Pflicht) — ohne beides wird keine Hypothese ans Gate übergeben (`docs/specs/lernschleife.md` AC1/AC2, S-058) | DB-NOT NULL/CHECK + App (`app.domain.research.hypothesen_erzeugung.erzeuge_hypothesen`) |
 | BR-137 | position.strategy_id / position.time_horizon_id / position.these | Beim Kauf fixiert; nach Position-Open unveränderlich (kein UPDATE dieser drei Spalten — alle übrigen `position`-Spalten bleiben regulär fortschreibbar) — Disciplined-Exit, ergänzt BR-111 um den Positions-Teil des Attribut-Bündels (`docs/specs/strategie-exit-regeln.md` AC5, S-040) | DB-Trigger (`BEFORE UPDATE`, Spalten-Vergleich) |
 | BR-138 | instrument.korrelations_cluster | Konzentration je Korrelations-Cluster wird unabhängig vom (nominellen) Sektorlimit geprüft — ein Titel eines bereits stark vertretenen Clusters kann gedeckelt/blockiert werden, auch wenn `gics_sector` noch Spielraum hätte (`docs/specs/risikomanagement.md` AC9, S-045) | App (`app.domain.risikomanagement.gate.pruefe_kauf_gate`) |
+| BR-139 | order.status / trade_fill | Bei Reject/Timeout wird KEIN Bestand (Position) verändert — nur ein bestätigter Fill (`filled`/`teilfill`) darf einen `trade_fill`-Eintrag und eine nachgelagerte Positions-Fortschreibung auslösen; `rejected`/`timeout` erzeugen ausschliesslich den `order`-Statuseintrag + Protokollierung (`docs/specs/ausfuehrung-paper.md` AC8, S-048) | App (`app.domain.execution.order_ausfuehrung.verarbeite_fill`) |
 
 ---
 
