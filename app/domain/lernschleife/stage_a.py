@@ -65,9 +65,7 @@ from app.contracts.lernschleife import (
     TradeErgebnis,
     WalkForwardSplitErgebnis,
 )
-
-#: Euler-Mascheroni-Konstante γ (DSR-Formel, AC7).
-_EULER_MASCHERONI = 0.5772156649015329
+from app.domain.lernschleife._statistik import EULER_MASCHERONI, berechne_stichprobenkennzahlen
 
 #: Default-Anzahl Walk-Forward-Splits (AC5). Bewusst NICHT Teil der
 #: AC12-Schwellenliste (die nennt nur Mindest-Stichprobe,
@@ -195,22 +193,6 @@ def berechne_walk_forward_effizienz(
     return oos_durchschnitt / is_durchschnitt
 
 
-def _skewness(werte: Sequence[float], mittelwert: float, populations_std: float) -> float:
-    n = len(werte)
-    if populations_std == 0:
-        return 0.0
-    m3 = sum((x - mittelwert) ** 3 for x in werte) / n
-    return m3 / populations_std**3
-
-
-def _kurtosis(werte: Sequence[float], mittelwert: float, populations_std: float) -> float:
-    n = len(werte)
-    if populations_std == 0:
-        return 3.0  # Normalverteilungs-Kurtosis (keine Wölbungs-Korrektur)
-    m4 = sum((x - mittelwert) ** 4 for x in werte) / n
-    return m4 / populations_std**4
-
-
 def berechne_deflated_sharpe_ratio(renditen: Sequence[Decimal], *, n_trials: int) -> Decimal:
     """AC7 — Deflated Sharpe Ratio (Bailey & López de Prado, 2014, "The
     Deflated Sharpe Ratio: Correcting for Selection Bias, Backtest
@@ -235,24 +217,8 @@ def berechne_deflated_sharpe_ratio(renditen: Sequence[Decimal], *, n_trials: int
     if n_trials < 1:
         raise ValueError("n_trials muss >= 1 sein (Trial-Registry zählt jede Variante, AC3)")
 
-    werte = [float(r) for r in renditen]
-    t = len(werte)
-    if t < 2:
-        raise ValueError("DSR benötigt mindestens 2 Renditen")
-
-    mittelwert = statistics.fmean(werte)
-    stichproben_std = statistics.stdev(werte)  # ddof=1, Sharpe-Ratio-Konvention
-    if stichproben_std == 0:
-        raise ValueError("DSR ist bei Rendite-Standardabweichung 0 nicht definiert")
-    sr_hat = mittelwert / stichproben_std
-
-    populations_std = statistics.pstdev(werte)  # ddof=0, für Schiefe/Kurtosis
-    skew = _skewness(werte, mittelwert, populations_std)
-    kurt = _kurtosis(werte, mittelwert, populations_std)
-
-    nenner_term = 1 - skew * sr_hat + ((kurt - 1) / 4) * sr_hat**2
-    if nenner_term <= 0:
-        raise ValueError("DSR-Varianzterm nicht positiv (extreme Schiefe/Wölbung)")
+    kennzahlen = berechne_stichprobenkennzahlen(renditen)
+    t, sr_hat, nenner_term = kennzahlen.t, kennzahlen.sr_hat, kennzahlen.nenner_term
 
     normal = statistics.NormalDist()
     if n_trials <= 1:
@@ -260,8 +226,8 @@ def berechne_deflated_sharpe_ratio(renditen: Sequence[Decimal], *, n_trials: int
     else:
         varianz_sr_hat = nenner_term / (t - 1)
         sr0 = math.sqrt(varianz_sr_hat) * (
-            (1 - _EULER_MASCHERONI) * normal.inv_cdf(1 - 1 / n_trials)
-            + _EULER_MASCHERONI * normal.inv_cdf(1 - 1 / (n_trials * math.e))
+            (1 - EULER_MASCHERONI) * normal.inv_cdf(1 - 1 / n_trials)
+            + EULER_MASCHERONI * normal.inv_cdf(1 - 1 / (n_trials * math.e))
         )
 
     dsr = normal.cdf((sr_hat - sr0) * math.sqrt(t - 1) / math.sqrt(nenner_term))
