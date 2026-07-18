@@ -1,7 +1,14 @@
-"""Tests für das Risikomanagement-Gate (Storys S-044, S-045).
+"""Tests für das Risikomanagement-Gate (Storys S-044, S-045, S-056).
 
-Covers (risikomanagement): AC2, AC6, AC8, AC9, AC10, AC12
+Covers (risikomanagement): AC2, AC6, AC7, AC8, AC9, AC10, AC12
 
+- AC7: ein wegen ausgeschöpften Limits (A2) blockierter Kauf wird nur dann
+  als `warteliste=True` markiert, wenn der Aufrufer das explizit per
+  `warteliste_bei_blockade=True` anfordert ("kann optional"); Default
+  bleibt `False`. Die AC12/E1-Blockaden (kein Depot-Stand/keine
+  Depotstrategie) und der Ordergrösse-`<=0`-Edge-Case setzen `warteliste`
+  NIE, selbst wenn der Aufrufer `warteliste_bei_blockade=True` übergibt
+  (Präzisierung S-056, siehe Spec).
 - AC12: kein `DepotStand` (E1) bzw. keine aktive Depotstrategie (analog
   E1, S-043) -> immer `"blockieren"`, nie ein Durchwink-Entscheid.
 - AC6: genau einer von drei Entscheiden (`"durchwinken"` / `"deckeln"` /
@@ -37,7 +44,11 @@ from decimal import Decimal
 
 from app.contracts.risikomanagement import DepotstrategieKonfiguration, GateEntscheid
 from app.contracts.strategie_exit_regeln import AnnotierteKaufOrder, ExitDefaultVorschlag
-from app.domain.portfolio.portfolio_aggregate import CASH_ASSET_CLASS_ID, ermittle_depot_stand
+from app.domain.portfolio.portfolio_aggregate import (
+    CASH_ASSET_CLASS_ID,
+    DepotStand,
+    ermittle_depot_stand,
+)
 from app.domain.portfolio.ports import ExitRegelnBestand, PositionsBestand
 from app.domain.risikomanagement.gate import pruefe_kauf_gate
 
@@ -440,6 +451,117 @@ def test_ac2_unbekannte_branche_faellt_in_gemeinsamen_bucket() -> None:
     )
 
     assert entscheid.entscheid == "blockieren"
+
+
+# --- AC7: Warteliste beim Blockieren (S-056) --------------------------------
+
+
+def _blockierendes_depot() -> tuple[DepotstrategieKonfiguration, DepotStand]:
+    """Depot-Stand + Depotstrategie, bei denen das Sektor-Limit bereits
+    ausgeschöpft ist (identischer Aufbau wie
+    `test_ac6_blockieren_wenn_sektor_limit_bereits_ausgeschoepft`)."""
+    positionen = [
+        _position(
+            position_id="lot-1",
+            titel_id="AAPL",
+            gics_branche="Technology",
+            menge=Decimal("10"),
+            einstand_preis=Decimal("100"),
+        ),  # 1000
+        _position(
+            position_id="lot-2",
+            titel_id="JNJ",
+            gics_branche="Health Care",
+            menge=Decimal("40"),
+            einstand_preis=Decimal("100"),
+        ),  # 4000
+    ]
+    depot_stand = ermittle_depot_stand(positionen)  # Gesamtwert 5000, Tech 1000 (20% == Limit)
+    return _depotstrategie(max_sektor_pct=Decimal("20")), depot_stand
+
+
+def test_ac7_warteliste_wird_bei_a2_blockade_gesetzt_wenn_angefordert() -> None:
+    """@trace risikomanagement#AC7 — der Aufrufer fordert
+    `warteliste_bei_blockade=True` an; das Limit ist ausgeschöpft (A2) ->
+    `GateEntscheid.warteliste` wird `True`."""
+    depotstrategie, depot_stand = _blockierendes_depot()
+
+    entscheid = pruefe_kauf_gate(
+        _kauf_order(titel_id="MSFT", ordergroesse=Decimal("50")),
+        gics_branche="Technology",
+        asset_class_id=1,
+        depotstrategie=depotstrategie,
+        depot_stand=depot_stand,
+        warteliste_bei_blockade=True,
+    )
+
+    assert entscheid.entscheid == "blockieren"
+    assert entscheid.warteliste is True
+
+
+def test_ac7_warteliste_bleibt_false_ohne_ausdruecklichen_wunsch() -> None:
+    """@trace risikomanagement#AC7 — "kann optional gesetzt werden": ohne
+    `warteliste_bei_blockade=True` bleibt `warteliste` auch bei einer
+    A2-Blockade `False` (Default-Verhalten unverändert zu S-044/S-045)."""
+    depotstrategie, depot_stand = _blockierendes_depot()
+
+    entscheid = pruefe_kauf_gate(
+        _kauf_order(titel_id="MSFT", ordergroesse=Decimal("50")),
+        gics_branche="Technology",
+        asset_class_id=1,
+        depotstrategie=depotstrategie,
+        depot_stand=depot_stand,
+    )
+
+    assert entscheid.entscheid == "blockieren"
+    assert entscheid.warteliste is False
+
+
+def test_ac7_warteliste_nicht_bei_ac12_blockade_trotz_wunsch() -> None:
+    """@trace risikomanagement#AC7,AC12 — `warteliste_bei_blockade=True`
+    wirkt NICHT auf die AC12/E1-Blockaden (kein Depot-Stand/keine
+    Depotstrategie): keine Konzentrationsprüfung fand statt, es gibt
+    fachlich keinen wartefähigen Kandidaten (Präzisierung S-056)."""
+    kein_depot_stand = pruefe_kauf_gate(
+        _kauf_order(ordergroesse=Decimal("100")),
+        gics_branche="Technology",
+        asset_class_id=1,
+        depotstrategie=_depotstrategie(),
+        depot_stand=None,
+        warteliste_bei_blockade=True,
+    )
+    keine_depotstrategie = pruefe_kauf_gate(
+        _kauf_order(ordergroesse=Decimal("100")),
+        gics_branche="Technology",
+        asset_class_id=1,
+        depotstrategie=None,
+        depot_stand=ermittle_depot_stand([]),
+        warteliste_bei_blockade=True,
+    )
+
+    assert kein_depot_stand.entscheid == "blockieren"
+    assert kein_depot_stand.warteliste is False
+    assert keine_depotstrategie.entscheid == "blockieren"
+    assert keine_depotstrategie.warteliste is False
+
+
+def test_ac7_warteliste_nicht_bei_ordergroesse_edge_case_trotz_wunsch() -> None:
+    """@trace risikomanagement#AC7 — `warteliste_bei_blockade=True` wirkt
+    NICHT auf den Ordergrösse-`<=0`-Edge-Case (keine gültige Order, die
+    warten könnte, Präzisierung S-056)."""
+    depot_stand = ermittle_depot_stand([])
+
+    entscheid = pruefe_kauf_gate(
+        _kauf_order(ordergroesse=Decimal("0")),
+        gics_branche="Technology",
+        asset_class_id=1,
+        depotstrategie=_depotstrategie(),
+        depot_stand=depot_stand,
+        warteliste_bei_blockade=True,
+    )
+
+    assert entscheid.entscheid == "blockieren"
+    assert entscheid.warteliste is False
 
 
 # --- AC8: Klumpenrisiko — Anlageklasse (S-045) ------------------------------

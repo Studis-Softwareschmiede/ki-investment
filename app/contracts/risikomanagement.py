@@ -1,6 +1,6 @@
 """Modul-Verträge Depotstrategie-Konfiguration + Gate-Entscheid (Storys
-S-043 AC1/AC3/AC4/AC11, S-044 AC2/AC5/AC6/AC12 und S-045 AC8/AC9/AC10, Spec
-`docs/specs/risikomanagement.md`).
+S-043 AC1/AC3/AC4/AC11, S-044 AC2/AC5/AC6/AC12, S-045 AC8/AC9/AC10 und
+S-056 AC7, Spec `docs/specs/risikomanagement.md`).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO. Dieses Modul bildet zwei Verträge-Abschnitte
@@ -58,7 +58,7 @@ GateEntscheidTyp = Literal["durchwinken", "deckeln", "blockieren"]
 
 
 class GateEntscheid(BaseModel):
-    """AC6/AC12-Vertrag (S-044): der Drei-Wege-Entscheid des
+    """AC6/AC7/AC12-Vertrag (S-044, S-056): der Drei-Wege-Entscheid des
     Risikomanagement-Gates je geplantem Kauf (§Verträge "Output").
 
     `freigegebene_groesse` ist bei `entscheid="durchwinken"` die volle
@@ -67,10 +67,13 @@ class GateEntscheid(BaseModel):
     Kappung, keine Neuberechnung) und bei `"blockieren"` `Decimal("0")`.
 
     `warteliste` bildet den optionalen AC7-Vertragsteil
-    (`{ ..., warteliste?: bool }`) strukturell ab — AC7 selbst
-    ("Warteliste bei Blockade") ist NICHT Teil dieser Story: kein
-    Konstruktionspfad in `app.domain.risikomanagement.gate` setzt dieses
-    Feld auf `True`, es bleibt hier immer `False`."""
+    (`{ ..., warteliste?: bool }`) ab: `app.domain.risikomanagement.gate
+    .pruefe_kauf_gate` setzt es auf `True`, wenn der Aufrufer per
+    `warteliste_bei_blockade=True` den optionalen A2-Wunsch äussert UND der
+    Kauf wegen ausgeschöpften Limits blockiert wird (AC7, S-056) — sonst
+    (inkl. AC12/E1-Blockaden und dem Ordergrösse-`<=0`-Edge-Case) bleibt es
+    `False`. Die eigentliche Warteliste-Mechanik (Persistenz, Re-Prüfung)
+    ist laut Spec "Offene Punkte" weiterhin offen (Folge-Story)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
