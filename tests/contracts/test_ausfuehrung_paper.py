@@ -7,12 +7,21 @@ Covers (ausfuehrung-paper): AC1, AC2, AC5, AC6
 Reine DTO-Validierungstests (pydantic `frozen`/`extra="forbid"`/
 Feld-Constraints) — das Verhalten der erzeugenden/konsumierenden Funktionen
 liegt in `tests/domain/execution/test_order_ausfuehrung.py` (dort auch die
-AC2/AC3-Auflösungslogik von `bestimme_wirksamen_modus`, S-047).
-"""
+AC2/AC3-Auflösungslogik von `bestimme_wirksamen_modus`, S-047, inkl. der
+Allowlist-/Fail-closed-Sperre und der aktiven Verdrahtung in
+`fuehre_order_aus`).
+
+- AC2 (Review-Fix, Sicherheit): `ModusKonfiguration.modus_je_anlageklasse`
+  ist trotz `frozen=True` NICHT nur top-level unveränderlich — das
+  `dict`-Feld selbst wird per `field_validator` in ein echtes
+  `types.MappingProxyType` gewandelt, eine nachträgliche Mutation des
+  Mappings wird dadurch verhindert (siehe
+  `test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich`)."""
 
 from __future__ import annotations
 
 from decimal import Decimal
+from types import MappingProxyType
 
 import pytest
 from pydantic import ValidationError
@@ -137,3 +146,24 @@ def test_ac2_modus_konfiguration_lehnt_unbekannten_modus_wert_ab() -> None:
 
     with pytest.raises(ValidationError):
         ModusKonfiguration(modus_je_anlageklasse={1: "papier"})  # type: ignore[dict-item]
+
+
+def test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich() -> None:
+    """@trace ausfuehrung-paper#AC2 — Review-Fix (Sicherheit):
+    `frozen=True` friert nur die Top-Level-Attribute des Modells ein; ohne
+    weitere Massnahme bliebe das `dict`-Feld `modus_je_anlageklasse`
+    inhaltlich mutabel (`konfiguration.modus_je_anlageklasse[1] = "echt"`
+    würde durchgehen). Der `field_validator` wandelt das Feld in ein
+    echtes `types.MappingProxyType` — eine Item-Zuweisung MUSS mit
+    `TypeError` scheitern, sowohl bei explizit übergebenem Mapping als
+    auch beim Default (`validate_default=True`, sonst würde nur der
+    explizite Konstruktions-Pfad geschützt)."""
+    konfiguration = ModusKonfiguration(modus_je_anlageklasse={1: "echt", 7: "simuliert"})
+    assert isinstance(konfiguration.modus_je_anlageklasse, MappingProxyType)
+    with pytest.raises(TypeError):
+        konfiguration.modus_je_anlageklasse[1] = "simuliert"  # type: ignore[index]
+
+    default_konfiguration = ModusKonfiguration()
+    assert isinstance(default_konfiguration.modus_je_anlageklasse, MappingProxyType)
+    with pytest.raises(TypeError):
+        default_konfiguration.modus_je_anlageklasse[1] = "echt"  # type: ignore[index]

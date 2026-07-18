@@ -39,6 +39,17 @@ Covers (ausfuehrung-paper): AC1, AC2, AC3, AC4, AC5, AC6
   `bestimme_wirksamen_modus` noch `fuehre_order_aus` kennen einen
   Bestätigungs-/Freigabe-Parameter (voll autonom, keine
   Bestätigungsabfrage vor der Order).
+- AC3 (Review-Fix, Sicherheit — Allowlist statt Denylist): die Sperre ist
+  fail-closed — NICHT nur `"echt"` wird geblockt, sondern JEDER Wert
+  ausser `"simuliert"`, auch ein Fremdwert ausserhalb des
+  `Modus`-Literal-Wertebereichs (nur via Konstruktions-Umgehung
+  erzeugbar, da der Kontrakt selbst per `Literal["echt", "simuliert"]`
+  einschränkt).
+- AC3 (Review-Fix, Sicherheit — aktive Verdrahtung): `fuehre_order_aus`
+  ruft `bestimme_wirksamen_modus` VOR jeder `BrokerPort`-Übermittlung auf
+  und wirft `LiveModusGesperrtError`, BEVOR der Port erreicht wird — die
+  Sperre griff vorher nur zufällig (kein `"echt"`-Adapter existiert),
+  jetzt durch eine aktive Prüfung im gemeinsamen Order-Pfad.
 """
 
 from __future__ import annotations
@@ -47,6 +58,7 @@ import inspect
 import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import MappingProxyType
 
 import pytest
 
@@ -433,3 +445,105 @@ def test_ac3_kein_bestaetigungs_parameter_in_modus_und_order_ausfuehrung() -> No
 
     parameter_namen = set(inspect.signature(fuehre_order_aus).parameters)
     assert not parameter_namen & {"bestaetigung", "bestaetigt", "confirm", "freigabe"}
+
+
+# ---------------------------------------------------------------------------
+# AC3 (Review-Fix) — Allowlist (fail-closed) statt Denylist (fail-open)
+# ---------------------------------------------------------------------------
+
+
+def test_ac3_allowlist_blockiert_auch_einen_fremdwert_ausserhalb_von_echt_simuliert() -> None:
+    """@trace ausfuehrung-paper#AC3 — Review-Fix (Sicherheit): die Sperre
+    ist eine ALLOWLIST (nur `"simuliert"` durchgelassen), keine Denylist
+    (nur `"echt"` geblockt). Ein Fremdwert, der weder `"echt"` noch
+    `"simuliert"` ist, wird ebenfalls hart geblockt — nicht unbemerkt
+    durchgelassen. `Modus` ist ein `Literal["echt", "simuliert"]`; ein
+    Fremdwert lässt sich nur über `model_construct` (Umgehung der
+    pydantic-Validierung) konstruieren, simuliert hier eine fehlerhafte/
+    kompromittierte Konfigurationsquelle."""
+    konfiguration = ModusKonfiguration.model_construct(
+        global_modus="paper_pro",  # type: ignore[arg-type]
+        modus_je_anlageklasse=MappingProxyType({}),
+    )
+
+    with pytest.raises(LiveModusGesperrtError):
+        bestimme_wirksamen_modus(1, konfiguration=konfiguration)
+
+
+def test_ac3_allowlist_blockiert_fremdwert_als_anlageklassen_override() -> None:
+    """@trace ausfuehrung-paper#AC3 — dieselbe Allowlist-Sperre greift
+    auch, wenn der Fremdwert über `modus_je_anlageklasse` (statt
+    `global_modus`) hereinkommt."""
+    konfiguration = ModusKonfiguration.model_construct(
+        global_modus="simuliert",
+        modus_je_anlageklasse=MappingProxyType({1: "paper_pro"}),  # type: ignore[dict-item]
+    )
+
+    with pytest.raises(LiveModusGesperrtError):
+        bestimme_wirksamen_modus(1, konfiguration=konfiguration)
+
+
+# ---------------------------------------------------------------------------
+# AC3 (Review-Fix) — aktive Verdrahtung in `fuehre_order_aus`
+# ---------------------------------------------------------------------------
+
+
+def test_ac3_fuehre_order_aus_blockiert_echt_modus_vor_dem_broker_aufruf() -> None:
+    """@trace ausfuehrung-paper#AC3 — `fuehre_order_aus` löst den Modus
+    für `anfrage.asset_class_id` auf und wirft `LiveModusGesperrtError`,
+    BEVOR ein `BrokerPort` erreicht wird — kein Broker-Aufruf erfolgt bei
+    gesperrtem Modus (Review-Fix: vorher hatte `bestimme_wirksamen_modus`
+    keinen Aufrufer im Order-Pfad)."""
+    ibkr_port = _FakeBrokerPort(broker_endpunkt_typ="ibkr_paper")
+    krypto_port = _FakeBrokerPort(broker_endpunkt_typ="krypto_sim_brokerless")
+    (anfrage,) = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
+    modus_konfiguration = ModusKonfiguration(global_modus="echt")
+
+    with pytest.raises(LiveModusGesperrtError):
+        fuehre_order_aus(
+            anfrage,
+            ibkr_paper_port=ibkr_port,
+            krypto_sim_port=krypto_port,
+            modus_konfiguration=modus_konfiguration,
+        )
+
+    assert ibkr_port.empfangene_anfragen == []
+    assert krypto_port.empfangene_anfragen == []
+
+
+def test_ac3_fuehre_order_aus_blockiert_anlageklassen_spezifisches_echt() -> None:
+    """@trace ausfuehrung-paper#AC3 — die Sperre greift auch, wenn nur die
+    konkrete `anfrage.asset_class_id` per Override auf `"echt"` gesetzt
+    ist (Global bleibt `"simuliert"`)."""
+    ibkr_port = _FakeBrokerPort(broker_endpunkt_typ="ibkr_paper")
+    krypto_port = _FakeBrokerPort(broker_endpunkt_typ="krypto_sim_brokerless")
+    (anfrage,) = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
+    modus_konfiguration = ModusKonfiguration(
+        global_modus="simuliert", modus_je_anlageklasse={1: "echt"}
+    )
+
+    with pytest.raises(LiveModusGesperrtError):
+        fuehre_order_aus(
+            anfrage,
+            ibkr_paper_port=ibkr_port,
+            krypto_sim_port=krypto_port,
+            modus_konfiguration=modus_konfiguration,
+        )
+
+    assert ibkr_port.empfangene_anfragen == []
+
+
+def test_ac3_fuehre_order_aus_laesst_simulierten_modus_ohne_konfiguration_durch() -> None:
+    """@trace ausfuehrung-paper#AC3 — ohne `modus_konfiguration` (Default
+    `None` -> `ModusKonfiguration()`, `global_modus="simuliert"`) läuft
+    `fuehre_order_aus` unverändert durch (kein Regressions-Bruch der
+    bestehenden AC1/AC4/AC5-Tests, die `modus_konfiguration` nicht
+    setzen)."""
+    ibkr_port = _FakeBrokerPort(broker_endpunkt_typ="ibkr_paper")
+    krypto_port = _FakeBrokerPort(broker_endpunkt_typ="krypto_sim_brokerless")
+    (anfrage,) = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
+
+    bestaetigung = fuehre_order_aus(anfrage, ibkr_paper_port=ibkr_port, krypto_sim_port=krypto_port)
+
+    assert bestaetigung.richtung == "verkauf"
+    assert anfrage in ibkr_port.empfangene_anfragen

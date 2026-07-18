@@ -69,20 +69,27 @@ noch nicht gebaut) beisteuert.
   bestehenden Auflösungsmuster von `bestimme_broker_endpunkt_typ` (AC5,
   global-Default + Anlageklassen-Override statt hartkodierter
   Code-Grenze, P6).
-- **AC3/BR-019** — ist der aufgelöste Modus `"echt"`, wirft die Funktion
-  `LiveModusGesperrtError` statt still auf `"simuliert"` herunterzustufen:
-  "Im MVP ist ausschliesslich der simulierte (Paper-)Modus aktiv" (AC3)
-  bzw. "Live ist gesperrt" (BR-019) ist eine harte MVP-Grenze (Nicht-Ziel
-  "Kein Live-/Echtgeld-Handel im MVP") — eine fälschlich auf `"echt"`
-  konfigurierte Ebene soll laut blockiert werden, nicht unbemerkt auf
-  Paper umgeleitet. Da im MVP dadurch ausschliesslich `"simuliert"`
-  zurückkommt (oder geworfen wird) und `fuehre_order_aus` ohnehin nur
-  Paper-`BrokerPort`-Implementierungen injiziert bekommt (S-046, kein
-  `"echt"`-Adapter existiert — Nicht-Ziel des MVP), bleibt diese Funktion
-  bewusst STANDALONE und wird (noch) nicht in `fuehre_order_aus`
-  verdrahtet: das "voll autonom, keine Bestätigungsabfrage vor der Order"
-  aus AC3 ist bereits strukturell erfüllt, da weder diese Funktion noch
-  `fuehre_order_aus` einen Bestätigungs-/Freigabe-Parameter kennen."""
+- **AC3/BR-019** — ist der aufgelöste Modus NICHT `"simuliert"` (Allowlist,
+  Review-Fix: fail-closed statt der ursprünglichen `"echt"`-Denylist, die
+  einen unbekannten Fremdwert unbemerkt hätte durchrutschen lassen),
+  wirft die Funktion `LiveModusGesperrtError` statt still auf
+  `"simuliert"` herunterzustufen: "Im MVP ist ausschliesslich der
+  simulierte (Paper-)Modus aktiv" (AC3) bzw. "Live ist gesperrt" (BR-019)
+  ist eine harte MVP-Grenze (Nicht-Ziel "Kein Live-/Echtgeld-Handel im
+  MVP") — eine fälschlich auf `"echt"` konfigurierte Ebene soll laut
+  blockiert werden, nicht unbemerkt auf Paper umgeleitet. Das "voll
+  autonom, keine Bestätigungsabfrage vor der Order" aus AC3 ist
+  strukturell erfüllt, da weder diese Funktion noch `fuehre_order_aus`
+  einen Bestätigungs-/Freigabe-Parameter kennen.
+
+  Review-Fix (Sicherheit): `bestimme_wirksamen_modus` ist NICHT mehr
+  standalone — `fuehre_order_aus` ruft sie VOR jeder Broker-Übermittlung
+  auf (siehe dortiger Docstring). Ursprünglich (S-046/S-047-Erstfassung)
+  hatte die Funktion keinen Aufrufer im Order-Pfad; die MVP-Live-Sperre
+  griff nur zufällig, weil (noch) kein `"echt"`-`BrokerPort`-Adapter
+  existiert (Nicht-Ziel des MVP) — nicht durch eine aktive Prüfung. Ein
+  künftiger Live-Adapter wäre damit ohne weitere Sperre erreichbar
+  gewesen."""
 
 from __future__ import annotations
 
@@ -132,19 +139,27 @@ def bestimme_wirksamen_modus(
     (`konfiguration.modus_je_anlageklasse[asset_class_id]`, falls
     vorhanden, sonst `konfiguration.global_modus`, Spec A1).
 
+    Review-Fix (Sicherheit, fail-closed statt fail-open): die Sperre ist
+    eine ALLOWLIST — ausschliesslich `"simuliert"` wird durchgelassen,
+    JEDER andere aufgelöste Wert (inkl. `"echt"` sowie ein etwaiger,
+    nicht via `Modus`-Literal konstruierbarer Fremdwert) wirft. Eine
+    Denylist (`if ... == "echt": raise`) hätte einen unbekannten Wert
+    unbemerkt durchgelassen — für ein Sicherheits-Gate ist "alles ausser
+    dem explizit erlaubten Wert sperren" die richtige Grundhaltung.
+
     Raises:
-        LiveModusGesperrtError: der aufgelöste Modus ist `"echt"` — im
-            MVP ausschliesslich `"simuliert"` aktiv (AC3, BR-019 "Live
-            ist gesperrt")."""
+        LiveModusGesperrtError: der aufgelöste Modus ist NICHT
+            `"simuliert"` — im MVP ausschliesslich `"simuliert"` aktiv
+            (AC3, BR-019 "Live ist gesperrt")."""
     aktive_konfiguration = konfiguration or ModusKonfiguration()
     aufgeloester_modus = aktive_konfiguration.modus_je_anlageklasse.get(
         asset_class_id, aktive_konfiguration.global_modus
     )
-    if aufgeloester_modus == "echt":
+    if aufgeloester_modus != "simuliert":
         raise LiveModusGesperrtError(
-            f"Modus 'echt' fuer asset_class_id={asset_class_id} ist im MVP hart "
-            "gesperrt (BR-019, Nicht-Ziel: kein Live-/Echtgeld-Handel im MVP) "
-            "- nur 'simuliert' ist aktiv."
+            f"Modus {aufgeloester_modus!r} fuer asset_class_id={asset_class_id} ist im "
+            "MVP hart gesperrt (BR-019, Nicht-Ziel: kein Live-/Echtgeld-Handel im MVP) "
+            "- nur 'simuliert' ist aktiv (Allowlist: fail-closed statt fail-open)."
         )
     return aufgeloester_modus
 
@@ -244,17 +259,36 @@ def fuehre_order_aus(
     ibkr_paper_port: BrokerPort,
     krypto_sim_port: BrokerPort,
     konfiguration: BrokerRoutingKonfiguration | None = None,
+    modus_konfiguration: ModusKonfiguration | None = None,
 ) -> OrderBestaetigung:
     """AC1/AC4/AC5/AC6: der gemeinsame Order-Code-Pfad — identisch für
     Kauf UND Verkauf (AC1), identisch für jeden `ExecutionOrderTyp` (AC6,
     keine Typ-Fallunterscheidung), und identisch für "echt"/"simuliert"
     (AC4: einziger variabler Punkt ist WELCHER `BrokerPort` als
     `ibkr_paper_port`/`krypto_sim_port` injiziert wurde — diese Funktion
-    selbst enthält kein `if modus == ...`).
+    selbst enthält keine Fallunterscheidung nach Order-Quelle Kauf/
+    Verkauf; die AC2/AC3-Modus-Sperre unten gilt UNIFORM für jede
+    `OrderAnfrage`, nicht als Kauf/Verkauf-spezifischer Zweig).
+
+    Review-Fix (Sicherheit, AC2/AC3/BR-019): löst VOR jeder Broker-
+    Übermittlung über `bestimme_wirksamen_modus` den wirksamen Modus der
+    `anfrage.asset_class_id` auf und wirft `LiveModusGesperrtError`, wenn
+    dieser nicht `"simuliert"` ist — kein `BrokerPort`-Aufruf erfolgt in
+    diesem Fall. Vorher (S-046/S-047-Ursprungsfassung) war
+    `bestimme_wirksamen_modus` standalone und hatte KEINEN Aufrufer im
+    Order-Pfad; die MVP-Live-Sperre griff nur zufällig, weil (noch) kein
+    `"echt"`-`BrokerPort`-Adapter existiert — nicht durch eine aktive
+    Prüfung. Ein künftiger Live-Adapter wäre ohne diese Verdrahtung ohne
+    weitere Sperre erreichbar gewesen.
 
     Wählt den Broker-Endpunkt-Typ deterministisch über
     `bestimme_broker_endpunkt_typ` (AC5) und delegiert die eigentliche
-    Order-Übermittlung an den entsprechenden `BrokerPort`."""
+    Order-Übermittlung an den entsprechenden `BrokerPort`.
+
+    Raises:
+        LiveModusGesperrtError: der für `anfrage.asset_class_id`
+            aufgelöste Modus ist nicht `"simuliert"` (AC3, BR-019)."""
+    bestimme_wirksamen_modus(anfrage.asset_class_id, konfiguration=modus_konfiguration)
     endpunkt_typ = bestimme_broker_endpunkt_typ(anfrage.asset_class_id, konfiguration=konfiguration)
     port = krypto_sim_port if endpunkt_typ == "krypto_sim_brokerless" else ibkr_paper_port
     return port.platziere_order(anfrage)
