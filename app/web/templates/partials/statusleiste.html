@@ -1,56 +1,73 @@
 {# Statusleisten-Inhalt (design.md §5 Zone A, §7.2-§7.5) — Story S-064 baut
-   die Shell/Struktur; die sechs Indikatoren zeigen hier bewusst den
-   definierten Leer-/Platzhalterzustand ("—" / "unbekannt", `--text-3`,
-   design.md §7.1 "leer"-Muster), solange kein Backend-Read-Modell
-   angebunden ist. Die konsolidierte Datenquelle (`GET /api/system/status`,
-   AC8) inkl. HTMX-Live-Polling (AC19) liefert Story S-068/S-075 — dieselben
+   die Shell/Struktur; die sechs Indikatoren zeigen den definierten Leer-/
+   Platzhalterzustand ("—" / "unbekannt", `--text-3`, design.md §7.1
+   "leer"-Muster), solange kein `status_context` (dict, Schlüssel je
+   Indikator: `ampel`/`killswitch`/`modus`/`heartbeat`/`drawdown`/
+   `halluzination` → `{icon, state, label}`, `app.web.status_partial
+   .status_partial_kontext`) übergeben wird bzw. ein einzelner Indikator
+   darin fehlt (Cold-Start ohne Datengrundlage, E2-Muster).
+
+   S-074 (AC20-Fix, Iteration 2) übergibt `status_context` NACH jedem
+   Control-POST bei einem HTMX-Aufruf (`app/api/control.py`). Story S-075
+   (AC19 Live-Polling) nutzt denselben `status_context`-Vertrag für ihre
+   Polling-Partial-Endpunkte weiter (keine Doppelspur) — dieselben
    `data-testid`-Anker bleiben dabei stabil, es wird nur der Inhalt
    ausgetauscht (kein Struktur-Rework nötig).
 
    D3-Pflicht (nie nur Farbe): jeder Indikator trägt Icon/Glyph + Text. #}
+{% set sc = status_context if status_context is defined else {} %}
 <div class="status-indicators">
 
-  <div class="status-item status-item--placeholder" role="status"
-       data-testid="ampel" data-ampel-state="unbekannt"
-       aria-label="Ampel-Status: unbekannt">
-    <span class="status-icon" aria-hidden="true">○</span>
+  {% set ampel = sc.ampel if sc.ampel is defined else None %}
+  <div class="status-item{{ '' if ampel else ' status-item--placeholder' }}" role="status"
+       data-testid="ampel" data-ampel-state="{{ ampel.state if ampel else 'unbekannt' }}"
+       aria-label="Ampel-Status: {{ ampel.label if ampel else 'unbekannt' }}">
+    <span class="status-icon" aria-hidden="true">{{ ampel.icon if ampel else '○' }}</span>
     <span class="status-label">Ampel</span>
-    <span class="status-value" data-value>unbekannt</span>
+    <span class="status-value" data-value>{{ ampel.label if ampel else 'unbekannt' }}</span>
   </div>
 
-  <div class="status-item status-item--placeholder"
-       data-testid="killswitch" data-betriebszustand="unbekannt">
-    <span class="status-icon" aria-hidden="true">○</span>
+  {% set killswitch = sc.killswitch if sc.killswitch is defined else None %}
+  <div class="status-item{{ '' if killswitch else ' status-item--placeholder' }}"
+       data-testid="killswitch"
+       data-betriebszustand="{{ killswitch.state if killswitch else 'unbekannt' }}">
+    <span class="status-icon" aria-hidden="true">{{ killswitch.icon if killswitch else '○' }}</span>
     <span class="status-label">Kill-Switch</span>
-    <span class="status-value" data-value>unbekannt</span>
+    <span class="status-value" data-value>{{ killswitch.label if killswitch else 'unbekannt' }}</span>
   </div>
 
+  {% set modus = sc.modus if sc.modus is defined else None %}
   <div class="status-item"
-       data-testid="modus-badge" data-modus="simuliert" data-live-locked="true">
+       data-testid="modus-badge" data-modus="{{ modus.state if modus else 'simuliert' }}"
+       data-live-locked="true">
     <span class="status-icon" aria-hidden="true">🔒</span>
     <span class="status-label">Modus</span>
-    <span class="status-value" data-value>SIMULIERT</span>
+    <span class="status-value" data-value>{{ modus.label if modus else 'SIMULIERT' }}</span>
   </div>
 
-  <div class="status-item status-item--placeholder"
-       data-testid="heartbeat" data-state="unbekannt">
-    <span class="status-icon" aria-hidden="true">○</span>
+  {% set herzschlag = sc.heartbeat if sc.heartbeat is defined else None %}
+  <div class="status-item{{ '' if herzschlag else ' status-item--placeholder' }}"
+       data-testid="heartbeat" data-state="{{ herzschlag.state if herzschlag else 'unbekannt' }}">
+    <span class="status-icon" aria-hidden="true">{{ herzschlag.icon if herzschlag else '○' }}</span>
     <span class="status-label">Heartbeat</span>
-    <span class="status-value" data-value>—</span>
+    <span class="status-value" data-value>{{ herzschlag.label if herzschlag else '—' }}</span>
   </div>
 
-  <div class="status-item status-item--placeholder"
-       data-testid="drawdown" data-state="unbekannt">
-    <span class="status-icon" aria-hidden="true">○</span>
+  {% set drawdown = sc.drawdown if sc.drawdown is defined else None %}
+  <div class="status-item{{ '' if drawdown else ' status-item--placeholder' }}"
+       data-testid="drawdown" data-state="{{ drawdown.state if drawdown else 'unbekannt' }}">
+    <span class="status-icon" aria-hidden="true">{{ drawdown.icon if drawdown else '○' }}</span>
     <span class="status-label">Drawdown</span>
-    <span class="status-value" data-value>—</span>
+    <span class="status-value" data-value>{{ drawdown.label if drawdown else '—' }}</span>
   </div>
 
-  <div class="status-item status-item--placeholder"
-       data-testid="halluzination-kpi" data-state="unbekannt">
-    <span class="status-icon" aria-hidden="true">○</span>
+  {% set halluzination = sc.halluzination if sc.halluzination is defined else None %}
+  <div class="status-item{{ '' if halluzination else ' status-item--placeholder' }}"
+       data-testid="halluzination-kpi"
+       data-state="{{ halluzination.state if halluzination else 'unbekannt' }}">
+    <span class="status-icon" aria-hidden="true">{{ halluzination.icon if halluzination else '○' }}</span>
     <span class="status-label">Halluz.-KPI</span>
-    <span class="status-value" data-value>—</span>
+    <span class="status-value" data-value>{{ halluzination.label if halluzination else '—' }}</span>
   </div>
 
 </div>

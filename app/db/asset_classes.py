@@ -1,10 +1,20 @@
-"""Anlageklassen-Lesepfad (Story S-069, `docs/specs/frontend-cockpit.md`
-AC9) — analog `app.db.depotstrategie.lade_aktive_depotstrategie`: ein reiner
-Lesepfad, der die 11 seed-gepflegten `AssetClass`-Zeilen (`app.db.models
-.AssetClass`, S-003/AC12, Toggle S-019) direkt als Cockpit-Vertrag
-(`app.contracts.anlageklassen_config.AnlageklasseEintrag`) liefert — die
-einzige erlaubte Quelle für `GET /api/config/anlageklassen`
-(`app.api.config`/`app.api.queries.config`)."""
+"""Anlageklassen-Lese-/Schreibpfad (Story S-069, `docs/specs/frontend-cockpit.md`
+AC9; Story S-074, AC20) — analog `app.db.depotstrategie.lade_aktive_depotstrategie`:
+ein reiner Lesepfad, der die 11 seed-gepflegten `AssetClass`-Zeilen
+(`app.db.models.AssetClass`, S-003/AC12, Toggle S-019) direkt als
+Cockpit-Vertrag (`app.contracts.anlageklassen_config.AnlageklasseEintrag`)
+liefert — die einzige erlaubte Quelle für `GET /api/config/anlageklassen`
+(`app.api.config`/`app.api.queries.config`).
+
+`setze_toggle` (S-074, AC20) ist der Konfig-Schreibpfad hinter `POST
+/api/control/anlageklassen/{asset_class_id}/toggle` (→ BR-017/BR-018): das
+einzige erlaubte Schreib-Gegenstück, direkt auf derselben Spalte
+(`AssetClass.aktiv`) wie `lade_alle_anlageklassen` liest — kein zweiter,
+abweichender Persistenz-Pfad. BR-018 ("Deaktivierung lässt gehaltene
+Positionen nicht erblinden") ist keine Schreib-Sperre — eine Deaktivierung
+mit offenen Positionen bleibt erlaubt (nur `neue_verarbeitung_erlaubt`
+sperrt, `app.domain.assetclasses.toggle_guard`, S-019); diese Funktion
+schreibt den reinen Toggle-Zustand unbedingt."""
 
 from __future__ import annotations
 
@@ -27,4 +37,20 @@ def lade_alle_anlageklassen(session: Session) -> list[AnlageklasseEintrag]:
     ]
 
 
-__all__ = ["lade_alle_anlageklassen"]
+def setze_toggle(session: Session, asset_class_id: int, aktiv: bool) -> AnlageklasseEintrag | None:
+    """AC20 (→ BR-017/BR-018): setzt `AssetClass.aktiv` für genau eine
+    Anlageklasse und liefert den aktualisierten Cockpit-Eintrag zurück —
+    `None`, wenn `asset_class_id` keine bestehende Zeile referenziert
+    (der Router meldet das als 404)."""
+    zeile = session.get(AssetClass, asset_class_id)
+    if zeile is None:
+        return None
+    zeile.aktiv = aktiv
+    session.commit()
+    session.refresh(zeile)
+    return AnlageklasseEintrag(
+        id=zeile.id, name=zeile.name, aktiv=zeile.aktiv, prio_stufe=zeile.prio_stufe
+    )
+
+
+__all__ = ["lade_alle_anlageklassen", "setze_toggle"]

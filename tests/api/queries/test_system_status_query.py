@@ -19,7 +19,14 @@ import pytest
 
 from app.api.queries.system_status import system_status_uebersicht
 from app.contracts.llm_grounding import CrossCheckErgebnis
-from app.core import alerts, drawdown_monitor, hallucination_kpi, heartbeat, kill_switch
+from app.core import (
+    alerts,
+    drawdown_monitor,
+    hallucination_kpi,
+    heartbeat,
+    kill_switch,
+    modus_override,
+)
 from app.domain.lernschleife.ports import LetztesGateErgebnis
 
 
@@ -38,12 +45,14 @@ def _zustand_isolieren():
     drawdown_monitor.reset_fuer_tests()
     hallucination_kpi.reset_fuer_tests()
     alerts.reset_fuer_tests()
+    modus_override.reset_fuer_tests()
     yield
     kill_switch.reset_fuer_tests()
     heartbeat.reset_fuer_tests()
     drawdown_monitor.reset_fuer_tests()
     hallucination_kpi.reset_fuer_tests()
     alerts.reset_fuer_tests()
+    modus_override.reset_fuer_tests()
 
 
 def test_cold_start_liefert_konsistente_leerzustaende_ohne_gate_ergebnis() -> None:
@@ -64,13 +73,38 @@ def test_cold_start_liefert_konsistente_leerzustaende_ohne_gate_ergebnis() -> No
 def test_modus_je_anlageklasse_deckt_alle_elf_anlageklassen_ab() -> None:
     """@trace frontend-cockpit#AC8 — BR-019: "aktiven Modus je
     Anlageklasse" deckt ALLE elf Anlageklassen (1..11) ab, nicht nur eine
-    Teilmenge; ohne persistenten Override-Store (Cold-Start, S-074-Scope)
-    lösen alle auf den globalen Default 'simuliert' auf."""
+    Teilmenge; ohne einen zuvor über `app.core.modus_override` gesetzten
+    Override (S-074) lösen alle auf den globalen Default 'simuliert' auf."""
     ergebnis = system_status_uebersicht(gate_ergebnis_repository=_FakeGateErgebnisRepository(None))
 
     assert ergebnis.modus_global == "simuliert"
     assert set(ergebnis.modus_je_anlageklasse.keys()) == set(range(1, 12))
     assert all(modus == "simuliert" for modus in ergebnis.modus_je_anlageklasse.values())
+
+
+def test_modus_wird_aus_dem_seit_s074_existierenden_override_store_gelesen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace frontend-cockpit#AC8 — die Query liest den Modus über
+    `app.core.modus_override.aktuelle_konfiguration()` (S-074-Schreibpfad
+    `POST /api/control/modus`) statt eines hartkodierten Defaults; belegt
+    per Monkeypatch (der reale Store lässt laut BR-019-Allowlist ohnehin
+    nur `"simuliert"` zu, ein Wert-Vergleich allein könnte Delegation von
+    Hardcoding nicht unterscheiden)."""
+    from app.contracts.ausfuehrung_paper import ModusKonfiguration
+    from app.core import modus_override
+
+    monkeypatch.setattr(
+        modus_override,
+        "aktuelle_konfiguration",
+        lambda: ModusKonfiguration(global_modus="echt", modus_je_anlageklasse={3: "simuliert"}),
+    )
+
+    ergebnis = system_status_uebersicht(gate_ergebnis_repository=_FakeGateErgebnisRepository(None))
+
+    assert ergebnis.modus_global == "echt"
+    assert ergebnis.modus_je_anlageklasse[3] == "simuliert"
+    assert ergebnis.modus_je_anlageklasse[1] == "echt"
 
 
 def test_konsolidiert_kill_switch_heartbeat_drawdown_kpi_zustand() -> None:
