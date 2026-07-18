@@ -1,0 +1,99 @@
+{# Depot-KPI-Tiles + Datentabelle (Story S-071, `docs/specs/frontend-
+   cockpit.md` AC14/AC19; `design.md` §7.1 Tile, §7.6 Datentabelle, §2.3
+   G/V-Kodierung, §2.4 Klassen-Chip) — eigenständiges Partial, damit
+   `views/depot.html` (Erstladung) UND `GET /ui/depot/partial` (AC19-
+   Live-Polling) exakt dasselbe Markup rendern (kein Layout-Sprung beim
+   Swap, `design.md` §8.3). Erwarteter Kontext: `depot`
+   (`DepotUebersichtResponse`), `mode` ("echt"|"simuliert").
+
+   Anlageklassen-Kürzel (`design.md` §2.4) — rein präsentational, hier
+   lokal statt in `app/api/ui.py` (Hot-Spot-Konvention: nur die Depot-
+   Route ändern; die Kürzel-Zuordnung ist reine Anzeige, kein Domänenwert). #}
+{% set ac_kuerzel = {
+  1: "AKT", 2: "ETF", 3: "CSH", 4: "OBL", 5: "FND",
+  6: "IMM", 7: "CRY", 8: "ROH", 9: "INF", 10: "FX", 11: "DER"
+} %}
+
+{% macro gv(value, testid) %}
+{%- if value is none -%}
+<span class="gv gv--unbekannt" data-testid="{{ testid }}" data-gv="unbekannt">—</span>
+{%- elif value > 0 -%}
+<span class="gv gv--positiv" data-testid="{{ testid }}" data-gv="positiv">▲ +{{ "%.2f"|format(value) }}</span>
+{%- elif value < 0 -%}
+<span class="gv gv--negativ" data-testid="{{ testid }}" data-gv="negativ">▼ −{{ "%.2f"|format(-value) }}</span>
+{%- else -%}
+<span class="gv gv--neutral" data-testid="{{ testid }}" data-gv="neutral">▬ ±{{ "%.2f"|format(value) }}</span>
+{%- endif -%}
+{% endmacro %}
+
+<section class="tiles" aria-label="Depot-Kennzahlen">
+  <article class="tile" data-testid="tile-portfolio-wert" aria-labelledby="tile-label-portfolio-wert">
+    <span class="tile-label" id="tile-label-portfolio-wert">Portfolio-Wert (Kostenbasis)</span>
+    <span class="tile-value" data-value>CHF {{ "%.2f"|format(depot.portfolio_wert_kostenbasis) }}</span>
+  </article>
+  <article class="tile" data-testid="tile-cash-quote" aria-labelledby="tile-label-cash-quote">
+    <span class="tile-label" id="tile-label-cash-quote">Cash-Quote</span>
+    <span class="tile-value" data-value>{{ "%.1f"|format(depot.portfolio_aggregat.cash_quote) }}%</span>
+  </article>
+  <article class="tile" data-testid="tile-realisierter-gv" aria-labelledby="tile-label-realisierter-gv">
+    <span class="tile-label" id="tile-label-realisierter-gv">Realisierter G/V</span>
+    <span class="tile-value" data-value>{{ gv(depot.realisierter_gv_gesamt, "tile-realisierter-gv-wert") }}</span>
+  </article>
+  <article class="tile" data-testid="tile-unrealisierter-gv" aria-labelledby="tile-label-unrealisierter-gv">
+    <span class="tile-label" id="tile-label-unrealisierter-gv">Unrealisierter G/V</span>
+    <span class="tile-value" data-value>{{ gv(depot.unrealisierter_gv_gesamt, "tile-unrealisierter-gv-wert") }}</span>
+  </article>
+</section>
+
+{% if depot.titel|length == 0 %}
+<p class="empty-state" data-testid="depot-empty">
+  Keine offenen Positionen im Modus {{ "SIMULIERT" if mode == "simuliert" else "ECHT" }}.
+</p>
+{% else %}
+<div class="table-wrapper">
+  <table class="table-dicht" data-testid="table-depot">
+    <caption class="sr-only">Depot-Bestand je Titel</caption>
+    <thead>
+      <tr>
+        <th scope="col">Titel</th>
+        <th scope="col">Klasse</th>
+        <th scope="col" class="num">Menge</th>
+        <th scope="col" class="num">Ø-Einstand</th>
+        <th scope="col" class="num">Live-Kurs</th>
+        <th scope="col" class="num">Unrealisierter G/V</th>
+        <th scope="col" class="num">Gewichtung</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for titel in depot.titel %}
+      <tr data-row-id="{{ titel.titel_id }}">
+        <td data-testid="titel-name">
+          {%- if titel.symbol -%}
+          {{ titel.symbol }}{% if titel.name %} — {{ titel.name }}{% endif %}
+          {%- else -%}
+          {{ titel.titel_id }}
+          {%- endif -%}
+        </td>
+        <td>
+          <span class="chip chip--ac chip--ac-{{ titel.anlageklasse }}" data-testid="klassen-chip"
+                data-anlageklasse="{{ titel.anlageklasse }}">
+            {{ ac_kuerzel.get(titel.anlageklasse, titel.anlageklasse) }}
+          </span>
+        </td>
+        <td class="num">{{ titel.menge }}</td>
+        <td class="num">{{ "%.2f"|format(titel.einstand_preis) }}</td>
+        <td class="num">
+          {%- if titel.aktueller_preis is none -%}
+          <span class="text-unbekannt" data-testid="live-kurs-unbekannt">—</span>
+          {%- else -%}
+          {{ "%.2f"|format(titel.aktueller_preis) }}
+          {%- endif -%}
+        </td>
+        <td class="num">{{ gv(titel.unrealisierter_gv, "titel-gv-" ~ titel.titel_id) }}</td>
+        <td class="num">{{ "%.1f"|format(titel.gewichtung) }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

@@ -1,0 +1,37 @@
+id: S-081
+parent: F-017
+title: Depot-Verlauf-Chart + Portfolio-Wert-Snapshot-Read-Modell (Snapshot-Job, server-SVG-Chart,
+  Depot-View-Anbindung; ausgelagert aus AC14)
+status: To Do
+priority: P3
+spec: docs/specs/frontend-cockpit.md
+implements:
+- AC32
+- AC33
+depends:
+- S-064
+- S-065
+- S-071
+labels:
+- db
+- ui
+size_est: L
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Heuristik-Score 10 (n_ac=2, n_comp~6: Snapshot-Tabelle+Migration,
+  Snapshot-Job, Read-Query, JSON-Route/DTO, server-SVG-Chart, Depot-View/Demo-Seed;
+  label_bump db+ui=+2) -> L. Cold-Start: baseline.json fehlt (dispo_est/tok_est=null,
+  keine Baseline-Tokens); estimator (L) in dieser Umgebung nicht dispatchbar (kein
+  Task-Tool) -> Fallback null/low. Konservative Entscheide: (b) Scheduler-Snapshot-Job
+  statt Write-on-Read (Write-on-Read wuerde read-only-Boundary AC2 verletzen). Offene
+  Owner-/designer-Entscheidung (c): Zeitreihen-Chart-Lib server-SVG (lib-freier Default)
+  vs. vendored uPlot (§8.2) — bis Freigabe server-SVG, nicht eigenmaechtig entscheiden.'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-19T00:00:00Z'
+updated_at: '2026-07-19T00:00:00Z'
+done_at: null

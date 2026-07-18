@@ -1,9 +1,34 @@
 {% extends "base.html" %}
 {% block title %}Depot — Betriebs-Cockpit{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/views-depot.css') }}">
+{% endblock %}
 {% block view_title %}Depot{% endblock %}
 {% block content %}
-<p class="view-placeholder" data-testid="view-placeholder">
-  Diese Ansicht wird in einer Folge-Story befüllt (KPI-Tiles, Depot-Tabelle,
-  Verlauf-Chart — <code>docs/specs/frontend-cockpit.md</code> AC14).
+{# Depot-View (Story S-071, `docs/specs/frontend-cockpit.md` AC14/AC19).
+   KPI-Tiles + Datentabelle stammen aus `partials/depot_daten.html`
+   (dasselbe Partial rendert auch der Live-Polling-Endpunkt
+   `/ui/depot/partial`, AC19 "kein Layout-Sprung"). Der Live-Bereich
+   pollt alle 12s (design.md §8.3 "Live-Kurse/Depot ~10-15s"); ein
+   fehlgeschlagener Poll zeigt den Stale-Hinweis statt eines falschen
+   Frischwerts (E1). #}
+<div
+  id="depot-live"
+  class="depot-live"
+  hx-get="{{ url_for('ui_depot_partial') }}?mode={{ mode }}"
+  hx-trigger="every 12s"
+  hx-target="this"
+  hx-swap="innerHTML"
+  hx-on::after-request="
+    document.getElementById('depot-stale').hidden = event.detail.successful;
+    if (!event.detail.successful) {
+      document.getElementById('depot-stale-zeit').textContent = new Date().toLocaleTimeString('de-CH');
+    }
+  "
+  aria-live="polite"
+  data-testid="depot-live-region"
+>{% include "partials/depot_daten.html" %}</div>
+<p id="depot-stale" class="stale-hinweis" hidden data-testid="depot-stale-hinweis" role="status">
+  ⚠ veraltet (seit <span id="depot-stale-zeit"></span>)
 </p>
 {% endblock %}

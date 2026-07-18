@@ -24,13 +24,25 @@ leeres Fake-Repository hält diese Datei DB-frei (identisches Test-Double-
 Muster wie `tests/api/test_trades.py`/`tests/web/test_trades_view.py`) —
 die Struktur-Assertions (Landmarks, `<h1>`, Statusleiste) bleiben davon
 unberührt (leere Trade-Historie rendert weiterhin eine gültige Seite,
-siehe Empty-State AC16)."""
+siehe Empty-State AC16).
+
+**Story S-071 (AC14):** `/ui/depot` liest seit dieser Story real über
+`app.api.queries.depot.hole_depot_uebersicht` (DI, keine Platzhalter-Route
+mehr) — die `client`-Fixture überschreibt die Depot-DI deshalb mit einem
+leeren Fake-Depot (analog `tests/api/test_depot_route.py`), damit diese
+generischen, über alle fünf Views parametrisierten Struktur-Tests ohne
+echte DB laufen. Die Depot-Inhalts-Tests (KPI-Tiles/Datentabelle/Live-
+Polling) liegen dediziert in `tests/web/test_ui_depot.py`."""
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.depot import get_live_price_provider
+from app.api.depot import get_position_repository as get_depot_position_repository
 from app.api.kandidaten import get_kandidaten_repository
 from app.api.trades import get_position_repository
 from app.main import app
@@ -84,9 +96,33 @@ _STATUS_TESTIDS: tuple[str, ...] = (
 )
 
 
+class _LeeresDepotRepository:
+    """Minimaler Fake (Story S-071): `/ui/depot` liest seit dieser Story
+    real über `hole_depot_uebersicht` (AC1) statt eines DB-freien
+    Platzhalters — die generischen Shell-Tests dieser Datei (parametrisiert
+    über alle fünf Views) überschreiben die DI deshalb hier mit einem
+    leeren Depot, analog `tests/api/test_depot_route.py`."""
+
+    def alle_offenen_positionen(self, *, mode):
+        return []
+
+    def realisierter_gv_gesamt(self, *, mode):
+        return Decimal("0")
+
+
+class _KeinLivePriceProvider:
+    def aktueller_preis(self, titel_id):
+        return None
+
+
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    app.dependency_overrides[get_depot_position_repository] = lambda: _LeeresDepotRepository()
+    app.dependency_overrides[get_live_price_provider] = lambda: _KeinLivePriceProvider()
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.clear()
 
 
 @pytest.mark.parametrize("path,_active_testid", _VIEW_PATHS)

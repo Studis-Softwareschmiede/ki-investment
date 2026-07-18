@@ -11,9 +11,14 @@ Spinnennetz, Control-Elemente) folgt je View in eigenen Stories
 
 Story S-073 (AC16) befüllt hier die **Trade-Historie-View** (`/ui/trades`)
 + eine HTMX-Partial-Route (`/ui/trades/tabelle`) für den Filter-Formular-
-Swap. Alle anderen Views bleiben unverändert Platzhalter (Hot-Spot-
-Disziplin — vier parallele Stories teilen sich diese Datei, siehe
-Story-Prompt).
+Swap.
+
+Story S-071 (AC14/AC19) befüllt die **Depot-View**: KPI-Tiles +
+Datentabelle über `app.api.queries.depot.hole_depot_uebersicht` (dieselbe
+Query-Funktion wie `GET /api/depot`, AC1, kein zweiter Datenzusammenbau)
+plus einen kleinen HTMX-Partial-Endpunkt (`/ui/depot/partial`) fürs
+Live-Polling (AC19). Der in AC14 ursprünglich genannte Depot-Verlauf-Chart
+ist per Spec v3 nach S-081 (AC32/AC33, Snapshot-Read-Modell) ausgelagert.
 
 **UI-Boundary (AC2):** diese Datei importiert bewusst NICHTS aus
 `app.domain.sizing`, `app.domain.risikomanagement`, `app.domain.execution`,
@@ -35,13 +40,16 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 
+from app.api.depot import get_live_price_provider
+from app.api.depot import get_position_repository as get_depot_position_repository
 from app.api.kandidaten import get_kandidaten_repository
+from app.api.queries.depot import hole_depot_uebersicht
 from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
 from app.api.queries.trades import hole_trade_historie
 from app.api.trades import get_position_repository
 from app.contracts.analyse_framework import KATEGORIE_NAMEN
 from app.contracts.depot import Modus
-from app.domain.portfolio.ports import PositionRepository
+from app.domain.portfolio.ports import LivePriceProvider, PositionRepository
 from app.domain.scoring.ports import KandidatenRepository
 from app.web.kandidaten.anlageklassen import anlageklasse_kuerzel
 from app.web.kandidaten.spinnennetz import (
@@ -66,17 +74,45 @@ KERN_VIEWS: tuple[dict[str, str], ...] = (
 )
 
 
-def _render(request: Request, *, active_view: str) -> object:
+def _render(request: Request, *, active_view: str, **extra_context: object) -> object:
     return templates.TemplateResponse(
         request,
         f"views/{active_view}.html",
-        {"active_view": active_view, "kern_views": KERN_VIEWS},
+        {"active_view": active_view, "kern_views": KERN_VIEWS, **extra_context},
     )
 
 
 @router.get("/depot", name="ui_depot")
-def depot_view(request: Request) -> object:
-    return _render(request, active_view="depot")
+def depot_view(
+    request: Request,
+    mode: Modus = "echt",
+    repository: PositionRepository = Depends(get_depot_position_repository),
+    live_price: LivePriceProvider = Depends(get_live_price_provider),
+) -> object:
+    """AC14: rendert die Depot-View gegen dieselbe Query-Funktion wie
+    `GET /api/depot` (AC1, kein zweiter Datenzusammenbau) — die DI-Factories
+    stammen bewusst aus `app.api.depot` statt hier ein eigenes
+    `sqlalchemy`/`app.db.session`-Import anzulegen (Boundary AC2,
+    `tests/architecture/test_ui_boundary.py`)."""
+    depot = hole_depot_uebersicht(mode=mode, repository=repository, live_price=live_price)
+    return _render(request, active_view="depot", depot=depot, mode=mode)
+
+
+@router.get("/depot/partial", name="ui_depot_partial")
+def depot_partial(
+    request: Request,
+    mode: Modus = "echt",
+    repository: PositionRepository = Depends(get_depot_position_repository),
+    live_price: LivePriceProvider = Depends(get_live_price_provider),
+) -> object:
+    """AC19: kleiner HTMX-Partial-Endpunkt fürs Live-Polling der
+    Depot-KPI-Tiles/-Datentabelle (Live-Kurse, unrealisierter G/V) — rendert
+    dasselbe Partial (`partials/depot_daten.html`) neu, keine eigene
+    Datenzusammenstellung (AC1, dieselbe Query-Funktion wie `depot_view`)."""
+    depot = hole_depot_uebersicht(mode=mode, repository=repository, live_price=live_price)
+    return templates.TemplateResponse(
+        request, "partials/depot_daten.html", {"depot": depot, "mode": mode}
+    )
 
 
 @router.get("/kandidaten", name="ui_kandidaten")

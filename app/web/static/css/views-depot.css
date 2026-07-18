@@ -1,0 +1,182 @@
+/* Depot-View (docs/design.md §7.1 Tile, §7.6 Datentabelle, §2.3 G/V,
+   §2.4 Klassen-Chip) — Story S-071, `docs/specs/frontend-cockpit.md`
+   AC14/AC19. Eigene Datei statt shell.css (Hot-Spot-Konvention: shell.css
+   bleibt Story S-064 vorbehalten). Keine Werte ausserhalb der Skalen (§4). */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* §7.1 KPI-/Status-Tile */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.tile-label {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.tile-value {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+/* §2.3 G/V — Vorzeichen + Glyph + Farbe als Verstärkung (D3, nie Farbe
+   allein). */
+.gv {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.gv--positiv {
+  color: var(--gain);
+}
+
+.gv--negativ {
+  color: var(--loss);
+}
+
+.gv--neutral {
+  color: var(--text-2);
+}
+
+.gv--unbekannt,
+.text-unbekannt {
+  color: var(--text-3);
+}
+
+/* §7.6 Datentabelle (dicht) */
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.table-dicht {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface-2);
+}
+
+.table-dicht thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+}
+
+.table-dicht th,
+.table-dicht td {
+  padding: var(--space-1) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+}
+
+.table-dicht th {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.table-dicht th.num,
+.table-dicht td.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.table-dicht tbody tr:nth-child(even) {
+  background: var(--surface-3);
+}
+
+/* §6 Responsive: horizontaler Scroll-Wrapper mit sticky erster Spalte
+   (Titel) — bleibt beim Scrollen schmaler Breiten sichtbar. */
+.table-dicht th:first-child,
+.table-dicht td:first-child {
+  position: sticky;
+  left: 0;
+}
+
+.table-dicht th:first-child {
+  background: var(--surface-2);
+}
+
+.table-dicht td:first-child {
+  background: inherit;
+}
+
+/* §2.4 Anlageklassen-Chip: Farbe als Rand/Punkt links des Kürzels, Chip-
+   Fläche neutral, Text immer --text-1 (Label-Kontrast unabhängig vom
+   Klassen-Farbton). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.chip--ac {
+  border-left: 3px solid var(--text-3);
+}
+
+.chip--ac-1 { border-left-color: var(--ac-1); }
+.chip--ac-2 { border-left-color: var(--ac-2); }
+.chip--ac-3 { border-left-color: var(--ac-3); }
+.chip--ac-4 { border-left-color: var(--ac-4); }
+.chip--ac-5 { border-left-color: var(--ac-5); }
+.chip--ac-6 { border-left-color: var(--ac-6); }
+.chip--ac-7 { border-left-color: var(--ac-7); }
+.chip--ac-8 { border-left-color: var(--ac-8); }
+.chip--ac-9 { border-left-color: var(--ac-9); }
+.chip--ac-10 { border-left-color: var(--ac-10); }
+.chip--ac-11 { border-left-color: var(--ac-11); }
+
+/* §7.1/§7.6 Empty-State (design.md §7.1 "leer") */
+.empty-state {
+  color: var(--text-2);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* §8.3 Live-Update: kein Layout-Sprung beim Poll-Swap. */
+.depot-live {
+  min-height: 120px;
+}
+
+/* E1: fehlgeschlagener Poll -> Stale-Hinweis statt falschem Frischwert. */
+.stale-hinweis {
+  color: var(--warn-fg);
+  font-size: var(--fs-sm);
+  margin-top: var(--space-2);
+}
