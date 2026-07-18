@@ -58,7 +58,31 @@ Order-Typ/Preis (die Position-/Risiko-Sizing-Kette dieser Codebasis
 liefert nur eine CHF-Grösse, siehe `OrderAnfrage.groesse`-Docstring) —
 `order_typ`/`preis` kommen deshalb hier als explizite Parameter herein,
 die ein künftiger Orchestrierungs-Layer (`app.orchestration.buy_pipeline`,
-noch nicht gebaut) beisteuert."""
+noch nicht gebaut) beisteuert.
+
+**S-047 ergänzt** `bestimme_wirksamen_modus` (AC2/AC3, BR-019):
+
+- **AC2** — löst den wirksamen Modus «echt/simuliert» einer Order anhand
+  `ModusKonfiguration` auf: die spezifischste gesetzte Ebene gewinnt
+  (`modus_je_anlageklasse[asset_class_id]`, falls vorhanden, sonst
+  `global_modus`, Spec A1) — strukturell identisch zum bereits
+  bestehenden Auflösungsmuster von `bestimme_broker_endpunkt_typ` (AC5,
+  global-Default + Anlageklassen-Override statt hartkodierter
+  Code-Grenze, P6).
+- **AC3/BR-019** — ist der aufgelöste Modus `"echt"`, wirft die Funktion
+  `LiveModusGesperrtError` statt still auf `"simuliert"` herunterzustufen:
+  "Im MVP ist ausschliesslich der simulierte (Paper-)Modus aktiv" (AC3)
+  bzw. "Live ist gesperrt" (BR-019) ist eine harte MVP-Grenze (Nicht-Ziel
+  "Kein Live-/Echtgeld-Handel im MVP") — eine fälschlich auf `"echt"`
+  konfigurierte Ebene soll laut blockiert werden, nicht unbemerkt auf
+  Paper umgeleitet. Da im MVP dadurch ausschliesslich `"simuliert"`
+  zurückkommt (oder geworfen wird) und `fuehre_order_aus` ohnehin nur
+  Paper-`BrokerPort`-Implementierungen injiziert bekommt (S-046, kein
+  `"echt"`-Adapter existiert — Nicht-Ziel des MVP), bleibt diese Funktion
+  bewusst STANDALONE und wird (noch) nicht in `fuehre_order_aus`
+  verdrahtet: das "voll autonom, keine Bestätigungsabfrage vor der Order"
+  aus AC3 ist bereits strukturell erfüllt, da weder diese Funktion noch
+  `fuehre_order_aus` einen Bestätigungs-/Freigabe-Parameter kennen."""
 
 from __future__ import annotations
 
@@ -68,9 +92,11 @@ from app.contracts.ausfuehrung_paper import (
     BrokerEndpunktTyp,
     BrokerRoutingKonfiguration,
     ExecutionOrderTyp,
+    ModusKonfiguration,
     OrderAnfrage,
     OrderBestaetigung,
 )
+from app.contracts.depot import Modus
 from app.contracts.risikomanagement import GateEntscheid
 from app.contracts.sizing import OrderTyp as VerkaufOrderTyp
 from app.contracts.sizing import Verkaufsauftrag
@@ -89,6 +115,38 @@ _VERKAUF_ORDER_TYP_MAP: dict[VerkaufOrderTyp, ExecutionOrderTyp] = {
     "stop_market": "stop",
     "twap": "twap",
 }
+
+
+class LiveModusGesperrtError(ValueError):
+    """AC3/BR-019 (S-047): der aufgelöste Modus einer Order ist `"echt"`,
+    was im MVP hart gesperrt ist ("Kein Live-/Echtgeld-Handel im MVP",
+    Nicht-Ziel) — geworfen von `bestimme_wirksamen_modus` statt eines
+    stillen Downgrades auf `"simuliert"`."""
+
+
+def bestimme_wirksamen_modus(
+    asset_class_id: int, *, konfiguration: ModusKonfiguration | None = None
+) -> Modus:
+    """AC2/AC3: löst den wirksamen Modus «echt/simuliert» einer Order auf
+    — die spezifischste gesetzte Ebene gewinnt
+    (`konfiguration.modus_je_anlageklasse[asset_class_id]`, falls
+    vorhanden, sonst `konfiguration.global_modus`, Spec A1).
+
+    Raises:
+        LiveModusGesperrtError: der aufgelöste Modus ist `"echt"` — im
+            MVP ausschliesslich `"simuliert"` aktiv (AC3, BR-019 "Live
+            ist gesperrt")."""
+    aktive_konfiguration = konfiguration or ModusKonfiguration()
+    aufgeloester_modus = aktive_konfiguration.modus_je_anlageklasse.get(
+        asset_class_id, aktive_konfiguration.global_modus
+    )
+    if aufgeloester_modus == "echt":
+        raise LiveModusGesperrtError(
+            f"Modus 'echt' fuer asset_class_id={asset_class_id} ist im MVP hart "
+            "gesperrt (BR-019, Nicht-Ziel: kein Live-/Echtgeld-Handel im MVP) "
+            "- nur 'simuliert' ist aktiv."
+        )
+    return aufgeloester_modus
 
 
 def bestimme_broker_endpunkt_typ(
@@ -203,7 +261,9 @@ def fuehre_order_aus(
 
 
 __all__ = [
+    "LiveModusGesperrtError",
     "bestimme_broker_endpunkt_typ",
+    "bestimme_wirksamen_modus",
     "erstelle_order_anfrage_fuer_kauf",
     "erstelle_order_anfrage_fuer_verkauf",
     "fuehre_order_aus",

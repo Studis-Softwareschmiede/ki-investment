@@ -1,6 +1,7 @@
-"""Tests für den Order-Ausführungs-Kern (Story S-046).
+"""Tests für den Order-Ausführungs-Kern (Story S-046) + die S-047-
+Modus-Auflösung (`bestimme_wirksamen_modus`).
 
-Covers (ausfuehrung-paper): AC1, AC4, AC5, AC6
+Covers (ausfuehrung-paper): AC1, AC2, AC3, AC4, AC5, AC6
 
 - AC1: `erstelle_order_anfrage_fuer_kauf`/`_fuer_verkauf` normalisieren
   sowohl eine gebilligte Kauf-Order (Risikomanagement-Gate) als auch einen
@@ -26,6 +27,18 @@ Covers (ausfuehrung-paper): AC1, AC4, AC5, AC6
   unverändert; `erstelle_order_anfrage_fuer_verkauf` mappt die 4 vom
   Exit-Sizing erzeugbaren `sizing.OrderTyp`-Werte korrekt (insbesondere
   `stop_market -> stop`).
+- AC2 (S-047): `bestimme_wirksamen_modus` löst die spezifischste gesetzte
+  Ebene auf — ein Anlageklassen-Override (`modus_je_anlageklasse`)
+  gewinnt gegen `global_modus`, unabhängig davon, in welche Richtung
+  (Override kann strenger ODER lockerer als Global sein); ohne Override
+  fällt eine Anlageklasse auf `global_modus` zurück.
+- AC3 (S-047): löst sich `"echt"` auf (global oder je Anlageklasse), wirft
+  `LiveModusGesperrtError` — MVP-Sperre (BR-019 "Live ist gesperrt", kein
+  stilles Downgrade auf `"simuliert"`). Der Default (keine Konfiguration)
+  liefert `"simuliert"` ohne zu werfen. Strukturell: weder
+  `bestimme_wirksamen_modus` noch `fuehre_order_aus` kennen einen
+  Bestätigungs-/Freigabe-Parameter (voll autonom, keine
+  Bestätigungsabfrage vor der Order).
 """
 
 from __future__ import annotations
@@ -40,6 +53,7 @@ import pytest
 from app.contracts.ausfuehrung_paper import (
     BrokerRoutingKonfiguration,
     ExecutionOrderTyp,
+    ModusKonfiguration,
     OrderAnfrage,
     OrderBestaetigung,
 )
@@ -47,7 +61,9 @@ from app.contracts.risikomanagement import GateEntscheid
 from app.contracts.sizing import Verkaufsauftrag
 from app.contracts.strategie_exit_regeln import AnnotierteKaufOrder, ExitDefaultVorschlag
 from app.domain.execution.order_ausfuehrung import (
+    LiveModusGesperrtError,
     bestimme_broker_endpunkt_typ,
+    bestimme_wirksamen_modus,
     erstelle_order_anfrage_fuer_kauf,
     erstelle_order_anfrage_fuer_verkauf,
     fuehre_order_aus,
@@ -354,3 +370,66 @@ def test_ac6_verkauf_order_typen_werden_korrekt_gemappt(
         _verkaufsauftrag(order_typ=sizing_order_typ), asset_class_id=1
     )
     assert anfrage.order_typ == erwarteter_execution_typ
+
+
+# ---------------------------------------------------------------------------
+# AC2/AC3 (S-047) — Modus-Auflösung (global + je Anlageklasse) + MVP-Sperre
+# ---------------------------------------------------------------------------
+
+
+def test_ac2_ohne_konfiguration_liefert_default_simuliert() -> None:
+    """@trace ausfuehrung-paper#AC2 — ohne explizite Konfiguration greift
+    der `ModusKonfiguration`-Default (`global_modus="simuliert"`)."""
+    assert bestimme_wirksamen_modus(1) == "simuliert"
+
+
+def test_ac2_ohne_override_faellt_anlageklasse_auf_global_zurueck() -> None:
+    """@trace ausfuehrung-paper#AC2 — eine Anlageklasse ohne eigenen
+    Eintrag in `modus_je_anlageklasse` übernimmt `global_modus`."""
+    konfiguration = ModusKonfiguration(
+        global_modus="simuliert", modus_je_anlageklasse={7: "simuliert"}
+    )
+    assert bestimme_wirksamen_modus(1, konfiguration=konfiguration) == "simuliert"
+
+
+def test_ac2_anlageklassen_override_gewinnt_gegen_global() -> None:
+    """@trace ausfuehrung-paper#AC2 — die spezifischste gesetzte Ebene
+    (Anlageklassen-Override) gewinnt gegen `global_modus`, unabhängig von
+    der Richtung: hier ist Global `"echt"`, Klasse 7 überschreibt auf
+    `"simuliert"` (kein Fehler, da der WIRKSAME Modus simuliert bleibt)."""
+    konfiguration = ModusKonfiguration(global_modus="echt", modus_je_anlageklasse={7: "simuliert"})
+    assert bestimme_wirksamen_modus(7, konfiguration=konfiguration) == "simuliert"
+
+
+def test_ac3_global_echt_ohne_override_wird_hart_gesperrt() -> None:
+    """@trace ausfuehrung-paper#AC3 — `global_modus="echt"` ohne
+    Anlageklassen-Override löst für jede Anlageklasse
+    `LiveModusGesperrtError` aus (BR-019 "Live ist gesperrt", MVP-Sperre)."""
+    konfiguration = ModusKonfiguration(global_modus="echt")
+    with pytest.raises(LiveModusGesperrtError):
+        bestimme_wirksamen_modus(1, konfiguration=konfiguration)
+
+
+def test_ac3_anlageklassen_override_auf_echt_wird_hart_gesperrt() -> None:
+    """@trace ausfuehrung-paper#AC3 — auch ein Anlageklassen-spezifisches
+    `"echt"` (Global bleibt `"simuliert"`) wird geblockt, nicht still auf
+    `"simuliert"` heruntergestuft."""
+    konfiguration = ModusKonfiguration(global_modus="simuliert", modus_je_anlageklasse={1: "echt"})
+    with pytest.raises(LiveModusGesperrtError):
+        bestimme_wirksamen_modus(1, konfiguration=konfiguration)
+
+    # Andere Anlageklassen ohne Override bleiben unbetroffen (fallen auf
+    # global_modus="simuliert" zurück).
+    assert bestimme_wirksamen_modus(2, konfiguration=konfiguration) == "simuliert"
+
+
+def test_ac3_kein_bestaetigungs_parameter_in_modus_und_order_ausfuehrung() -> None:
+    """@trace ausfuehrung-paper#AC3 — "voll autonom ... keine
+    Bestätigungsabfrage vor der Order": weder `bestimme_wirksamen_modus`
+    noch `fuehre_order_aus` (bereits AC4, S-046) besitzen einen
+    Bestätigungs-/Freigabe-Parameter."""
+    parameter_namen = set(inspect.signature(bestimme_wirksamen_modus).parameters)
+    assert not parameter_namen & {"bestaetigung", "bestaetigt", "confirm", "freigabe"}
+
+    parameter_namen = set(inspect.signature(fuehre_order_aus).parameters)
+    assert not parameter_namen & {"bestaetigung", "bestaetigt", "confirm", "freigabe"}
