@@ -78,6 +78,7 @@ def test_kandidatenliste_liefert_titel_klasse_score_signal_kategorie_scores_und_
         signal="KAUF",
         kategorie_scores=_VOLLSTAENDIGE_SCORES,
         as_of=datetime(2026, 7, 1, 10, 0, tzinfo=UTC),
+        sanity_cap_angewendet=False,
     )
     client = _client(_FakeKandidatenRepository(kandidaten=[kandidat]))
 
@@ -100,6 +101,7 @@ def test_kandidatenliste_liefert_titel_klasse_score_signal_kategorie_scores_und_
         "risiko": 9.0,
     }
     assert eintrag["as_of"] == "2026-07-01T10:00:00Z"
+    assert eintrag["sanity_cap_angewendet"] is False
 
 
 def test_kandidat_detail_liefert_fakten_begruendung_und_sanity_cap_status() -> None:

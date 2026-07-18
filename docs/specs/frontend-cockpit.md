@@ -130,7 +130,7 @@ Jeder Read-Endpunkt = **Query-Funktion (read-only) + JSON-Route (`response_model
 - Nicht bewertbarer G/V (`None`) → „—", nie 0/Farbe (E2).
 - Fehlgeschlagener Poll → „veraltet (seit …)", kein Frischwert-Fake (E1).
 - Leere Tabelle → definierter Empty-State je Modus (z. B. „Keine offenen Positionen im Modus SIMULIERT").
-- Kandidat mit fehlender Kategorie-Datengrundlage → als fehlend ausgewiesen, nie geschätzt (→ BR-005, E3).
+- Kandidat mit fehlender Kategorie-Datengrundlage → als fehlend ausgewiesen, nie geschätzt (→ BR-005, E3). **Spinnennetz-Präzisierung (AC15):** Achsen/Gitter/Labels bleiben immer vollständig gezeichnet; fehlt mindestens eine Kategorie, wird jedoch KEINE Kaufstärke-Fläche (Polygon) gezeichnet — ein fabrizierter Polygon-Punkt für eine fehlende Kategorie wäre selbst eine Schätzung. Die begleitende Werttabelle zeigt für die fehlende Kategorie „—" (E2-Muster).
 - Kill-Switch `HALTED` / Live-Modus → Vollbreite-Banner mit maximaler Priorität (A1, D5).
 - Keine laufende Stufe-B-Bewährung (`mintrl_restlaufzeit = None`) → MinTRL „—", nie 0/Farbe (AC25, E2-Muster).
 - Leere Warteliste → definierter Empty-State „Keine blockierten Kandidaten im Modus SIMULIERT" (AC27).

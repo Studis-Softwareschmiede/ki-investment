@@ -1,9 +1,73 @@
 {% extends "base.html" %}
 {% block title %}Kandidaten — Betriebs-Cockpit{% endblock %}
 {% block view_title %}Kandidaten{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/kandidaten.css') }}">
+{% endblock %}
 {% block content %}
-<p class="view-placeholder" data-testid="view-placeholder">
-  Diese Ansicht wird in einer Folge-Story befüllt (Kandidaten-Tabelle,
-  Spinnennetz-Detail — <code>docs/specs/frontend-cockpit.md</code> AC15).
-</p>
+<div class="kandidaten-layout">
+  <section class="kandidaten-liste">
+    {% if kandidaten %}
+    <div class="tabellen-wrapper">
+      <table class="table-kandidaten" data-testid="table-kandidaten">
+        <caption>Bewertete Kandidaten</caption>
+        <thead>
+          <tr>
+            <th scope="col">Titel</th>
+            <th scope="col">Klasse</th>
+            <th scope="col">Gesamtscore</th>
+            <th scope="col">Signal</th>
+            <th scope="col">Stand (as_of)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for kandidat in kandidaten %}
+          <tr data-testid="kandidat-row" data-row-id="{{ kandidat.analysis_result_id }}">
+            <td>
+              <button
+                type="button"
+                class="kandidat-open"
+                data-testid="kandidat-open"
+                hx-get="{{ url_for('ui_kandidat_detail', analysis_result_id=kandidat.analysis_result_id) }}"
+                hx-target="#kandidat-detail"
+                hx-swap="outerHTML"
+                hx-on::after-swap="document.querySelector('#kandidat-detail .kandidat-detail-titel')?.focus()"
+              >{{ kandidat.titel }}</button>
+            </td>
+            <td>
+              <span
+                class="klassen-chip klassen-chip--{{ kandidat.asset_class_id }}"
+                data-testid="klassen-chip"
+                data-anlageklasse="{{ anlageklasse_kuerzel(kandidat.asset_class_id)|lower }}"
+              >{{ anlageklasse_kuerzel(kandidat.asset_class_id) }}</span>
+            </td>
+            <td class="wert-mono">
+              {{ '%.1f'|format(kandidat.gesamtscore) }}
+              <div
+                class="score-meter"
+                role="presentation"
+                data-testid="score-meter"
+              ><span class="score-meter-fuellung" style="width: {{ (kandidat.gesamtscore / 10 * 100)|round(1) }}%"></span></div>
+            </td>
+            <td>
+              <span
+                class="signal-badge signal-badge--{{ kandidat.signal|lower }}"
+                data-testid="signal-badge"
+                data-signal="{{ kandidat.signal|lower }}"
+                data-sanity-capped="{{ 'true' if kandidat.sanity_cap_angewendet else 'false' }}"
+              >{{ kandidat.signal }}{% if kandidat.sanity_cap_angewendet %} <span class="signal-badge-cap">⛨ gedeckelt (Risiko&lt;3)</span>{% endif %}</span>
+            </td>
+            <td class="wert-mono">{{ kandidat.as_of.strftime('%Y-%m-%d %H:%M') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="kandidaten-leer" data-testid="kandidaten-leer">Keine bewerteten Kandidaten.</p>
+    {% endif %}
+  </section>
+
+  {% include "partials/kandidaten/detail.html" %}
+</div>
 {% endblock %}

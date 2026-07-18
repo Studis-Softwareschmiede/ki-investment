@@ -164,6 +164,7 @@ class SqlAlchemyKandidatenRepository:
                 signal=ergebnis.signal_enum,
                 kategorie_scores=kategorie_scores_je_analyse[ergebnis.id],
                 as_of=ergebnis.created_at,
+                sanity_cap_angewendet=ergebnis.sanity_cap_applied,
             )
             for ergebnis in ergebnisse
         ]

@@ -11,7 +11,13 @@ AC1/AC10) — dieses Modul führt selbst KEINE Berechnung ein.
 
 `titel`/`name` (S-066 Iteration 2, Review-Fund): der menschenlesbare Titel
 (`Instrument.symbol`/`.name`) — `titel_id` bleibt zusätzlich die rohe
-`instrument_id` (z.B. für den Detail-Link)."""
+`instrument_id` (z.B. für den Detail-Link).
+
+`sanity_cap_angewendet` auf `KandidatUebersichtResponse` (S-072
+Iteration 2, Review-Fund): `docs/design.md` §7.7 verlangt den Zusatz-
+Marker + das `data-sanity-capped`-Attribut bereits auf dem Signal-Badge
+der Kandidaten-TABELLE (AC15), nicht erst im Detail-Panel — additive
+Erweiterung, 1:1 aus dem Read-Modell (→ BR-008)."""
 
 from __future__ import annotations
 
@@ -37,6 +43,7 @@ class KandidatUebersichtResponse(BaseModel):
     signal: Signal
     kategorie_scores: KategorieScores
     as_of: datetime
+    sanity_cap_angewendet: bool
 
 
 class KandidatFaktResponse(BaseModel):
