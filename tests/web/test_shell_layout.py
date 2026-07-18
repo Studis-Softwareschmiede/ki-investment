@@ -31,6 +31,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.kandidaten import get_kandidaten_repository
 from app.api.trades import get_position_repository
 from app.main import app
 
@@ -44,9 +45,23 @@ class _LeeresFakePositionRepository:
         return []
 
 
+class _LeereKandidatenRepository:
+    """Story S-072 macht `/ui/kandidaten` zu einer echten, DB-gespeisten
+    Route (AC15) — dieser Fake hält die Shell-Tests hier weiterhin DB-frei
+    (analog `tests/api/test_kandidaten.py`), ohne den Struktur-/A11y-Scope
+    dieser Datei (AC11/AC13) zu erweitern."""
+
+    def liste_kandidaten(self) -> list[object]:
+        return []
+
+    def kandidat_detail(self, analysis_result_id: str) -> None:
+        return None
+
+
 @pytest.fixture(autouse=True)
-def _override_position_repository():
+def _db_freie_view_overrides():
     app.dependency_overrides[get_position_repository] = _LeeresFakePositionRepository
+    app.dependency_overrides[get_kandidaten_repository] = _LeereKandidatenRepository
     yield
     app.dependency_overrides.clear()
 

@@ -25,7 +25,14 @@ fehlend ausgewiesen statt geschätzt (deckt E3, → BR-005).
 menschenlesbaren **Titel**, nicht nur die `instrument_id` — `titel` (=
 `Instrument.symbol`) und `name` (= `Instrument.name`) ergänzen `titel_id`
 (bleibt die rohe `instrument_id`, z.B. für den Detail-Link) um die
-Anzeige-Werte; beide stammen 1:1 aus `Instrument`, keine neue Berechnung."""
+Anzeige-Werte; beide stammen 1:1 aus `Instrument`, keine neue Berechnung.
+
+**S-072 Iteration 2 (Review-Fund, Important):** `docs/design.md` §7.7
+verlangt bei aktivem Sanity-Cap (BR-008) einen Zusatz-Marker + das
+`data-sanity-capped`-Anker-Attribut **auf dem Signal-Badge der
+Kandidaten-Tabelle** (nicht nur im Detail-Panel) — `KandidatUebersicht`
+trägt dafür `sanity_cap_angewendet` additiv (1:1 aus `AnalysisResult
+.sanity_cap_applied`, keine neue Berechnung, analog `KandidatDetail`)."""
 
 from __future__ import annotations
 
@@ -41,7 +48,8 @@ from app.contracts.analyse_framework import KategorieScores, Signal
 class KandidatUebersicht:
     """Ein Eintrag der Kandidaten-Übersicht (AC4): Titel, Anlageklasse,
     Gesamtscore, abgeleitetes Signal (→ BR-007), die 5 Kategorie-Scores
-    (Spinnennetz-Achsen, C-007) und `as_of` (Analyse-Zeitpunkt)."""
+    (Spinnennetz-Achsen, C-007), `as_of` (Analyse-Zeitpunkt) und der
+    Sanity-Cap-Status (S-072 Iteration 2, → BR-008, design.md §7.7)."""
 
     analysis_result_id: str
     titel_id: str
@@ -52,6 +60,7 @@ class KandidatUebersicht:
     signal: Signal
     kategorie_scores: KategorieScores
     as_of: datetime
+    sanity_cap_angewendet: bool
 
 
 @dataclass(frozen=True)

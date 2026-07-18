@@ -33,6 +33,7 @@ def liste_kandidaten(repository: KandidatenRepository) -> list[KandidatUebersich
             signal=eintrag.signal,
             kategorie_scores=eintrag.kategorie_scores,
             as_of=eintrag.as_of,
+            sanity_cap_angewendet=eintrag.sanity_cap_angewendet,
         )
         for eintrag in repository.liste_kandidaten()
     ]

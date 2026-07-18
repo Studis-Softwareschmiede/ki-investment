@@ -1,0 +1,83 @@
+{# Kandidaten-Detail-Panel (design.md §7.8/§8.1/§10, AC15) — eigenständiges
+   HTMX-Partial (Partial-Load, AC15-e): wird sowohl beim initialen Seiten-
+   aufruf (Leer-Zustand, `detail=none`) als auch als `hx-get`-Response beim
+   Öffnen eines Kandidaten gerendert (`app/api/ui.py`, dieselbe Datei —
+   P4/DRY, kein zweiter Template-Bau). `hx-swap="outerHTML"` ersetzt den
+   kompletten `#kandidat-detail`-Container inkl. `id`, deshalb trägt DIESES
+   Partial die `id`/`data-testid`, nicht der aufrufende Wrapper. #}
+{% from "partials/kandidaten/_spinnennetz_svg.html" import spinnennetz_svg %}
+<div id="kandidat-detail" class="kandidat-detail" data-testid="kandidat-detail">
+{% if detail is none %}
+  {% if kandidat_nicht_gefunden %}
+  <p class="kandidat-detail-leer" data-testid="kandidat-detail-nicht-gefunden">
+    Kandidat nicht gefunden.
+  </p>
+  {% else %}
+  <p class="kandidat-detail-leer" data-testid="kandidat-detail-leer">
+    Kein Kandidat ausgewählt — auf einen Titel in der Tabelle klicken.
+  </p>
+  {% endif %}
+{% else %}
+  <h2 class="kandidat-detail-titel" tabindex="-1">
+    {{ detail.titel }} <span class="kandidat-detail-name">({{ detail.name }})</span>
+  </h2>
+
+  {{ spinnennetz_svg(geometrie, aria_label, viewbox, sanity_cap_achse) }}
+
+  <table class="kategorie-werttabelle" data-testid="kategorie-werttabelle">
+    <caption>Kategorie-Scores (Werttabelle zum Spinnennetz, A11y-Pflicht)</caption>
+    <thead>
+      <tr>
+        <th scope="col">Kategorie</th>
+        <th scope="col">Score (0–10)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for kategorie in kategorie_namen %}
+      {% set score = detail.kategorie_scores[kategorie] %}
+      <tr>
+        <th scope="row">{{ kategorie|capitalize }}</th>
+        <td class="wert-mono">{{ '%.1f'|format(score) if score is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p
+    class="sanity-cap-hinweis{% if detail.sanity_cap_angewendet %} sanity-cap-hinweis--aktiv{% endif %}"
+    data-testid="sanity-cap-hinweis"
+    data-sanity-capped="{{ 'true' if detail.sanity_cap_angewendet else 'false' }}"
+  >
+    {% if detail.sanity_cap_angewendet %}⛨ gedeckelt (Risiko&lt;3) — das Signal folgt nicht dem rechnerischen Score.{% else %}Kein Sanity-Cap aktiv.{% endif %}
+  </p>
+
+  <section class="kategorie-fakten-sektion" aria-labelledby="kategorie-fakten-titel">
+    <h3 id="kategorie-fakten-titel">Kategorie-Fakten</h3>
+    {% if detail.fakten %}
+    <table data-testid="kategorie-fakten">
+      <caption>Quellen-ID + Zeitstempel je Kennzahl (→ BR-002)</caption>
+      <thead>
+        <tr>
+          <th scope="col">Kennzahl</th>
+          <th scope="col">Wert</th>
+          <th scope="col">Quellen-ID</th>
+          <th scope="col">Zeitstempel</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for fakt in detail.fakten %}
+        <tr data-row-id="{{ fakt.kennzahl }}">
+          <td>{{ fakt.kennzahl }}</td>
+          <td class="wert-mono">{{ fakt.wert }}</td>
+          <td>{{ fakt.quellen_id }}</td>
+          <td>{{ fakt.zeitstempel.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p data-testid="kategorie-fakten-leer">Keine Kategorie-Fakten hinterlegt.</p>
+    {% endif %}
+  </section>
+{% endif %}
+</div>

@@ -1,11 +1,13 @@
-"""Tests für `SqlAlchemyKandidatenRepository` (Story S-066,
-`docs/specs/frontend-cockpit.md` AC4/AC5/AC7).
+"""Tests für `SqlAlchemyKandidatenRepository` (Story S-066/S-072,
+`docs/specs/frontend-cockpit.md` AC4/AC5/AC7/AC15).
 
-Covers (frontend-cockpit): AC4, AC5, AC7 — AC7 (Read-Modell-Gap
+Covers (frontend-cockpit): AC4, AC5, AC7, AC15 — AC7 (Read-Modell-Gap
 geschlossen) ist kein eigenes Test-Case, sondern strukturell durch diese
 Datei erfüllt: sie prüft genau den Adapter, der die Kandidaten-Analysen
 erstmals als persistentes, HTTP-abfragbares Read-Modell exponiert (rein
-lesend, kein `session.add`/`commit` in keinem Test hier).
+lesend, kein `session.add`/`commit` in keinem Test hier). AC15 (S-072
+Iteration 2, Review-Fund): `sanity_cap_angewendet` auf `liste_kandidaten`
+— Grundlage des §7.7-Signal-Badge-Markers.
 
 Prüft `app.adapters.repositories.analysis_result_repository
 .SqlAlchemyKandidatenRepository` gegen eine SQLite-In-Memory-DB: nur
@@ -197,6 +199,28 @@ def test_liste_kandidaten_liefert_alle_5_kategorie_scores_als_spinnennetz_achsen
     assert kandidat.kategorie_scores.qualitativ == 6.0
     assert kandidat.kategorie_scores.makro == 5.0
     assert kandidat.kategorie_scores.risiko == 9.0
+
+
+def test_liste_kandidaten_liefert_sanity_cap_status() -> None:
+    """@trace frontend-cockpit#AC15 — S-072 Iteration 2 (Review-Fund):
+    `sanity_cap_angewendet` ist Teil jedes Listen-Eintrags (design.md
+    §7.7-Marker auf dem Signal-Badge der Kandidaten-Tabelle, → BR-008),
+    1:1 aus `AnalysisResult.sanity_cap_applied`."""
+    session = _session()
+    stammdaten = _stammdaten(session)
+    _lege_analysis_result_an(
+        session,
+        stammdaten,
+        gesamtscore=Decimal("4.5"),
+        signal_enum="HALTEN",
+        kategorie_scores=_VOLLSTAENDIGE_SCORES,
+        sanity_cap_applied=True,
+    )
+    repository = SqlAlchemyKandidatenRepository(session)
+
+    kandidat = repository.liste_kandidaten()[0]
+
+    assert kandidat.sanity_cap_angewendet is True
 
 
 def test_liste_kandidaten_sortiert_neueste_zuerst() -> None:

@@ -63,4 +63,20 @@
   /* §4 Motion */
   --motion-fast: 120ms;
   --motion-base: 200ms;
+
+  /* §2.4 Anlageklassen-Kodierung (11 Klassen, C-006) — Story S-072
+     (Kandidaten-View, erster Konsument des Klassen-Chips). Light-Theme:
+     dieselben Hues, ~1 Stufe abgedunkelt via color-mix (css/R08),
+     design.md §2.4. */
+  --ac-1: light-dark(color-mix(in oklab, #4C9AFF 70%, black), #4C9AFF);
+  --ac-2: light-dark(color-mix(in oklab, #6EE7B7 70%, black), #6EE7B7);
+  --ac-3: light-dark(color-mix(in oklab, #94A3B8 70%, black), #94A3B8);
+  --ac-4: light-dark(color-mix(in oklab, #38BDF8 70%, black), #38BDF8);
+  --ac-5: light-dark(color-mix(in oklab, #A78BFA 70%, black), #A78BFA);
+  --ac-6: light-dark(color-mix(in oklab, #F0883E 70%, black), #F0883E);
+  --ac-7: light-dark(color-mix(in oklab, #F472B6 70%, black), #F472B6);
+  --ac-8: light-dark(color-mix(in oklab, #E3B341 70%, black), #E3B341);
+  --ac-9: light-dark(color-mix(in oklab, #818CF8 70%, black), #818CF8);
+  --ac-10: light-dark(color-mix(in oklab, #2DD4BF 70%, black), #2DD4BF);
+  --ac-11: light-dark(color-mix(in oklab, #C084FC 70%, black), #C084FC);
 }

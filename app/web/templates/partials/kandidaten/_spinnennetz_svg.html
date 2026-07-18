@@ -1,0 +1,58 @@
+{# Spinnennetz-SVG-Makro (design.md §8.1, AC15) — reines Markup, konsumiert
+   die in Python vorberechnete Geometrie (`app.web.kandidaten.spinnennetz`).
+   A11y-Pflicht (§8.1): role="img" + aria-label, begleitende Werttabelle
+   steht daneben im aufrufenden Template (nicht hier). #}
+{% macro spinnennetz_svg(geometrie, aria_label, viewbox, sanity_cap_achse=none) %}
+<svg
+  class="spinnennetz"
+  viewBox="{{ viewbox }}"
+  role="img"
+  aria-label="{{ aria_label }}"
+  data-testid="spinnennetz"
+>
+  <g class="spinnennetz-gitter" aria-hidden="true">
+    {% for ring, punkte in geometrie.gitterringe %}
+    <polygon
+      class="spinnennetz-gitterring"
+      data-gitterring="{{ ring }}"
+      points="{% for p in punkte %}{{ '%.2f'|format(p.x) }},{{ '%.2f'|format(p.y) }}{% if not loop.last %} {% endif %}{% endfor %}"
+    ></polygon>
+    {% endfor %}
+  </g>
+
+  {% if geometrie.kaufstaerke_polygon %}
+  <polygon
+    class="spinnennetz-flaeche"
+    data-series="aktuell"
+    points="{% for p in geometrie.kaufstaerke_polygon %}{{ '%.2f'|format(p.x) }},{{ '%.2f'|format(p.y) }}{% if not loop.last %} {% endif %}{% endfor %}"
+  ></polygon>
+  {% endif %}
+
+  <g class="spinnennetz-achsen">
+    {% for achse in geometrie.achsen %}
+    <g
+      class="spinnennetz-achse{% if achse.kategorie == sanity_cap_achse %} spinnennetz-achse--warn{% endif %}"
+      data-kategorie="{{ achse.kategorie }}"
+      data-score="{{ '%.1f'|format(achse.score) if achse.score is not none else '' }}"
+    >
+      <line
+        class="spinnennetz-achsenlinie"
+        x1="{{ '%.2f'|format(geometrie.mittelpunkt.x) }}"
+        y1="{{ '%.2f'|format(geometrie.mittelpunkt.y) }}"
+        x2="{{ '%.2f'|format(achse.ende.x) }}"
+        y2="{{ '%.2f'|format(achse.ende.y) }}"
+      ></line>
+      <text class="spinnennetz-label" x="{{ '%.2f'|format(achse.label.x) }}" y="{{ '%.2f'|format(achse.label.y) }}">{{ achse.kategorie|capitalize }} {{ '%.1f'|format(achse.score) if achse.score is not none else '—' }}</text>
+      {% if achse.score_punkt %}
+      <circle
+        class="spinnennetz-punkt"
+        cx="{{ '%.2f'|format(achse.score_punkt.x) }}"
+        cy="{{ '%.2f'|format(achse.score_punkt.y) }}"
+        r="3"
+      ></circle>
+      {% endif %}
+    </g>
+    {% endfor %}
+  </g>
+</svg>
+{% endmacro %}

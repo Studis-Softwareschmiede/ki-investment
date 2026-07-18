@@ -35,10 +35,20 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 
+from app.api.kandidaten import get_kandidaten_repository
+from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
 from app.api.queries.trades import hole_trade_historie
 from app.api.trades import get_position_repository
+from app.contracts.analyse_framework import KATEGORIE_NAMEN
 from app.contracts.depot import Modus
 from app.domain.portfolio.ports import PositionRepository
+from app.domain.scoring.ports import KandidatenRepository
+from app.web.kandidaten.anlageklassen import anlageklasse_kuerzel
+from app.web.kandidaten.spinnennetz import (
+    STANDARD_VIEWBOX,
+    berechne_spinnennetz_geometrie,
+    spinnennetz_aria_label,
+)
 from app.web.templates_setup import templates
 
 router = APIRouter(prefix="/ui", tags=["ui"])
@@ -70,8 +80,65 @@ def depot_view(request: Request) -> object:
 
 
 @router.get("/kandidaten", name="ui_kandidaten")
-def kandidaten_view(request: Request) -> object:
-    return _render(request, active_view="kandidaten")
+def kandidaten_view(
+    request: Request,
+    repository: KandidatenRepository = Depends(get_kandidaten_repository),
+) -> object:
+    """AC15: Kandidaten-Tabelle + Detail-Panel-Shell. Liest ausschliesslich
+    über die geteilte Query-Schicht (`app.api.queries.kandidaten`, AC1/AC10
+    — dieselbe Funktion speist `app.api.kandidaten` (JSON, AC4)). Das
+    Detail-Panel startet leer (kein Kandidat ausgewählt) und wird per
+    HTMX-Partial-Load befüllt (AC15-e, siehe `kandidat_detail_partial`)."""
+    kandidaten = liste_kandidaten(repository)
+    return templates.TemplateResponse(
+        request,
+        "views/kandidaten.html",
+        {
+            "active_view": "kandidaten",
+            "kern_views": KERN_VIEWS,
+            "kandidaten": kandidaten,
+            "anlageklasse_kuerzel": anlageklasse_kuerzel,
+            "detail": None,
+            "kandidat_nicht_gefunden": False,
+            "geometrie": None,
+            "aria_label": "",
+            "viewbox": STANDARD_VIEWBOX,
+            "sanity_cap_achse": None,
+            "kategorie_namen": KATEGORIE_NAMEN,
+        },
+    )
+
+
+@router.get("/kandidaten/{analysis_result_id}", name="ui_kandidat_detail")
+def kandidat_detail_partial(
+    request: Request,
+    analysis_result_id: str,
+    repository: KandidatenRepository = Depends(get_kandidaten_repository),
+) -> object:
+    """AC15-e: HTMX-Partial-Load des Detail-Panels — liefert NUR den
+    `#kandidat-detail`-Container (kein volles Seiten-Layout), Ziel eines
+    `hx-get`/`hx-swap="outerHTML"` aus `views/kandidaten.html`. Eine
+    unbekannte `analysis_result_id` liefert HTTP 200 mit einem definierten
+    "nicht gefunden"-Zustand statt 404 (die JSON-API, `app.api.kandidaten`
+    AC5, bleibt bei 404) — so swappt HTMX den Container ohne zusätzliche
+    `hx-target-error`-Konfiguration; analog zur E2/E3-Empty-State-
+    Konvention dieses Cockpits."""
+    detail = kandidat_detail(repository, analysis_result_id)
+    context: dict[str, object] = {
+        "detail": detail,
+        "kandidat_nicht_gefunden": detail is None,
+        "geometrie": None,
+        "aria_label": "",
+        "viewbox": STANDARD_VIEWBOX,
+        "sanity_cap_achse": None,
+        "kategorie_namen": KATEGORIE_NAMEN,
+    }
+    if detail is not None:
+        kategorie_scores = detail.kategorie_scores.model_dump()
+        context["geometrie"] = berechne_spinnennetz_geometrie(kategorie_scores)
+        context["aria_label"] = spinnennetz_aria_label(detail.titel, kategorie_scores)
+        context["sanity_cap_achse"] = "risiko" if detail.sanity_cap_angewendet else None
+    return templates.TemplateResponse(request, "partials/kandidaten/detail.html", context)
 
 
 def _trades_kontext(
