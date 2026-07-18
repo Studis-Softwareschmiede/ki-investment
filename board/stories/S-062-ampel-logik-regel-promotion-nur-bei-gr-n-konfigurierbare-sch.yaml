@@ -1,7 +1,7 @@
 id: S-062
 parent: F-016
 title: Ampel-Logik, Regel-Promotion nur bei Grün & konfigurierbare Schwellen
-status: To Do
+status: Done
 priority: P3
 spec: docs/specs/lernschleife.md
 implements:
@@ -24,9 +24,9 @@ estimate_note: Cold-Start; Ampel 🟢/🟡/🔴 (BR-025), nur 🟢 promotet in S
   Schwellen als Parameter.
 confidence: medium
 tok_est: null
-branch: null
+branch: feat/S-062
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:11:09Z'
-updated_at: '2026-07-12T10:11:09Z'
-done_at: null
+updated_at: '2026-07-18T02:42:56Z'
+done_at: '2026-07-18T02:42:56Z'
