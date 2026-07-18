@@ -1,5 +1,6 @@
 """Modul-Vertrag Position-Sizing-Kern (Story S-039, Spec
-`docs/specs/sizing.md` AC1/AC2/AC3/AC4/AC7).
+`docs/specs/sizing.md` AC1/AC2/AC3/AC4/AC7) + Exit-Sizing-Ausführung
+(Story S-042, AC8/AC12).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO in `app/contracts/`. Dieses Modul bildet den
@@ -22,6 +23,7 @@ Kapitalbasis + Kosten zur absoluten `ordergroesse`.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -144,9 +146,53 @@ class OrdergroessenErgebnis(BaseModel):
     verworfen: str | None = None
 
 
+#: AC8 (Story S-042): der Wertebereich des Verträge-Felds "Exit-Sizing
+#: Output ... order_typ: market|stop_market|limit|twap". `"market"` und
+#: `"twap"` sind hier bereits Teil des vollen Vertrags-Wertebereichs
+#: (AC8-Alternative bzw. AC10, TWAP-Schwelle), werden von dieser Story
+#: (AC8/AC12) aber nicht erzeugt — siehe Moduldocstring
+#: `app.domain.sizing.exit_sizing`, das ausschliesslich `"stop_market"`
+#: (Hard-Exit) bzw. `"limit"` (Soft-Exit-Default) liefert.
+OrderTyp = Literal["market", "stop_market", "limit", "twap"]
+
+#: AC8 (Story S-042): die zwei Ausführungsprofile eines Verkaufsauftrags —
+#: "sofort" (Hard-Exit, "sofort die gesamte Position") vs. "gestaffelt"
+#: (Soft-Exit).
+Ausfuehrungsprofil = Literal["sofort", "gestaffelt"]
+
+
+class Verkaufsauftrag(BaseModel):
+    """AC8/AC12-Vertrag "Exit-Sizing Output" (Story S-042): `{ titel_id,
+    menge, tranchen[], order_typ, preis?, ausfuehrungsprofil }` — die
+    direkte Übergabe von Exit-Sizing an das Kauf- & Verkaufsmodul (AC12,
+    umgeht bewusst das Risikomanagement, siehe `app.domain.sizing
+    .exit_sizing`-Moduldocstring).
+
+    `menge` ist die volle Zielmenge des Verkaufs (die Entscheidung, WIE
+    VIEL der Position verkauft wird, ist Teil der beim Kauf fixierten
+    Exit-Regeln, → C-014, Nicht-Ziel dieser Spec); `tranchen` zerlegt
+    diese Menge in einzelne Ausführungs-Teilmengen — in dieser Story
+    (AC8, ohne AC11) ein Einzel-Element mit der vollen `menge` (die
+    3-4-Tranchen-Zerlegung samt zeit-/ereignisbasierter Abstands-Logik ist
+    AC11, eine spätere Story). `preis` bleibt optional/`None`, solange
+    keine Preisfindung Teil einer umgesetzten AC ist."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    titel_id: str = Field(min_length=1)
+    menge: Decimal = Field(gt=0)
+    tranchen: tuple[Decimal, ...] = Field(min_length=1)
+    order_typ: OrderTyp
+    preis: Decimal | None = None
+    ausfuehrungsprofil: Ausfuehrungsprofil
+
+
 __all__ = [
+    "Ausfuehrungsprofil",
     "KellyFraktionsKonfiguration",
+    "OrderTyp",
     "OrdergroessenErgebnis",
     "OrdergroessenKonfiguration",
     "PositionSizingErgebnis",
+    "Verkaufsauftrag",
 ]
