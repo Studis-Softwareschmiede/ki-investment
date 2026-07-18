@@ -44,15 +44,32 @@ Moduldocstring für die vollständige AC1/AC4/AC5/AC6-Herleitung):
   Timeout-Status (AC7/AC8, eigene Folge-Story S-048) und ohne Slippage-
   /Spread-Simulation (AC9, S-049) — dieser Vertrag deckt nur die
   Order-ANNAHME durch den gewählten Endpunkt.
+
+**S-047 ergänzt** (`app.domain.execution.order_ausfuehrung
+.bestimme_wirksamen_modus`, AC2/AC3, BR-019):
+
+- `ModusKonfiguration` — der AC2-Modus-Schalter «echt/simuliert»: global
+  gesetzt, je Anlageklasse überschreibbar (Spec A1: "der wirksame Modus
+  je Order ergibt sich aus der spezifischsten gesetzten Ebene"). Analoges
+  Konfigurationsmuster zu `BrokerRoutingKonfiguration` (global + je-
+  Anlageklasse-Override statt hartkodierter Code-Grenze, architecture.md
+  §2 P6). Lässt strukturell `"echt"` zu (forward-kompatibel für eine
+  spätere Live-Freischaltung) — die tatsächliche MVP-Sperre (AC3,
+  BR-019 "Live ist gesperrt", Nicht-Ziel "Kein Live-/Echtgeld-Handel im
+  MVP") erzwingt ausschliesslich `bestimme_wirksamen_modus` selbst, nicht
+  dieser Kontrakt.
 """
 
 from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.contracts.depot import Modus
 
 
 class PlattformStammdaten(BaseModel):
@@ -143,6 +160,42 @@ class BrokerRoutingKonfiguration(BaseModel):
     brokerlose_anlageklassen_ids: frozenset[int] = Field(
         default=DEFAULT_BROKERLOSE_ANLAGEKLASSEN_IDS
     )
+
+
+class ModusKonfiguration(BaseModel):
+    """AC2 (S-047): der Modus-Schalter «echt/simuliert» — global gesetzt,
+    je Anlageklasse überschreibbar (Spec A1, BR-019: "global und je Klasse
+    überschreibbar"). `modus_je_anlageklasse` trägt NUR die Anlageklassen
+    mit einem expliziten Override; alle übrigen Anlageklassen fallen auf
+    `global_modus` zurück — die Auflösung der "spezifischsten gesetzten
+    Ebene" übernimmt
+    `app.domain.execution.order_ausfuehrung.bestimme_wirksamen_modus`
+    (dort auch die AC3/BR-019-MVP-Sperre gegen `"echt"`, NICHT hier: dieser
+    Kontrakt bleibt bewusst forward-kompatibel für eine spätere
+    Live-Freischaltung, siehe Moduldocstring).
+
+    Review-Fix (Sicherheit): `frozen=True` friert nur die Top-Level-
+    Attribute dieses Modells ein — ein `dict`-Feld bliebe trotzdem
+    inhaltlich mutabel (`konfiguration.modus_je_anlageklasse[1] = "echt"`
+    würde ohne weitere Massnahme durchgehen). `modus_je_anlageklasse` wird
+    deshalb per `field_validator` in ein echtes `types.MappingProxyType`
+    gewandelt (analog zum `frozenset`-Precedent bei
+    `BrokerRoutingKonfiguration.brokerlose_anlageklassen_ids`, S-046) —
+    dieselbe Sicherheits-Sperre wie AC3/BR-019 darf nicht durch eine
+    nachträgliche Mutation des Konfigurations-Mappings unterlaufen werden
+    können."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    global_modus: Modus = "simuliert"
+    modus_je_anlageklasse: dict[int, Modus] = Field(default_factory=dict, validate_default=True)
+
+    @field_validator("modus_je_anlageklasse")
+    @classmethod
+    def _modus_je_anlageklasse_immutable(
+        cls, wert: dict[int, Modus]
+    ) -> MappingProxyType[int, Modus]:
+        return MappingProxyType(dict(wert))
 
 
 class OrderAnfrage(BaseModel):

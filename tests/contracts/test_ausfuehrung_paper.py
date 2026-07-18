@@ -1,17 +1,27 @@
 """Tests für die S-046-Order-Ausführungs-Verträge (`app.contracts
 .ausfuehrung_paper.OrderAnfrage`/`OrderBestaetigung`/
-`BrokerRoutingKonfiguration`).
+`BrokerRoutingKonfiguration`) + die S-047-`ModusKonfiguration`.
 
-Covers (ausfuehrung-paper): AC1, AC5, AC6
+Covers (ausfuehrung-paper): AC1, AC2, AC5, AC6
 
 Reine DTO-Validierungstests (pydantic `frozen`/`extra="forbid"`/
 Feld-Constraints) — das Verhalten der erzeugenden/konsumierenden Funktionen
-liegt in `tests/domain/execution/test_order_ausfuehrung.py`.
-"""
+liegt in `tests/domain/execution/test_order_ausfuehrung.py` (dort auch die
+AC2/AC3-Auflösungslogik von `bestimme_wirksamen_modus`, S-047, inkl. der
+Allowlist-/Fail-closed-Sperre und der aktiven Verdrahtung in
+`fuehre_order_aus`).
+
+- AC2 (Review-Fix, Sicherheit): `ModusKonfiguration.modus_je_anlageklasse`
+  ist trotz `frozen=True` NICHT nur top-level unveränderlich — das
+  `dict`-Feld selbst wird per `field_validator` in ein echtes
+  `types.MappingProxyType` gewandelt, eine nachträgliche Mutation des
+  Mappings wird dadurch verhindert (siehe
+  `test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich`)."""
 
 from __future__ import annotations
 
 from decimal import Decimal
+from types import MappingProxyType
 
 import pytest
 from pydantic import ValidationError
@@ -19,6 +29,7 @@ from pydantic import ValidationError
 from app.contracts.ausfuehrung_paper import (
     DEFAULT_BROKERLOSE_ANLAGEKLASSEN_IDS,
     BrokerRoutingKonfiguration,
+    ModusKonfiguration,
     OrderAnfrage,
     OrderBestaetigung,
 )
@@ -93,3 +104,66 @@ def test_ac5_broker_routing_konfiguration_default_ist_nur_krypto() -> None:
     konfiguration = BrokerRoutingKonfiguration()
     assert konfiguration.brokerlose_anlageklassen_ids == DEFAULT_BROKERLOSE_ANLAGEKLASSEN_IDS
     assert konfiguration.brokerlose_anlageklassen_ids == frozenset({7})
+
+
+def test_ac2_modus_konfiguration_default_ist_global_simuliert_ohne_overrides() -> None:
+    """@trace ausfuehrung-paper#AC2 — der Default ist `global_modus =
+    "simuliert"` ohne Anlageklassen-Overrides (MVP-Default)."""
+    konfiguration = ModusKonfiguration()
+    assert konfiguration.global_modus == "simuliert"
+    assert konfiguration.modus_je_anlageklasse == {}
+
+
+def test_ac2_modus_konfiguration_akzeptiert_je_anlageklasse_override() -> None:
+    """@trace ausfuehrung-paper#AC2 — je Anlageklasse ist der Modus
+    strukturell überschreibbar (auch mit `"echt"`, forward-kompatibel —
+    die MVP-Sperre erzwingt erst `bestimme_wirksamen_modus`, siehe
+    `tests/domain/execution/test_order_ausfuehrung.py`)."""
+    konfiguration = ModusKonfiguration(
+        global_modus="simuliert", modus_je_anlageklasse={1: "echt", 7: "simuliert"}
+    )
+    assert konfiguration.modus_je_anlageklasse == {1: "echt", 7: "simuliert"}
+
+
+def test_ac2_modus_konfiguration_ist_unveraenderlich_und_lehnt_unbekannte_felder_ab() -> None:
+    """@trace ausfuehrung-paper#AC2 — `ModusKonfiguration` ist ebenfalls
+    `frozen`/`extra="forbid"` (P2, Modul-Vertrag)."""
+    konfiguration = ModusKonfiguration()
+
+    with pytest.raises(ValidationError):
+        konfiguration.global_modus = "echt"  # type: ignore[misc]
+
+    with pytest.raises(ValidationError):
+        ModusKonfiguration(unbekanntes_feld="x")
+
+
+def test_ac2_modus_konfiguration_lehnt_unbekannten_modus_wert_ab() -> None:
+    """@trace ausfuehrung-paper#AC2 — `global_modus`/`modus_je_anlageklasse`
+    akzeptieren ausschliesslich den `Modus`-Wertebereich (`echt`/
+    `simuliert`)."""
+    with pytest.raises(ValidationError):
+        ModusKonfiguration(global_modus="paper")  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError):
+        ModusKonfiguration(modus_je_anlageklasse={1: "papier"})  # type: ignore[dict-item]
+
+
+def test_ac2_modus_je_anlageklasse_mapping_ist_wirklich_unveraenderlich() -> None:
+    """@trace ausfuehrung-paper#AC2 — Review-Fix (Sicherheit):
+    `frozen=True` friert nur die Top-Level-Attribute des Modells ein; ohne
+    weitere Massnahme bliebe das `dict`-Feld `modus_je_anlageklasse`
+    inhaltlich mutabel (`konfiguration.modus_je_anlageklasse[1] = "echt"`
+    würde durchgehen). Der `field_validator` wandelt das Feld in ein
+    echtes `types.MappingProxyType` — eine Item-Zuweisung MUSS mit
+    `TypeError` scheitern, sowohl bei explizit übergebenem Mapping als
+    auch beim Default (`validate_default=True`, sonst würde nur der
+    explizite Konstruktions-Pfad geschützt)."""
+    konfiguration = ModusKonfiguration(modus_je_anlageklasse={1: "echt", 7: "simuliert"})
+    assert isinstance(konfiguration.modus_je_anlageklasse, MappingProxyType)
+    with pytest.raises(TypeError):
+        konfiguration.modus_je_anlageklasse[1] = "simuliert"  # type: ignore[index]
+
+    default_konfiguration = ModusKonfiguration()
+    assert isinstance(default_konfiguration.modus_je_anlageklasse, MappingProxyType)
+    with pytest.raises(TypeError):
+        default_konfiguration.modus_je_anlageklasse[1] = "echt"  # type: ignore[index]

@@ -5,6 +5,7 @@ Covers (llm-grounding): AC5
 Covers (depot): AC5
 Covers (kandidatensuche): AC6, AC7, AC10
 Covers (depot-ueberwachung): AC4, AC6, AC7
+Covers (ausfuehrung-paper): AC12
 
 `app.config.Settings.toleranz_config` trägt die konfigurierbaren
 Toleranzschwellen je Kennzahl-Typ (absolut/relativ) — provisorische
@@ -30,6 +31,14 @@ trägt die Keyword-/Ereignis-Filter-Stichwortliste,
 die je Ereignistyp konfigurierten Schwellen und
 `depot_ueberwachung_ereignisse_pro_tag_schwellwert` (S-033, AC7) den
 Alert-Fatigue-Tages-Schwellwert — alle drei ohne Codeänderung per
+Env-Variable überschreibbar.
+
+`app.config.Settings.bewaehrungsregel_mindest_trades`/
+`bewaehrungsregel_mindest_tage`/`bewaehrungsregel_live_start_kapitalanteil`
+(S-047, AC12) tragen die provisorischen, konfigurierbaren Defaults der
+Bewährungsregel vor Echtgeld (30–50 Trades/3–6 Monate im Simulationsmodus,
+Live-Start mit 10–20 % Kapital) — reine hinterlegte Defaults ohne
+Live-Start-Konsument im MVP (Nicht-Ziel), ohne Codeänderung per
 Env-Variable überschreibbar.
 """
 
@@ -227,3 +236,30 @@ def test_settings_ueberschreibt_alert_fatigue_schwellwert_ohne_codeaenderung(
     settings = Settings(_env_file=None)
 
     assert settings.depot_ueberwachung_ereignisse_pro_tag_schwellwert == 3
+
+
+def test_settings_liefert_provisorische_bewaehrungsregel_defaults_ohne_env() -> None:
+    """@trace ausfuehrung-paper#AC12 — ohne Env-Override sind die
+    Bewährungsregel-Defaults 40 Trades / 120 Tage / 15 % Kapitalanteil
+    (Mitte der jeweiligen Spec-Spannen 30–50/3–6 Monate/10–20 %)."""
+    settings = Settings(_env_file=None)
+
+    assert settings.bewaehrungsregel_mindest_trades == 40
+    assert settings.bewaehrungsregel_mindest_tage == 120
+    assert settings.bewaehrungsregel_live_start_kapitalanteil == 0.15
+
+
+def test_settings_ueberschreibt_bewaehrungsregel_defaults_ohne_codeaenderung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@trace ausfuehrung-paper#AC12 — alle drei Bewährungsregel-Defaults
+    sind ohne Codeänderung per Env-Variable überschreibbar."""
+    monkeypatch.setenv("BEWAEHRUNGSREGEL_MINDEST_TRADES", "30")
+    monkeypatch.setenv("BEWAEHRUNGSREGEL_MINDEST_TAGE", "90")
+    monkeypatch.setenv("BEWAEHRUNGSREGEL_LIVE_START_KAPITALANTEIL", "0.10")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.bewaehrungsregel_mindest_trades == 30
+    assert settings.bewaehrungsregel_mindest_tage == 90
+    assert settings.bewaehrungsregel_live_start_kapitalanteil == 0.10

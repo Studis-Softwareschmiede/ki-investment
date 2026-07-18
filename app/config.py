@@ -122,6 +122,23 @@ Umgebungsvariable `KANDIDATENSUCHE_PROFIL_OVERRIDES` (JSON-Mapping
 Anlageklasse (als String-Key) → `{"modus": ..., "schwellen": {...}}`,
 Muster von `TOLERANZ_CONFIG` folgend, hier aber pro Klasse gemerged statt
 vollständig ersetzt, siehe `SuchprofilOverride`-Docstring).
+
+Aus S-047 (AC12, `docs/specs/ausfuehrung-paper.md`) kommen
+`bewaehrungsregel_mindest_trades`/`bewaehrungsregel_mindest_tage`/
+`bewaehrungsregel_live_start_kapitalanteil` hinzu: die Bewährungsregel vor
+Echtgeld ist laut AC12 "als provisorischer, konfigurierbarer Default
+hinterlegt" — mindestens 30–50 Trades **bzw.** 3–6 Monate im
+Simulationsmodus vor einem Live-Start, Live-Start mit 10–20 % des
+Kapitals (`docs/concept.md` §"Default, provisorisch"). Live-Betrieb ist
+ausdrücklich Nicht-Ziel des MVP (AC12) — diese Story hinterlegt daher
+ausschliesslich die drei Config-Werte, OHNE eine Prüf-/Gate-Funktion zu
+bauen, die sie auswertet (kein Live-Start-Konsument existiert im MVP).
+Provisorisch gewählt: **40 Trades** (Mitte 30–50),
+**120 Tage** (Mitte ~3–6 Monate) und **15 % Kapitalanteil** (Mitte
+10–20 %) — ohne Codeänderung über
+`BEWAEHRUNGSREGEL_MINDEST_TRADES`/`BEWAEHRUNGSREGEL_MINDEST_TAGE`/
+`BEWAEHRUNGSREGEL_LIVE_START_KAPITALANTEIL` überschreibbar (Muster von
+`ERWARTETE_SLIPPAGE_PCT_DEFAULT` folgend).
 """
 
 from __future__ import annotations
@@ -303,6 +320,26 @@ class Settings(BaseSettings):
     #: Codeänderung über
     #: `DEPOT_UEBERWACHUNG_EREIGNISSE_PRO_TAG_SCHWELLWERT` überschreibbar.
     depot_ueberwachung_ereignisse_pro_tag_schwellwert: int = Field(default=10, ge=0)
+
+    #: Bewährungsregel (AC12, S-047): Mindestzahl Trades im
+    #: Simulationsmodus vor einem Live-Start (Spec: "30–50 Trades",
+    #: provisorisch). Provisorischer Default 40 (Mitte), ohne
+    #: Codeänderung über `BEWAEHRUNGSREGEL_MINDEST_TRADES` überschreibbar.
+    #: Kein Live-Start-Konsument existiert im MVP (Nicht-Ziel) — reiner
+    #: hinterlegter Default (s. Modul-Docstring).
+    bewaehrungsregel_mindest_trades: int = Field(default=40, ge=1)
+
+    #: Bewährungsregel (AC12, S-047): Mindestdauer im Simulationsmodus vor
+    #: einem Live-Start, in Tagen (Spec: "3–6 Monate", provisorisch).
+    #: Provisorischer Default 120 Tage (Mitte), ohne Codeänderung über
+    #: `BEWAEHRUNGSREGEL_MINDEST_TAGE` überschreibbar.
+    bewaehrungsregel_mindest_tage: int = Field(default=120, ge=1)
+
+    #: Bewährungsregel (AC12, S-047): Kapitalanteil eines Live-Starts
+    #: (Spec: "Live-Start mit 10–20 % des Kapitals", provisorisch).
+    #: Provisorischer Default 0.15 (15 %, Mitte), ohne Codeänderung über
+    #: `BEWAEHRUNGSREGEL_LIVE_START_KAPITALANTEIL` überschreibbar.
+    bewaehrungsregel_live_start_kapitalanteil: float = Field(default=0.15, gt=0, le=1)
 
 
 @lru_cache
