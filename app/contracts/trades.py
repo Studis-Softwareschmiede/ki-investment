@@ -43,6 +43,13 @@ class TradeHistorieEintrag(BaseModel):
     fx_rate: Decimal | None = None
     kapital_gv_chf: Decimal | None = None
     waehrungs_gv_chf: Decimal | None = None
+    #: AC16 (S-073, Review-Fix Iteration 2): aufgelöste Titel-Bezeichnung
+    #: (`Instrument.symbol`/`Instrument.name`, `PositionRepository
+    #: .historie_depotweit`-Join) — additiv, `None` nur bei einem Fake-
+    #: Repository ohne Join-Unterstützung (nie bei einem echten Read über
+    #: die Datenbank, da jeder Trade eine `instrument`-FK trägt).
+    titel: str | None = None
+    name: str | None = None
 
 
 class TradesResponse(BaseModel):

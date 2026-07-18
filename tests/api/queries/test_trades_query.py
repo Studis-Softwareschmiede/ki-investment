@@ -71,6 +71,8 @@ def test_hole_trade_historie_bildet_alle_ac6_felder_verlustfrei_ab():
         fx_rate=Decimal("0.9"),
         kapital_gv_chf=Decimal("1.5"),
         waehrungs_gv_chf=Decimal("-0.5"),
+        titel="ACME",
+        name="Acme Corp",
     )
     repository = _FakePositionRepository([eintrag])
 
@@ -90,3 +92,5 @@ def test_hole_trade_historie_bildet_alle_ac6_felder_verlustfrei_ab():
     assert trade.fx_rate == Decimal("0.9")
     assert trade.kapital_gv_chf == Decimal("1.5")
     assert trade.waehrungs_gv_chf == Decimal("-0.5")
+    assert trade.titel == "ACME"
+    assert trade.name == "Acme Corp"

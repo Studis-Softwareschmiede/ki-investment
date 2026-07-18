@@ -24,6 +24,13 @@
   --warn-fg: light-dark(#9A6700, #D29922);
   --danger-fg: light-dark(#CF222E, #F85149);
   --info-fg: light-dark(#0969DA, #58A6FF);
+  --on-solid: #FFFFFF;
+
+  /* §2.3 Gewinn/Verlust (G/V) — Story S-073 (Trades-View, AC16
+     Slippage/TCA-Vorzeichen-Kodierung) ist die erste Content-View-Story,
+     die diese Tokens braucht (tokens.css-Konvention: kein Vorratsanlegen). */
+  --gain: light-dark(#1A7F37, #3FB950);
+  --loss: light-dark(#CF222E, #F85149);
 
   /* §2.5 Interaktion & Fokus */
   --accent: light-dark(#0969DA, #58A6FF);

@@ -135,6 +135,15 @@ class TransaktionsEintrag:
     #: AC6 (S-053): realisierter Währungsgewinn-Anteil in CHF — nur bei
     #: einem Fremdwährungs-Verkauf gesetzt, sonst `None`.
     waehrungs_gv_chf: Decimal | None = None
+    #: AC16 (S-073, Review-Fix Iteration 2): aufgelöste Titel-Bezeichnung
+    #: (`Instrument.symbol`) — additiv, `None` bei `historie_je_titel`
+    #: (kein `Instrument`-Join dort, siehe `SqlAlchemyPositionRepository
+    #: .historie_je_titel`), stets gesetzt bei `historie_depotweit`
+    #: (`Instrument`-Join, analog `alle_offenen_positionen`).
+    titel: str | None = None
+    #: AC16 (S-073, Review-Fix Iteration 2): `Instrument.name` — additiv,
+    #: `None`-Verhalten wie `titel`.
+    name: str | None = None
 
 
 @dataclass(frozen=True)

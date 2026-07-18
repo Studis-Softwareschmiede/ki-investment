@@ -12,14 +12,44 @@ Skip-Link zu `<main>`, genau ein `<h1>` je View, aktiver Nav-Eintrag über
 `aria-current`, Nav mit den fünf Kern-Views, die sechs Statusleisten-
 Indikatoren (Ampel/Kill-Switch/Modus/Heartbeat/Drawdown/Halluzinations-KPI)
 mit Text **und** Icon (D3 — nie nur Farbe) auf jeder View identisch (D2/
-WCAG 3.2.3)."""
+WCAG 3.2.3).
+
+**S-073-Nachzug:** `/ui/trades` bezieht seit Story S-073 (AC16) echte Daten
+über `PositionRepository` (`app.api.trades.get_position_repository`,
+DB-Session-DI) statt eines reinen Platzhalters — die generischen
+Shell-Struktur-Tests hier iterieren über alle fünf Views und liefen daher
+ohne DB gegen `/ui/trades` mit einem `RuntimeError` (fehlende
+`DB_*`-Env-Vars) ins Leere. Ein modulweites `dependency_overrides` auf ein
+leeres Fake-Repository hält diese Datei DB-frei (identisches Test-Double-
+Muster wie `tests/api/test_trades.py`/`tests/web/test_trades_view.py`) —
+die Struktur-Assertions (Landmarks, `<h1>`, Statusleiste) bleiben davon
+unberührt (leere Trade-Historie rendert weiterhin eine gültige Seite,
+siehe Empty-State AC16)."""
 
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.trades import get_position_repository
 from app.main import app
+
+
+class _LeeresFakePositionRepository:
+    """Minimaler Fake — `/ui/trades` (S-073) braucht für die reinen
+    Struktur-Tests hier keine echten Trades, nur eine DB-freie
+    `historie_depotweit`-Implementierung (leere Liste, Empty-State)."""
+
+    def historie_depotweit(self, *, mode, titel_id=None, von=None, bis=None):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def _override_position_repository():
+    app.dependency_overrides[get_position_repository] = _LeeresFakePositionRepository
+    yield
+    app.dependency_overrides.clear()
+
 
 _VIEW_PATHS: tuple[tuple[str, str], ...] = (
     ("/ui/depot", "nav-link-depot"),
