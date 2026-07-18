@@ -1,6 +1,6 @@
 """Tests für das Fill-Handling des Order-Ausführungs-Kerns (Story S-048).
 
-Covers (ausfuehrung-paper): AC7, AC8
+Covers (ausfuehrung-paper): AC5, AC7, AC8
 
 - AC7: `berechne_arrival_price_slippage` ist die reine Formel (Fill-Preis −
   Arrival-Price); `verarbeite_fill` wendet sie NUR bei einem bestätigten
@@ -150,6 +150,39 @@ def test_ac7_verarbeite_fill_berechnet_slippage_bei_vollstaendigem_fill() -> Non
     assert ergebnis.tatsaechliche_kosten == Decimal("5")
     assert ergebnis.restmenge == Decimal("0")
     assert ergebnis.restmenge_verhalten is None
+
+
+def test_ac7_geld_felder_werden_auf_numeric_8_quantisiert() -> None:
+    """@trace ausfuehrung-paper#AC7 — alle Geld-/Preis-Felder des Ergebnisses
+    (fill_preis/tatsaechliche_kosten/arrival_price/slippage) werden an der
+    NUMERIC(20,8)-Schreibgrenze kaufmännisch auf 8 Nachkommastellen gerundet
+    (S-041/S-053-Lesson: sonst Postgres-vs-SQLite-Divergenz). Belegt mit
+    Werten > 8 Nachkommastellen — glatte Fixtures prüfen die Quantisierung
+    nicht."""
+    anfrage = _anfrage(groesse=Decimal("100"), preis=Decimal("150"))
+    bestaetigung = _bestaetigung(anfrage)
+    meldung = BrokerFillMeldung(
+        status="filled",
+        ausgefuehrte_menge=Decimal("100"),
+        fill_preis=Decimal("151.1234567891"),
+        tatsaechliche_kosten=Decimal("5.0000000004"),
+    )
+
+    ergebnis = verarbeite_fill(
+        anfrage, bestaetigung, meldung, arrival_price=Decimal("150.0000000006")
+    )
+
+    assert ergebnis.fill_preis == Decimal("151.12345679")
+    assert ergebnis.tatsaechliche_kosten == Decimal("5.00000000")
+    assert ergebnis.arrival_price == Decimal("150.00000000")
+    assert ergebnis.slippage == Decimal("1.12345679")
+    for wert in (
+        ergebnis.fill_preis,
+        ergebnis.tatsaechliche_kosten,
+        ergebnis.arrival_price,
+        ergebnis.slippage,
+    ):
+        assert wert.as_tuple().exponent == -8
 
 
 def test_ac7_verarbeite_fill_bei_reject_hat_keine_slippage() -> None:

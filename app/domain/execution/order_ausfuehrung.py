@@ -128,7 +128,7 @@ Slippage/TCA):
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from app.contracts.ausfuehrung_paper import (
     Ausfuehrungsergebnis,
@@ -350,14 +350,27 @@ def fuehre_order_aus(
     return port.platziere_order(anfrage)
 
 
+#: Rundungsraster für Preise/CHF-Geldbeträge (NUMERIC(20,8), P7/ADR-010) —
+#: kaufmännisch (ROUND_HALF_UP), analog `position_booking._quantize_geld`.
+#: Alle Geld-/Preis-Felder von `Ausfuehrungsergebnis` (landen in
+#: `order`/`trade_fill` NUMERIC(20,8)) werden hier an der Schreibgrenze
+#: quantisiert (S-041/S-053-Lesson: sonst Postgres-vs-SQLite-Divergenz).
+_GELD_QUANTUM = Decimal("0.00000001")
+
+
+def _quantize_geld(wert: Decimal) -> Decimal:
+    return wert.quantize(_GELD_QUANTUM, rounding=ROUND_HALF_UP)
+
+
 def berechne_arrival_price_slippage(fill_preis: Decimal, arrival_price: Decimal) -> Decimal:
     """AC7: realisierte Arrival-Price-Slippage je Trade = Fill-Preis −
     Arrival-Price (identische Formel zu BR-114 `trade_fill.slippage_abs`
     und zur Depot-eigenen `app.domain.portfolio.transaction_historie
     .berechne_slippage`, hier auf die Order-Ausführungs-eigene TCA
     angewandt, C-016). Positiv heisst: der Fill war teurer/schlechter als
-    der Signal-Kurs (Kauf-Kontext); negativ heisst günstiger."""
-    return fill_preis - arrival_price
+    der Signal-Kurs (Kauf-Kontext); negativ heisst günstiger. An der
+    NUMERIC(20,8)-Schreibgrenze quantisiert (S-041/S-053-Lesson)."""
+    return _quantize_geld(fill_preis - arrival_price)
 
 
 def bestimme_restmenge_verhalten(order_typ: ExecutionOrderTyp) -> RestmengeVerhalten:
@@ -402,7 +415,7 @@ def verarbeite_fill(
             ausgefuehrte_menge=Decimal("0"),
             fill_preis=None,
             tatsaechliche_kosten=Decimal("0"),
-            arrival_price=arrival_price,
+            arrival_price=_quantize_geld(arrival_price),
             slippage=None,
             restmenge=angefragte_menge,
             restmenge_verhalten=None,
@@ -428,9 +441,9 @@ def verarbeite_fill(
         status=meldung.status,
         angefragte_menge=angefragte_menge,
         ausgefuehrte_menge=meldung.ausgefuehrte_menge,
-        fill_preis=meldung.fill_preis,
-        tatsaechliche_kosten=meldung.tatsaechliche_kosten,
-        arrival_price=arrival_price,
+        fill_preis=_quantize_geld(meldung.fill_preis),
+        tatsaechliche_kosten=_quantize_geld(meldung.tatsaechliche_kosten),
+        arrival_price=_quantize_geld(arrival_price),
         slippage=berechne_arrival_price_slippage(meldung.fill_preis, arrival_price),
         restmenge=restmenge,
         restmenge_verhalten=restmenge_verhalten,
@@ -456,7 +469,17 @@ def fuehre_order_aus_und_verarbeite_fill(
     nötig, siehe Moduldocstring). Wählt denselben Broker-Endpunkt-Typ
     (AC5) wie `fuehre_order_aus` für den nachfolgenden `ermittle_fill`-
     Aufruf — beide Aufrufe MÜSSEN denselben Port ansprechen (derselbe
-    Broker-Endpunkt, der die Order angenommen hat)."""
+    Broker-Endpunkt, der die Order angenommen hat).
+
+    **Scope-Grenze (bewusst, Nicht-Ziel dieser Story):** diese Funktion
+    liefert ausschliesslich das `Ausfuehrungsergebnis`-DTO zurück und
+    persistiert NICHTS. Die Verdrahtung des `ExecutionRepository`
+    (`speichere_ausfuehrung` → `order`/`trade_fill`-Zeilen) sowie die dafür
+    nötige `instrument_id`-Auflösung aus `titel_id` sind einem künftigen
+    Orchestrierungs-Layer vorbehalten (Persistenz-Port + Migration + Modelle
+    existieren bereits aus S-048, nur der Aufrufer fehlt — analog zu
+    `pruefe_kauf_gate`/`bestimme_exit_order`). Bis dahin bleiben `order`/
+    `trade_fill` leer."""
     bestaetigung = fuehre_order_aus(
         anfrage,
         ibkr_paper_port=ibkr_paper_port,
