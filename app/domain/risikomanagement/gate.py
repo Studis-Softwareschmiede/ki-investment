@@ -1,5 +1,5 @@
 """Risikomanagement-Gate: Drei-Wege-Entscheid + volle Prüfmatrix
-(Storys S-044 AC2/AC5/AC6/AC12 und S-045 AC8/AC9/AC10, Spec
+(Storys S-044 AC2/AC5/AC6/AC12, S-045 AC8/AC9/AC10 und S-056 AC7, Spec
 `docs/specs/risikomanagement.md`, BR-014/BR-013/BR-138).
 
 Reiner Domain-Kern (architecture.md §4 P1/P3): keine I/O, kein LLM, keine
@@ -66,6 +66,26 @@ begrenzt den wertgewichteten Anteil aller **Nicht-Cash**-Positionen
 dieselbe Konzentrationsformel, Gruppierungsachse "Cash vs. Nicht-Cash".
 Kauft der Kandidat selbst die Cash-Klasse (praktisch irrelevant für einen
 Kauf-Order-Pfad), entfällt diese Prüfung (kein Exposure-Zuwachs).
+
+**AC7 (Warteliste beim Blockieren, S-056):** deckt A2 ("... der Titel kann
+optional auf eine Warteliste gesetzt werden"). Der Aufrufer entscheidet
+über den neuen Parameter `warteliste_bei_blockade` (Default `False`, rein
+additiv — bestehende Aufrufer/Tests bleiben unverändert), ob ein wegen
+ausgeschöpften Limits blockierter Kauf-Kandidat als `GateEntscheid
+.warteliste=True` markiert wird ("... kann optional ... gesetzt werden" —
+kein automatischer Zwang). Gilt ausschliesslich für den A2-Blockade-Grund
+("Limit bereits ausgeschöpft oder der Korrelations-/Klumpenwert zu hoch",
+d.h. den `bindend.max_erlaubte_zusatz <= 0`-Zweig unten) — NICHT für die
+beiden anderen Blockade-Gründe (`depot_stand=None`/`depotstrategie=None`,
+AC12/E1: kein Grenzwert verfügbar, keine Konzentrationsprüfung stattgefunden
+— "auf Warteliste setzen" ergibt hier keinen fachlichen Sinn) und NICHT für
+den Ordergrösse-`<= 0`-Edge-Case (keine gültige Order, die warten könnte).
+Die eigentliche Warteliste-**Mechanik** (Persistenz, Re-Prüfung/Ablauf) ist
+laut Spec "Offene Punkte" ("Warteliste-Mechanik bei Blockade (wann/wie
+erneut geprüft) — offen") explizit NICHT Teil dieser Story — das Gate liefert
+ausschliesslich das strukturelle Signal (`warteliste: bool`) an das
+Kauf-&-Verkaufsmodul (§Verträge "Output"), das domain-fremde Persistieren/
+Re-Prüfen ist eine bewusst offene Folge-Story (Ausbau).
 
 **AC8-Checklisten-Eintrag "Drawdown-Limits":** die Spec nennt in AC8
 "Drawdown-Limits" als eine von vier Prüfmatrix-Dimensionen, präzisiert dies
@@ -210,8 +230,9 @@ def pruefe_kauf_gate(
     korrelations_cluster: str | None = None,
     depotstrategie: DepotstrategieKonfiguration | None,
     depot_stand: DepotStand | None,
+    warteliste_bei_blockade: bool = False,
 ) -> GateEntscheid:
-    """AC2/AC6/AC8/AC9/AC10/AC12: prüft `kauf_order` gegen die volle
+    """AC2/AC6/AC7/AC8/AC9/AC10/AC12: prüft `kauf_order` gegen die volle
     Prüfmatrix (Sektor/Klasse/Einzelposition/Korrelations-Cluster/
     portfolio-weites Exposure) der aktiven Depotstrategie und trifft den
     Drei-Wege-Entscheid.
@@ -238,6 +259,14 @@ def pruefe_kauf_gate(
         depot_stand: der aktuelle Depot-Stand (`app.domain.portfolio
             .portfolio_aggregate.ermittle_depot_stand`) — `None`, wenn er
             nicht geladen werden konnte (AC12, E1).
+        warteliste_bei_blockade: AC7 (S-056) — wird ein Kauf wegen
+            ausgeschöpften Limits blockiert (A2), markiert der Aufrufer mit
+            `True` den optionalen Wunsch, den Titel auf die Warteliste zu
+            setzen (`GateEntscheid.warteliste=True`). Default `False`
+            (kein automatisches Setzen, "kann optional" laut Spec). Wirkt
+            NICHT auf die AC12/E1-Blockaden (kein Depot-Stand/keine
+            Depotstrategie) oder den Ordergrösse-`<=0`-Edge-Case — siehe
+            Moduldocstring.
 
     Returns:
         `GateEntscheid` mit genau einem der drei Entscheide (AC6).
@@ -375,12 +404,16 @@ def pruefe_kauf_gate(
     bindend = min(bindende_pruefungen, key=lambda p: p.max_erlaubte_zusatz)
 
     if bindend.max_erlaubte_zusatz <= 0:
+        warteliste_hinweis = (
+            " Titel wird auf die Warteliste gesetzt (AC7)." if warteliste_bei_blockade else ""
+        )
         return GateEntscheid(
             entscheid="blockieren",
             freigegebene_groesse=_quantize_geld(Decimal("0")),
+            warteliste=warteliste_bei_blockade,
             begruendung=(
                 f"Limit für {bindend.label} bereits ausgeschöpft — Kauf wird "
-                "blockiert (AC2/AC8/AC9/AC10, A2)."
+                f"blockiert (AC2/AC8/AC9/AC10, A2).{warteliste_hinweis}"
             ),
         )
 

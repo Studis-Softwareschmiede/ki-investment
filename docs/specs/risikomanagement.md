@@ -73,6 +73,22 @@ Zwei zusammengehörige Bausteine: (a) die **Depotstrategie** als nutzerkonfiguri
 > "unbekannt"-Bucket statt die Prüfung zu überspringen (konservative
 > Operationalisierung des Edge-Case "Korrelations-Daten nicht verfügbar").
 
+> **Präzisierung (S-056):** AC7 ("Beim Blockieren kann der Titel optional
+> auf eine Warteliste gesetzt werden") deckt laut A2-Wortlaut den Fall
+> "Limit bereits ausgeschöpft oder der Korrelations-/Klumpenwert zu hoch".
+> Das Gate kennt drei strukturell verschiedene Blockade-Gründe: (1) A2 —
+> eine der Prüfmatrix-Dimensionen (AC2/AC8/AC9/AC10) ist ausgeschöpft, (2)
+> AC12/E1 — kein Depot-Stand oder keine aktive Depotstrategie verfügbar
+> (keine Konzentrationsprüfung fand überhaupt statt), (3) der
+> Ordergrösse-`<=0`-Edge-Case (keine gültige Order). Nur Grund (1) ist die
+> von AC7/A2 gemeinte Blockade — "Warteliste" setzt eine tatsächlich
+> geprüfte, aber am Limit gescheiterte Order voraus; bei (2)/(3) gibt es
+> fachlich keinen wartefähigen Kandidaten. Die Warteliste-**Mechanik**
+> selbst (Persistenz, Re-Prüfung/Ablauf) bleibt gemäss "Offene Punkte"
+> weiterhin offen — diese Story liefert ausschliesslich das optionale
+> Entscheid-Signal (`GateEntscheid.warteliste`, vom Aufrufer per
+> `warteliste_bei_blockade`-Parameter angefordert).
+
 > **Traceability:** Jeder Test trägt das kanonische Trace-Tag `@trace risikomanagement#AC<n>`
 > gemäss `knowledge/<lang>.md` → `## Spec-Tagging`. Der `tester` rechnet das Coverage-Gate
 > (jede genannte AC ≥ 1 deckender Test).
