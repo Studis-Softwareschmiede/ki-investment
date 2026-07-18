@@ -43,6 +43,12 @@ vom Typ `"drawdown"` mit `schwere="warn"` und setzt
 `DrawdownStatus.ueberwachungsluecke=True` — OHNE den Kill-Switch
 auszulösen (kein Fehlalarm bei leerer Kurve, aber auch kein
 stillschweigendes Verschweigen der Lücke).
+
+**Update S-068** (`docs/specs/frontend-cockpit.md` AC8): ergänzt `status()`
+— eine reine, seiteneffektfreie Zustandsabfrage für read-only Konsumenten
+(Betriebs-Cockpit System-Status). Das bestehende `pruefe_drawdown()` bleibt
+unverändert die einzige Stelle, die tatsächlich alarmiert/den Kill-Switch
+auslöst.
 """
 
 from __future__ import annotations
@@ -76,6 +82,38 @@ def aktualisiere_equity_stand(equity_wert: Decimal, zeitstempel: datetime) -> No
             _hoechststand = equity_wert
 
 
+def _lese_drawdown_status_unlocked(
+    aktueller_stand: Decimal | None, hoechststand: Decimal | None
+) -> DrawdownStatus:
+    """NUR mit bereits unter `_lock` gelesenen Werten aufrufen: liefert den
+    reinen Zustand (Cold-Start-Erkennung + `drawdown_pct`-Formel), OHNE
+    einen `Alert` zu melden oder den Kill-Switch auszulösen — `kill_
+    ausgeloest` ist in diesem Kern deshalb immer `False`. Gemeinsamer Kern
+    von `pruefe_drawdown()` (meldet zusätzlich Alerts/Kill-Switch on top)
+    UND dem seiteneffektfreien `status()` (S-068) — analog zum bereits
+    bestehenden Muster `_zaehle_relevante_unlocked()` in
+    `app.core.hallucination_kpi`."""
+    if aktueller_stand is None or hoechststand is None:
+        return DrawdownStatus(
+            aktueller_stand=None,
+            hoechststand=None,
+            drawdown_pct=None,
+            ueberwachungsluecke=True,
+            kill_ausgeloest=False,
+        )
+
+    drawdown_pct = (
+        (hoechststand - aktueller_stand) / hoechststand if hoechststand > 0 else Decimal(0)
+    )
+    return DrawdownStatus(
+        aktueller_stand=aktueller_stand,
+        hoechststand=hoechststand,
+        drawdown_pct=drawdown_pct,
+        ueberwachungsluecke=False,
+        kill_ausgeloest=False,
+    )
+
+
 def pruefe_drawdown(*, jetzt: datetime | None = None) -> DrawdownStatus:
     """Prüft den aktuellen Drawdown gegen die zwei unabhängig
     konfigurierbaren Schwellen (AC5) und löst bei Überschreiten der
@@ -90,7 +128,9 @@ def pruefe_drawdown(*, jetzt: datetime | None = None) -> DrawdownStatus:
         aktueller_stand = _aktueller_stand
         hoechststand = _hoechststand
 
-    if aktueller_stand is None or hoechststand is None:
+    basis_status = _lese_drawdown_status_unlocked(aktueller_stand, hoechststand)
+
+    if basis_status.ueberwachungsluecke:
         melde(
             Alert(
                 typ="drawdown",
@@ -103,17 +143,10 @@ def pruefe_drawdown(*, jetzt: datetime | None = None) -> DrawdownStatus:
                 zeitstempel=ts,
             )
         )
-        return DrawdownStatus(
-            aktueller_stand=None,
-            hoechststand=None,
-            drawdown_pct=None,
-            ueberwachungsluecke=True,
-            kill_ausgeloest=False,
-        )
+        return basis_status
 
-    drawdown_pct = (
-        (hoechststand - aktueller_stand) / hoechststand if hoechststand > 0 else Decimal(0)
-    )
+    drawdown_pct = basis_status.drawdown_pct
+    assert drawdown_pct is not None  # Cold-Start bereits oben behandelt
 
     kill_ausgeloest = False
     if drawdown_pct > Decimal(str(settings.drawdown_kill_schwelle)):
@@ -155,12 +188,30 @@ def pruefe_drawdown(*, jetzt: datetime | None = None) -> DrawdownStatus:
         )
 
     return DrawdownStatus(
-        aktueller_stand=aktueller_stand,
-        hoechststand=hoechststand,
+        aktueller_stand=basis_status.aktueller_stand,
+        hoechststand=basis_status.hoechststand,
         drawdown_pct=drawdown_pct,
         ueberwachungsluecke=False,
         kill_ausgeloest=kill_ausgeloest,
     )
+
+
+def status() -> DrawdownStatus:
+    """Reine Zustandsabfrage (S-068, `docs/specs/frontend-cockpit.md` AC8)
+    — Gegenstück zu `pruefe_drawdown()` für read-only Konsumenten (Betriebs-
+    Cockpit System-Status): nutzt denselben Kern (`_lese_drawdown_status_
+    unlocked`, Cold-Start-Erkennung + `drawdown_pct`-Formel) wie
+    `pruefe_drawdown()`, löst aber NIE einen `Alert` oder den Kill-Switch
+    aus (kein `melde()`-/`kill_switch.ausloesen()`-Aufruf) — ein reiner
+    Status-Read darf keine Nebenwirkung auf den Betriebszustand haben.
+    `kill_ausgeloest` ist bei diesem Getter deshalb immer `False` (das Feld
+    beschreibt nur, ob DIESER Aufruf ausgelöst hat, nicht den laufenden
+    Kill-Switch-Zustand selbst — dafür `app.core.kill_switch.status()`)."""
+    with _lock:
+        aktueller_stand = _aktueller_stand
+        hoechststand = _hoechststand
+
+    return _lese_drawdown_status_unlocked(aktueller_stand, hoechststand)
 
 
 def reset_fuer_tests() -> None:
