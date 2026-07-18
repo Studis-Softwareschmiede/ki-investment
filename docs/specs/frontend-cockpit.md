@@ -2,7 +2,7 @@
 id: frontend-cockpit
 title: Betriebs-Cockpit-Frontend (server-gerenderte Anzeige-/Control-Plane)
 status: active
-version: 1
+version: 2
 spec_format: use-case-2.0
 area: depot
 ---
@@ -91,6 +91,19 @@ Das Betriebs-Cockpit ist die server-gerenderte Anzeige- und Control-Plane des Sy
 
 - **AC23** — Playwright-Regressionstests unter `tests/regression/**/*.spec.ts` decken die fünf gerenderten Cockpit-Views end-to-end gegen den Demo-Seed-Zustand ab und verankern sich an den stabilen `data-testid`/`data-*`-Attributen aus `design.md` §7/§8; Server-Rendering ändert daran nichts (Playwright ist Test-Toolchain, kein FE-Framework-Signal).
 
+**Betriebs-Cockpit-Lücken (Konzept-Abgleich — MinTRL · Warteliste · Hybrid-Bestätigung; v2)**
+
+> Diese drei ACs schliessen die im systematischen Abgleich Obsidian-Konzept ↔ Cockpit-Planung gefundenen Anzeige-Lücken. Sie sind **rein anzeigend/steuernd** (Anzeige-/Control-Plane, §13.7) und ändern **keine** Trading-Logik. Die zugehörigen **Backend-Write-Pfade** (Warteliste-Persistenz, Order-Anhalten für Bestätigung) sind bewusst **nicht** Teil dieser Spec (siehe Nicht-Ziele/Abhängigkeiten) — im MVP speist der Demo-Seed die Read-Modelle.
+
+- **AC24** — **MinTRL-Restlaufzeit im System-Status-DTO:** Das `GET /api/system/status`-DTO (AC8) wird um die **MinTRL-Restlaufzeit** der laufenden Paper-Bewährung (Stufe B) erweitert — Feld `mintrl_restlaufzeit` (verbleibende Zeit bis statistische Signifikanz, als Klartext **und** maschinenlesbarer Wert/Einheit), bezogen aus dem **Stufe-B-Report des Validierungs-Gates** (→ `[[lernschleife]]`#AC9, → BR-025). Read-only: das Cockpit **zeigt** ausschliesslich den im Backend berechneten Wert (kein neuer Rechenpfad im Cockpit, Boundary AC2 gilt). Gibt es keine laufende 🟡-Bewährung (Stufe B nicht aktiv), ist der Wert `None`.
+- **AC25** — **System-Status-View zeigt MinTRL-Restlaufzeit:** Neben der Gate-Ampel (AC17) zeigt die System-Status-View die MinTRL-Restlaufzeit als Klartext mit Einheit (z. B. „noch ≈ 2.7 Jahre bis statistisch signifikant") samt erklärendem Kurztext („🟢 heisst *noch nicht* statistisch bewiesen — MinTRL zeigt die verbleibende Bewährungszeit", → C-012/IDEA-025); fehlt der Wert (`None`), erscheint der definierte „—"-Empty-State, **nie** 0 oder ein Farbzustand (E2-Muster). Status nie nur über Farbe (D3); stabiles `data-testid` gemäss `design.md` §7.
+- **AC26** — **Warteliste-Read-Modell + `GET /api/warteliste`:** Eine read-only Query-Funktion in `app/api/queries/**` + JSON-Route (`response_model`-DTO) liefert die vom Risikomanagement-Gate **blockierten Kauf-Kandidaten** als schlankes Read-Modell: je Eintrag Titel, Anlageklasse, geplante Grösse, **Blockade-Grund** (welche Prüfmatrix-Dimension: Klumpen-/Korrelations-/Drawdown-/Kelly-Cap-Limit, → `[[risikomanagement]]`#AC7/AC8/AC9) und **Zeitpunkt**; strikt modus-isoliert (→ BR-130). Boundary AC2 gilt: **kein** Import aus `app/domain/risikomanagement`, Daten ausschliesslich aus dem Read-Modell/Repository, **nie** per Gate-Direktaufruf. Detail-Datenmodell (Entität/Constraints/Index) → `dba`/`data-model.md`.
+- **AC27** — **Warteliste-View:** Datentabelle (§7.6) mit Titel + Klassen-Chip (§2.4), geplanter Grösse, Blockade-Grund als Text/Badge und Zeitpunkt + definierter Empty-State „Keine blockierten Kandidaten im Modus SIMULIERT"; Status/Grund nie nur über Farbe (D3); stabile `data-testid` gemäss `design.md` §7. Rein lesend (kein Control-Element in dieser View).
+- **AC28** — **Demo-Seed Warteliste:** Der Demo-Seed (AC22) füllt das Warteliste-Read-Modell mit deterministischen, order-freien Beispiel-Einträgen (idempotent, `mode="simuliert"`), sodass die Warteliste-View gefüllt und Playwright-testbar ist; **keine** Order-/Sizing-/Risiko-/Execution-Aufrufe (§13.7-6).
+- **AC29** — **Offene-Entscheide-Read-Modell + `GET /api/entscheide/offen`:** Eine read-only Query-Funktion + JSON-Route (`response_model`-DTO) liefert die offenen, **bestätigungspflichtigen** Entscheide des Hybrid-Modus (Titel, Richtung Kauf/Verkauf, Grösse, vorgeschlagene Order, Frist/Ablauf, Begründung) als schlankes Read-Modell (→ C-016/IDEA-015/IDEA-027). Solange der autonome Paper-Modus aktiv ist (MVP-Default), ist die Liste **leer**. Boundary AC2 gilt (read-only, kein Execution-Import).
+- **AC30** — **Offene-Entscheide-View + Bestätigen/Ablehnen (Control-Plane):** Die View zeigt offene Entscheide als Karten/Tabelle; **Bestätigen** und **Ablehnen** laufen als HTMX-POST **ausschliesslich** über `app/api/control.py` (Control-Boundary AC20) gegen den Entscheid-Zustand — **nie** über die UI-/Query-Schicht und **nie** direkt in die Execution-Logik; nach dem POST wird das aktualisierte Partial zurückgerendert. Jede Bestätigung ist über einen nativen modalen `<dialog>` mit Klartext-Konsequenz bestätigungspflichtig (analog AC21). **Die MVP-Live-Sperre (→ BR-019/AC21) bleibt unangetastet** — eine Bestätigung löst im MVP ausschliesslich simulierte Orders aus.
+- **AC31** — **Hybrid-Flow feature-gated (post-MVP-Default aus):** Der Bestätigungs-Flow (AC29/AC30) ist über env/Konfig **feature-gated**, Default **aus** im MVP-Paper-Autonom-Betrieb (→ C-016 „Bestätigungspflicht-Modus ist späteres Feature des hybriden Betriebs"); ist er aus, zeigt die View einen definierten „autonom — keine offenen Entscheide"-Zustand und die Control-POSTs sind inaktiv/gesperrt. Bei aktivem Flag kann der Demo-Seed deterministische offene Entscheide order-frei füllen (AC22-konform).
+
 > **Traceability:** Jeder Test trägt das kanonische Trace-Tag `@trace frontend-cockpit#AC<n>[,BR-NNN]`.
 
 ## Verträge
@@ -103,10 +116,12 @@ Jeder Read-Endpunkt = **Query-Funktion (read-only) + JSON-Route (`response_model
 | Kandidaten | `GET /api/kandidaten` | Liste: Titel, Klasse, Gesamtscore, Signal, 5 Kategorie-Scores, `as_of` | `domain/scoring`, Kandidaten-Analyse-Read-Modell (AC7) |
 | ↳ Detail | `GET /api/kandidaten/{id}` | Kategorie-Fakten (Quellen-ID/Timestamp), Begründung, Sanity-Cap-Status | `domain/analysis_new`, LLM-Grounding-Output |
 | Trades | `GET /api/trades?mode=&titel=&von=&bis=` | depotweite Fills/Transaktionen inkl. Slippage/TCA, FX-Split | `PositionRepository.historie_je_titel`, depotweites Historien-Read-Modell (AC7) |
-| System-Status | `GET /api/system/status` | Kill-Switch, Modus je Klasse, Heartbeat, Drawdown, Halluz-KPI, Gate-Ampel | `app/core/**`, Validierungs-Gate |
+| System-Status | `GET /api/system/status` | Kill-Switch, Modus je Klasse, Heartbeat, Drawdown, Halluz-KPI, Gate-Ampel, **MinTRL-Restlaufzeit** (AC24) | `app/core/**`, Validierungs-Gate (Stufe-B-Report, → `[[lernschleife]]`) |
 | Konfiguration | `GET /api/config/anlageklassen` · `GET /api/config/depotstrategie` | 11 Klassen (Toggle + Prio) · Depotstrategie-Grenzwerte/Preset | `domain/assetclasses`, Konfig |
+| Warteliste (v2) | `GET /api/warteliste?mode=` | blockierte Kauf-Kandidaten: Titel, Klasse, geplante Grösse, Blockade-Grund, Zeitpunkt (AC26) | Warteliste-Read-Modell (AC26); Blockade-Signal → `[[risikomanagement]]`#AC7 |
+| Offene Entscheide (v2) | `GET /api/entscheide/offen` | bestätigungspflichtige Hybrid-Entscheide: Titel, Richtung, Grösse, Order, Frist, Begründung (AC29) | Entscheid-Read-Modell (AC29); feature-gated (AC31) |
 
-**Control-Plane (POST, `app/api/control.py`):** Toggle je Klasse, Modus-Schalter (Live gesperrt), Kill-Switch auslösen/zurücksetzen → ausschliesslich `app/core/**`-Zustandsfunktionen (z. B. `kill_switch.ausloesen`/`freigeben`) bzw. Konfig-Schreibpfade; Rückgabe = aktualisiertes Status-Partial (HTML).
+**Control-Plane (POST, `app/api/control.py`):** Toggle je Klasse, Modus-Schalter (Live gesperrt), Kill-Switch auslösen/zurücksetzen, **Hybrid-Entscheid bestätigen/ablehnen** (feature-gated, AC30/AC31) → ausschliesslich `app/core/**`-Zustandsfunktionen (z. B. `kill_switch.ausloesen`/`freigeben`) bzw. Konfig-/Entscheid-Zustandspfade; Rückgabe = aktualisiertes Partial (HTML).
 
 **Asset-/Template-Ort:** Templates `app/web/templates/`, Statics `app/web/static/` (inkl. `static/vendor/htmx.min.js`, `static/css/tokens.css`). **Kein CDN.**
 
@@ -117,6 +132,9 @@ Jeder Read-Endpunkt = **Query-Funktion (read-only) + JSON-Route (`response_model
 - Leere Tabelle → definierter Empty-State je Modus (z. B. „Keine offenen Positionen im Modus SIMULIERT").
 - Kandidat mit fehlender Kategorie-Datengrundlage → als fehlend ausgewiesen, nie geschätzt (→ BR-005, E3).
 - Kill-Switch `HALTED` / Live-Modus → Vollbreite-Banner mit maximaler Priorität (A1, D5).
+- Keine laufende Stufe-B-Bewährung (`mintrl_restlaufzeit = None`) → MinTRL „—", nie 0/Farbe (AC25, E2-Muster).
+- Leere Warteliste → definierter Empty-State „Keine blockierten Kandidaten im Modus SIMULIERT" (AC27).
+- Hybrid-Flow feature-gated aus (MVP-Default) → „autonom — keine offenen Entscheide", Control-POSTs gesperrt (AC31).
 
 ## NFRs
 
@@ -131,8 +149,11 @@ Jeder Read-Endpunkt = **Query-Funktion (read-only) + JSON-Route (`response_model
 - **Kein SPA-/Node-Build** (ADR-012); keine hoch-interaktiven Client-Zustände (Drag&Drop/Offline).
 - **Kein neues Order-/Sizing-/Risiko-/Execution-Verhalten** — die Anzeige-Schicht liest nur; das Read-Modell-Gap wird rein lesend geschlossen (AC7).
 - **Kein Auth-Layer** im MVP (local-only, §13.7); kommt er, gilt WCAG 3.3.8.
-- **Kein DB-Detailmodell** des Kandidaten-/Trade-Read-Modells hier — Entitäten/Constraints/Indizes → `dba`/`data-model.md`.
+- **Kein DB-Detailmodell** des Kandidaten-/Trade-/Warteliste-/Entscheid-Read-Modells hier — Entitäten/Constraints/Indizes → `dba`/`data-model.md`.
 - **Keine konkrete Chart-Lib-Datei-Freigabe** — Spinnennetz server-SVG (keine Lib); Zeitreihen-Empfehlung uPlot (Freigabe Owner/designer).
+- **Keine MinTRL-Berechnung** — das Cockpit zeigt nur den vom Validierungs-Gate (Stufe-B-Report) gelieferten Wert (AC24); die Berechnung selbst bleibt in `[[lernschleife]]`#AC9.
+- **Keine Warteliste-Schreib-/Re-Prüf-Mechanik** — das Cockpit **zeigt** die Warteliste nur read-only (AC26/AC27). Das **Erfassen** blockierter Käufe im Order-Pfad und die Re-Prüf-/Ablauf-Mechanik bleiben offen und sind Backend-Scope (Risikomanagement/Handel, → `[[risikomanagement]]` „Offene Punkte"). Im MVP speist ausschliesslich der Demo-Seed das Read-Modell (AC28).
+- **Keine Order-Anhalte-Mechanik für den Hybrid-Modus** — das tatsächliche Anhalten einer Order zur Bestätigung (Execution-Pause) ist post-MVP-Backend-Scope (Ausführung/Handel, → C-016 „späteres Feature"); diese Spec deckt nur die Cockpit-Anzeige-/Control-Fläche hinter dem Feature-Flag (AC29–AC31).
 
 ## Abhängigkeiten
 
@@ -142,5 +163,8 @@ Jeder Read-Endpunkt = **Query-Funktion (read-only) + JSON-Route (`response_model
 - Anlageklassen-Konfiguration (`[[anlageklassen-config]]`) — Toggles/Prio/Depotstrategie (AC9/AC18).
 - Lernschleife (`[[lernschleife]]`) — Gate-Ampel (AC8, → BR-025).
 - Socket-Live-Kurs-Zugriff (`LivePriceProvider`, Cross-Cutting, P5) — Live-Kurse (AC3/AC14).
+- Lernschleife (`[[lernschleife]]`) — MinTRL-Restlaufzeit aus dem Stufe-B-Report (AC24/AC25, → `[[lernschleife]]`#AC9). Kein neuer Rechenpfad im Cockpit.
+- Risikomanagement (`[[risikomanagement]]`) — Blockade-Signal/Warteliste (AC26–AC28, → `[[risikomanagement]]`#AC7). **Offen (Backend-Scope):** Warteliste-Persistenz-/Write-Path (blockierte Käufe erfassen) — nicht Teil dieser Spec.
+- Ausführung (`[[ausfuehrung-paper]]`) — Hybrid-Bestätigungs-Modus (AC29–AC31, → C-016). **Offen (post-MVP-Backend-Scope):** Order-Anhalte-Mechanik zur Bestätigung — nicht Teil dieser Spec.
 - Geschäftsregeln: BR-001, BR-002, BR-005, BR-006, BR-007, BR-008, BR-017, BR-018, BR-019, BR-021, BR-022, BR-025, BR-130 (`architecture.md` / `data-model.md`).
 - Architektur: §13 (ADR-012/013/014), §4 UI-Boundary. Design: `docs/design.md` §5/§7/§8/§9/§10.
