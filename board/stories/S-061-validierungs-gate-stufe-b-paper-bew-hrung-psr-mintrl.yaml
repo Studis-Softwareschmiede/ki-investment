@@ -1,7 +1,7 @@
 id: S-061
 parent: F-016
 title: 'Validierungs-Gate Stufe B (Paper-Bewährung): PSR & MinTRL'
-status: To Do
+status: Done
 priority: P3
 spec: docs/specs/lernschleife.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: Cold-Start; PSR/MinTRL-Statistik laufend gegen Paper-Trade-Log (S
   MinTRL-Anzeige.
 confidence: low
 tok_est: null
-branch: null
+branch: feat/S-061
 pr: null
 blocked_reason: null
 created_at: '2026-07-12T10:11:02Z'
-updated_at: '2026-07-12T10:11:09Z'
-done_at: null
+updated_at: '2026-07-18T02:26:57Z'
+done_at: '2026-07-18T02:26:55Z'
