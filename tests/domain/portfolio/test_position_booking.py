@@ -226,7 +226,9 @@ def _kauf(**overrides: object) -> FillInput:
         "mode": "simuliert",
         "strategie": "Index",
         "zeithorizont": 8,
-        "exit_regeln": ExitRegeln(stop_typ="atr_trailing", stop_parameter=2.5),
+        "exit_regeln": ExitRegeln(
+            stop_typ="atr_trailing", stop_parameter=2.5, thesis_invalidierung="Wachstum < 5%."
+        ),
         "these": "Langfristiger Index-Halter.",
     }
     kwargs.update(overrides)

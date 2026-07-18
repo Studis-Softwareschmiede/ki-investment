@@ -46,7 +46,9 @@ VALID_KAUF_KWARGS = {
     "mode": "simuliert",
     "strategie": "Index",
     "zeithorizont": 8,
-    "exit_regeln": ExitRegeln(stop_typ="atr_trailing", stop_parameter=2.5),
+    "exit_regeln": ExitRegeln(
+        stop_typ="atr_trailing", stop_parameter=2.5, thesis_invalidierung="Wachstum < 5%."
+    ),
     "these": "Langfristiger Index-Halter.",
 }
 
@@ -123,6 +125,33 @@ def test_rejects_kauf_missing_positions_attribut(missing_field: str) -> None:
     stillschweigenden Lücke angelegt."""
     kwargs = dict(VALID_KAUF_KWARGS)
     del kwargs[missing_field]
+    with pytest.raises(ValidationError):
+        FillInput(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "exit_regeln_kwargs",
+    [
+        {},  # komplett leeres Bündel — alle Unterfelder `None`
+        {"thesis_invalidierung": "These bricht."},  # stop_typ fehlt
+        {"stop_typ": "atr_trailing", "stop_parameter": 2.5},  # thesis_invalidierung fehlt
+        {"stop_typ": "   ", "thesis_invalidierung": "These bricht."},  # stop_typ nur Whitespace
+    ],
+    ids=["leeres_buendel", "stop_typ_fehlt", "thesis_invalidierung_fehlt", "stop_typ_whitespace"],
+)
+def test_rejects_kauf_with_inhaltlich_unvollstaendigem_exit_regeln(
+    exit_regeln_kwargs: dict[str, object],
+) -> None:
+    """@trace depot#AC1 — Review-Fix (S-040, CRITICAL): das `exit_regeln`-
+    Objekt allein reicht bei einem Kauf nicht — fehlt `stop_typ` oder
+    `thesis_invalidierung` INHALTLICH (Edge-Case
+    `docs/specs/strategie-exit-regeln.md`: "Fehlende oder unvollständige
+    Exit-Regeln (kein Stop-Trigger oder keine Thesis-Invalidierung)
+    verhindern die Weitergabe an das Risikomanagement"), verweigert
+    pydantic die Instanziierung — bereits am tatsächlichen Schreibpfad
+    (`FillInput`), nicht erst in einem nachgelagerten, nie aufgerufenen
+    Modul."""
+    kwargs = dict(VALID_KAUF_KWARGS, exit_regeln=ExitRegeln(**exit_regeln_kwargs))
     with pytest.raises(ValidationError):
         FillInput(**kwargs)
 

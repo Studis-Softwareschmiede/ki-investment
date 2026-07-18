@@ -91,8 +91,17 @@ POSITION_STATUS_VALUES = ("offen", "geschlossen")
 # data-model.md §4 `position`/`order`/...: CHECK mode ∈ {...} (→ BR-130)
 MODE_VALUES = ("echt", "simuliert")
 
-# data-model.md §4 `exit_rule`: CHECK stop_typ ∈ {...}
-EXIT_RULE_STOP_TYP_VALUES = ("fix_pct", "atr_trailing", "fundamental", "keiner")
+# data-model.md §4 `exit_rule`: CHECK stop_typ ∈ {...}. Erweitert in S-040
+# (Migration `d19a6f5c7b3e`) um 'technisch' (AC8-Präzisierung: Daytrade/
+# Swing-Default nutzt `stop_typ == "technisch"`, siehe
+# `app.db.exit_regel_ableitung`/`EXIT_DEFAULT_SET_STOP_TYP_VALUES`) — ohne
+# diese Erweiterung würde die Fixierung (AC1) einer Daytrade/Swing-Position
+# an der CHECK-Constraint scheitern. Der SQL-String wird — anders als vor
+# S-040 — jetzt AUS dieser Konstante gebildet (siehe
+# `_EXIT_RULE_STOP_TYP_VALUES_SQL` unten), damit Konstante und
+# CHECK-Constraint nicht auseinanderdriften (S-037-Lesson).
+EXIT_RULE_STOP_TYP_VALUES = ("fix_pct", "atr_trailing", "fundamental", "technisch", "keiner")
+_EXIT_RULE_STOP_TYP_VALUES_SQL = ", ".join(repr(stop_typ) for stop_typ in EXIT_RULE_STOP_TYP_VALUES)
 
 # data-model.md §1 `exit_default_set`: CHECK kategorie ∈ {...} (Spec
 # `docs/specs/strategie-exit-regeln.md` AC8 — 5 Default-Exit-Set-Kategorien
@@ -110,12 +119,14 @@ _EXIT_DEFAULT_SET_KATEGORIE_VALUES_SQL = ", ".join(
     repr(kategorie) for kategorie in EXIT_DEFAULT_SET_KATEGORIE_VALUES
 )
 
-# data-model.md §1 `exit_default_set`: CHECK stop_typ ∈ {...} — bewusst NICHT
-# identisch mit EXIT_RULE_STOP_TYP_VALUES (jenes Enum ist die bereits in
-# S-015 fixierte Persistenz-Spalte `exit_rule.stop_typ`; 'technisch' kommt
-# hier zusaetzlich vor, AC8 "technischer Stop" — dessen Uebernahme in
-# `exit_rule` ist Sache der fixierenden Story S-040, nicht dieser reinen
-# Ableitungs-Konfiguration).
+# data-model.md §1 `exit_default_set`: CHECK stop_typ ∈ {...} — zwei
+# eigenständige Wertemengen mit identischem Inhalt seit S-040
+# (EXIT_RULE_STOP_TYP_VALUES wurde dort um 'technisch' erweitert, siehe
+# oben), bewusst NICHT als eine gemeinsame Konstante zusammengelegt: diese
+# hier beschreibt die Ableitungs-Konfiguration (`exit_default_set`, S-038),
+# jene die fixierte Persistenz-Spalte (`exit_rule`, S-015/S-040) — zwei
+# eigenständige Tabellen/Migrationen, deren Wertemengen sich künftig wieder
+# unabhängig voneinander entwickeln könnten.
 EXIT_DEFAULT_SET_STOP_TYP_VALUES = ("fundamental", "atr_trailing", "fix_pct", "technisch", "keiner")
 _EXIT_DEFAULT_SET_STOP_TYP_VALUES_SQL = ", ".join(
     repr(stop_typ) for stop_typ in EXIT_DEFAULT_SET_STOP_TYP_VALUES
@@ -1030,6 +1041,14 @@ class Position(Base):
     nicht gebaute Bewertungs-Schleife (siehe `app.domain.portfolio
     .fx_attribution.berechne_fx_split_unrealisiert`-Docstring), kein
     Fill-getriebener Schreibpfad dieser Story.
+
+    **S-040 (AC5, → BR-137):** `strategy_id`/`time_horizon_id`/`these` sind
+    nach dem Kauf unveränderlich (Spec `docs/specs/strategie-exit-regeln.md`
+    AC5) — unter Postgres per `BEFORE UPDATE`-Trigger durchgesetzt, der NUR
+    Änderungen an genau diesen drei Spalten verweigert (Migration
+    `d19a6f5c7b3e`); alle übrigen Spalten (`menge`, `einstand_preis`,
+    `status`, `closed_at` etc.) bleiben regulär fortschreibbar — anders als
+    `ExitRule`/`Transaction` ist `position` KEINE reine Append-only-Tabelle.
     """
 
     __tablename__ = "position"
@@ -1096,20 +1115,26 @@ class ExitRule(Base):
     """Beim Kauf fixierte Exit-Regeln (data-model.md §4 `exit_rule`, C-011,
     C-014; unveränderlich nach Kauf → BR-111).
 
-    1:1 zu `Position` über `position_id`. Diese Story (S-015) liefert nur
-    das Schema als Teil des Positions-Grundgerüsts (AC1 „Exit-Regeln" als
-    Position-Attribut) — die inhaltliche Ableitung der Werte (Default-
-    Exit-Set je Strategie/Klasse, ATR-Multiplikatoren) ist
-    `strategie-exit-regeln` (S-038, AC6-AC9); die BR-111-Unveränderlichkeit
-    (kein UPDATE nach Position-Open) durchzusetzen ist S-040
-    („Attribut-Bündel-Fixierung, Unveränderlichkeit") — hier NICHT
-    umgesetzt, um nicht in eine andere Story-Spec vorzugreifen.
+    1:1 zu `Position` über `position_id`. S-015 lieferte nur das Schema als
+    Teil des Positions-Grundgerüsts (AC1 „Exit-Regeln" als Position-
+    Attribut) — die inhaltliche Ableitung der Werte (Default-Exit-Set je
+    Strategie/Klasse, ATR-Multiplikatoren) ist `strategie-exit-regeln`
+    (S-038, AC6-AC9).
+
+    **S-040 (AC1/AC5)** schliesst zwei Lücken:
+    - Das tatsächliche Anlegen einer Zeile beim Kauf
+      (`app.adapters.repositories.position_repository
+      .SqlAlchemyPositionRepository.lege_position_an`, aus dem
+      `FillInput.exit_regeln`-Pass-through).
+    - Die BR-111-Unveränderlichkeit (kein UPDATE/DELETE nach dem Insert) —
+      unter Postgres per `BEFORE UPDATE OR DELETE`-Trigger durchgesetzt
+      (Migration `d19a6f5c7b3e`, analog `Transaction`/`TrialRegistry`).
     """
 
     __tablename__ = "exit_rule"
     __table_args__ = (
         CheckConstraint(
-            "stop_typ IN ('fix_pct', 'atr_trailing', 'fundamental', 'keiner')",
+            f"stop_typ IN ({_EXIT_RULE_STOP_TYP_VALUES_SQL})",
             name="ck_exit_rule_stop_typ",
         ),
     )

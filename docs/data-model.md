@@ -476,9 +476,9 @@ wird dagegen ab S-053 aktiv fortgeschrieben (Kauf/Nachkauf, → BR-129).
 | id | UUID | PK |
 | instrument_id | UUID | FK → instrument.id, NOT NULL |
 | asset_class_id | SMALLINT | FK → asset_class.id, NOT NULL |
-| strategy_id | UUID | FK → strategy.id, NOT NULL (**beim Kauf fixiert**, C-014) |
-| time_horizon_id | SMALLINT | FK → time_horizon.id, NOT NULL (beim Kauf fixiert) |
-| these | TEXT | NOT NULL (Kaufthese; Leitfrage-Prüfung C-011) |
+| strategy_id | UUID | FK → strategy.id, NOT NULL (**beim Kauf fixiert, nach Kauf unveränderlich → BR-137**, C-014) |
+| time_horizon_id | SMALLINT | FK → time_horizon.id, NOT NULL (beim Kauf fixiert, nach Kauf unveränderlich → BR-137) |
+| these | TEXT | NOT NULL (Kaufthese; Leitfrage-Prüfung C-011; nach Kauf unveränderlich → BR-137) |
 | menge | NUMERIC(20,8) | NOT NULL, CHECK ≥ 0 |
 | einstand_preis | NUMERIC(20,8) | NOT NULL (Ø-Einstand) |
 | einstand_methode | TEXT | NOT NULL, CHECK ∈ {gleitender_durchschnitt, fifo}, DEFAULT `gleitender_durchschnitt` (CH-Default, → BR-112) |
@@ -491,18 +491,27 @@ wird dagegen ab S-053 aktiv fortgeschrieben (Kauf/Nachkauf, → BR-129).
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
 | opened_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
 | closed_at | TIMESTAMPTZ | |
+| — | — | **Spalten-gesperrt, nicht Tabellen-append-only** (→ BR-137, S-040): nur `strategy_id`/`time_horizon_id`/`these` sind per `BEFORE UPDATE`-Trigger gesperrt (Migration `d19a6f5c7b3e`) — `menge`/`einstand_preis`/`status`/`closed_at` etc. bleiben regulär fortschreibbar (S-016). |
 
 ### `exit_rule` — beim Kauf fixierte Exit-Regeln (C-011, C-014; unveränderlich → BR-111)
+
+S-040 legt beim Kauf (`lege_position_an`) erstmals eine Zeile an (aus dem
+`FillInput.exit_regeln`-Pass-through) und erweitert die `stop_typ`-CHECK
+um `technisch` (Migration `d19a6f5c7b3e`) — ohne diese Erweiterung würde
+die Fixierung einer Daytrade/Swing-Position (AC8-Präzisierung, S-038)
+scheitern, da `app.db.exit_regel_ableitung.klassifiziere_exit_kategorie`
+für diese Kategorie `stop_typ == "technisch"` liefert.
+
 | Feld | Typ | Constraint |
 |---|---|---|
 | position_id | UUID | PK, FK → position.id (1:1) |
 | stop_loss_pct | NUMERIC(6,3) | (z.B. −15 %) |
 | take_profit_pct | NUMERIC(6,3) | (z.B. +30 %) |
-| stop_typ | TEXT | CHECK ∈ {fix_pct, atr_trailing, fundamental, keiner} |
+| stop_typ | TEXT | CHECK ∈ {fix_pct, atr_trailing, fundamental, technisch, keiner} (technisch seit S-040) |
 | atr_multiplikator | NUMERIC(5,2) | (2.5–3× je Volatilitätsklasse) |
 | thesis_invalidation | TEXT | Bedingung des Thesis-Bruchs |
 | time_box | INTERVAL | optionale Zeit-Box |
-| — | — | **append-only nach Position-Open** — kein UPDATE (Disciplined-Exit, → BR-111) |
+| — | — | **append-only nach Position-Open** — kein UPDATE/DELETE (Disciplined-Exit, → BR-111; unter Postgres per `BEFORE UPDATE OR DELETE`-Trigger durchgesetzt, Migration `d19a6f5c7b3e`, S-040) |
 
 ### `order` — Order (C-016)
 | Feld | Typ | Constraint |
@@ -813,6 +822,7 @@ bislang nicht führte).
 | BR-134 | depot_fill_dedup.client_order_id | Idempotenz: PK/UNIQUE auf `client_order_id` — ein Fill wird nie zweimal gegen den Bestand verbucht (ADR-011, P8, at-least-once). *(Beim Merge von F-011 von BR-132 auf BR-134 umnummeriert — BR-132/BR-133 waren parallel durch S-018 vergeben.)* | DB-UNIQUE + App |
 | BR-135 | strategy.cluster / strategy_cluster.freigeschaltet | Eine Strategie-Zuordnung ausserhalb des freigeschalteten Clusters wird abgelehnt (MVP: nur passiv_regelbasiert); deterministisch, ohne LLM-Beteiligung (`docs/specs/strategie-exit-regeln.md` AC2/E2, S-037). *(Beim Merge von F-012 von BR-132 auf BR-135 umnummeriert.)* | App |
 | BR-136 | rule_hypothesis | Mindest-Evidenz-Protokoll (`anzahl_faelle > 0`, `zeitraum_bis >= zeitraum_von`, `signalquelle`, `asset_class_id` alle Pflicht) UND marktlogische Begründung (`marktlogik` Pflicht) — ohne beides wird keine Hypothese ans Gate übergeben (`docs/specs/lernschleife.md` AC1/AC2, S-058) | DB-NOT NULL/CHECK + App (`app.domain.research.hypothesen_erzeugung.erzeuge_hypothesen`) |
+| BR-137 | position.strategy_id / position.time_horizon_id / position.these | Beim Kauf fixiert; nach Position-Open unveränderlich (kein UPDATE dieser drei Spalten — alle übrigen `position`-Spalten bleiben regulär fortschreibbar) — Disciplined-Exit, ergänzt BR-111 um den Positions-Teil des Attribut-Bündels (`docs/specs/strategie-exit-regeln.md` AC5, S-040) | DB-Trigger (`BEFORE UPDATE`, Spalten-Vergleich) |
 
 ---
 
@@ -831,7 +841,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.
 10. **Seed-Daten (separate Migration):** Anlageklassen 1–11, 5 Kategorien, Kategoriegewichte + Methodentabellen je Klasse (aus Anlageklassen-Notiz), Datenquellen-Registry (12 Quellen), 3 Risikoprofile, 9 Zeithorizonte, 18 Strategien, 5 Default-Exit-Set-Kategorien (S-038), 2 ATR-Multiplikator-Volatilitätsklassen (S-038). Idempotent seedbar (`ON CONFLICT DO NOTHING`).
 
-> **Append-only-Durchsetzung (BR-111/115/118/121):** über entzogene UPDATE/DELETE-Grants auf App-Rolle **oder** BEFORE-UPDATE/DELETE-Trigger `RAISE EXCEPTION` — Wahl trifft der `coder` in der jeweiligen Migration; das Modell fordert nur die Invariante.
+> **Append-only-Durchsetzung (BR-111/115/118/121):** über entzogene UPDATE/DELETE-Grants auf App-Rolle **oder** BEFORE-UPDATE/DELETE-Trigger `RAISE EXCEPTION` — Wahl trifft der `coder` in der jeweiligen Migration; das Modell fordert nur die Invariante. **BR-137** ist kein Tabellen-append-only, sondern eine Spalten-gesperrte Variante desselben Musters (nur `position.strategy_id`/`time_horizon_id`/`these`, s. o.) — S-040 setzt beide (BR-111 via `exit_rule`-weiten Trigger, BR-137 via Spalten-Vergleichs-Trigger) in derselben Migration `d19a6f5c7b3e` um.
 
 ---
 
