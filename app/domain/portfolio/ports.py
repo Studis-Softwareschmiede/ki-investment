@@ -165,7 +165,19 @@ class PositionsBestand:
     (S-016, titel-spezifisch, für die Fill-Buchung) trägt dieses DTO auch
     Anlageklasse, GICS-Branche, Strategie und Exit-Regeln — die für die
     Fill-Buchung selbst irrelevanten, für die Aggregation aber
-    erforderlichen Attribute."""
+    erforderlichen Attribute.
+
+    `these`/`zeithorizont_id` (S-040, AC10/AC11): vervollständigen das
+    beim Kauf fixierte Attribut-Bündel (Strategie, Zeithorizont,
+    Exit-Regeln, These) um die beiden bislang fehlenden Felder — `these`
+    macht die Kauf-These maschinell auslesbar (AC10, Grundlage der
+    späteren «Analyse bestehende Titel»); `zeithorizont_id` vervollständigt
+    das an Risikomanagement/Depot-Überwachung weitergereichte Bündel
+    (AC11). Beide sind `None` mit Default, um bestehende Aufrufer/Test-
+    Fakes (die diese Felder nicht setzen) nicht zu brechen — bei einer
+    real über `SqlAlchemyPositionRepository.alle_offenen_positionen`
+    gelesenen Position sind sie stets gesetzt (`Position.these`/
+    `Position.time_horizon_id` sind NOT NULL)."""
 
     position_id: str
     titel_id: str
@@ -175,6 +187,8 @@ class PositionsBestand:
     einstand_preis: Decimal
     strategie: str | None
     exit_regeln: ExitRegelnBestand
+    these: str | None = None
+    zeithorizont_id: int | None = None
 
 
 class PositionRepository(Protocol):
@@ -307,7 +321,10 @@ class PositionRepository(Protocol):
         .ermittle_titel_strategie_exit_regeln`, die bei mehreren Lots
         desselben Titels (FIFO) den ältesten Lot als Titel-Repräsentant
         verwendet). Leere Liste, falls kein offener Lot in diesem Modus
-        existiert."""
+        existiert.
+
+        **S-040 (AC10/AC11):** liefert zusätzlich `these`/`zeithorizont_id`
+        je Lot — vervollständigt das beim Kauf fixierte Attribut-Bündel."""
         ...
 
 

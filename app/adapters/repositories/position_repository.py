@@ -8,10 +8,21 @@ Implementiert `app.domain.portfolio.ports.PositionRepository` strukturell
 S-016 (AC2/AC3/AC5) ergänzt die Schreib-/Fortschreibungs-Methoden
 (`offene_positionen`, `lege_position_an`, `aktualisiere_kauf`,
 `verbuche_verkauf_lot`) — siehe `app.domain.portfolio.ports` für die
-Modellannahme ("jede `position`-Zeile ist ein Lot"). `lege_position_an`
-legt bewusst **keine** `exit_rule`-Zeile an: die inhaltliche Interpretation
-der Exit-Regel-Kategorien ist `strategie-exit-regeln` (S-037/S-038), nicht
-Teil dieser Story (siehe `app.contracts.depot`-Moduldocstring).
+Modellannahme ("jede `position`-Zeile ist ein Lot"). Bis S-040 legte
+`lege_position_an` bewusst **keine** `exit_rule`-Zeile an (die inhaltliche
+Interpretation der Exit-Regel-Kategorien war `strategie-exit-regeln`,
+S-037/S-038, vorbehalten).
+
+**S-040 (AC1, Attribut-Bündel-Fixierung)** schliesst diese Lücke:
+`lege_position_an` legt jetzt zusätzlich eine `ExitRule`-Zeile aus
+`fill.exit_regeln` an (`_exit_rule_aus_fill`) — das komplette, beim Kauf
+fixierte Attribut-Bündel (Strategie, Zeithorizont, Exit-Regeln, These, AC1)
+entsteht damit atomar in derselben Transaktion wie die `Position`-Zeile.
+Die BR-111/BR-137-Unveränderlichkeit (AC5, kein UPDATE/DELETE nach dem
+Insert) erzwingt die DB-Schicht (Migration `d19a6f5c7b3e`, Postgres-
+Trigger) — hier ist keine zusätzliche App-seitige Sperre nötig, da dieser
+Adapter für `exit_rule` ohnehin keine Update-/Delete-Methode anbietet
+(strukturell kein Aufrufer-Pfad, analog `Transaction`).
 
 DBA-Zweit-Review von S-016 (Critical + Important) ergänzt:
 - `offene_positionen` liest die Lots jetzt gesperrt (`with_for_update()`) —
@@ -53,6 +64,14 @@ zurück (`OffenePosition.einstand_fx_rate`), und `schreibe_transaktion`
 persistiert bei einem gesetzten `fx_split` (Verkauf in Fremdwährung)
 zusätzlich `Transaction.fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf`
 (→ BR-129).
+
+Story S-040 (AC10, These maschinell auslesbar) ergänzt
+`PositionsBestand.these`/`PositionsBestand.zeithorizont_id`:
+`alle_offenen_positionen` liefert die beim Kauf fixierte Kauf-These sowie
+den Zeithorizont je Lot mit — Grundlage für die spätere «Analyse
+bestehende Titel» (These gegen die aktuelle Lage prüfen, AC10) sowie für
+die vollständige, an das Risikomanagement weitergereichte Bündel-Sicht
+(AC11).
 """
 
 from __future__ import annotations
@@ -65,7 +84,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.contracts.depot import FillInput, Modus
+from app.contracts.depot import ExitRegeln, FillInput, Modus
 from app.db.models import DepotFillDedup, ExitRule, Instrument, Position, Strategy, Transaction
 from app.domain.portfolio.fx_attribution import FxSplit
 from app.domain.portfolio.ports import (
@@ -160,7 +179,17 @@ class SqlAlchemyPositionRepository:
         `fill.anlageklasse`/`fill.zeithorizont` sind bereits identische
         Fremdschlüsselwerte (`asset_class_id`/`time_horizon_id`).
         `einstand_fx_rate` (AC6, S-053): FX-Kurs des Fills, `None` bei
-        CHF."""
+        CHF.
+
+        **S-040 (AC1):** legt zusätzlich, in derselben Transaktion, die
+        1:1-`ExitRule`-Zeile aus `fill.exit_regeln` an (`_exit_rule_aus_fill`)
+        — das vollständige Attribut-Bündel (Strategie, Zeithorizont,
+        Exit-Regeln, These) wird damit atomar mit der Position fixiert.
+        `fill.exit_regeln` ist bei einem Kauf-Fill bereits durch
+        `FillInput._pruefe_kauf_pflichtfelder` (S-015) als vorhanden
+        garantiert; das defensive `is not None`-Guard unten deckt nur den
+        (heute strukturell nicht erreichbaren) Fall eines künftigen
+        Aufrufers ab, der diese Prüfung umgeht."""
         strategy_id = self._session.scalars(
             select(Strategy.id).where(Strategy.name == fill.strategie)
         ).first()
@@ -185,6 +214,11 @@ class SqlAlchemyPositionRepository:
         )
         self._session.add(position)
         self._session.flush()
+
+        if fill.exit_regeln is not None:
+            self._session.add(_exit_rule_aus_fill(position.id, fill.exit_regeln))
+            self._session.flush()
+
         return str(position.id)
 
     def aktualisiere_kauf(
@@ -332,7 +366,16 @@ class SqlAlchemyPositionRepository:
         .ermittle_titel_strategie_exit_regeln`). `Instrument`/`ExitRule`
         werden als Outer-Join angebunden: `gics_sector` kann fehlen (siehe
         `app.db.models.Instrument`-Docstring), eine `exit_rule`-Zeile
-        existiert bislang für keinen Lot (S-037/S-038)."""
+        existiert nur für Positionen, die über `lege_position_an` seit
+        S-040 angelegt wurden (ältere Lots bleiben ohne Zeile, `None`-
+        Exit-Regeln, siehe `_exit_regeln_aus_zeile`).
+
+        **S-040 (AC10, AC11):** liefert zusätzlich `these` (Kauf-These,
+        maschinell auslesbar für die spätere «Analyse bestehende Titel»,
+        AC10) und `zeithorizont_id` — zusammen mit `strategie`/
+        `exit_regeln` das vollständige, beim Kauf fixierte Attribut-Bündel
+        je Lot, wie es an das Risikomanagement/die Depot-Überwachung
+        weitergereicht wird (AC11)."""
         stmt = (
             select(Position, Instrument.gics_sector, Strategy.name, ExitRule)
             .join(Instrument, Instrument.id == Position.instrument_id)
@@ -352,16 +395,62 @@ class SqlAlchemyPositionRepository:
                 einstand_preis=position.einstand_preis,
                 strategie=strategie_name,
                 exit_regeln=_exit_regeln_aus_zeile(exit_rule_zeile),
+                these=position.these,
+                zeithorizont_id=position.time_horizon_id,
             )
             for position, gics_sector, strategie_name, exit_rule_zeile in zeilen
         ]
 
 
+def _als_decimal(wert: float | None) -> Decimal | None:
+    """AC1 (S-040): `ExitRegeln`-Felder sind `float`-typisiert (Pass-
+    through-Vertrag, `app.contracts.depot`), `exit_rule`-Spalten sind
+    `NUMERIC` (Decimal, P7/ADR-010) — Konvertierung über `str()` vermeidet
+    die binäre Float-Ungenauigkeit eines direkten `Decimal(float)`-Aufrufs."""
+    return None if wert is None else Decimal(str(wert))
+
+
+def _exit_rule_aus_fill(position_id: uuid.UUID, exit_regeln: ExitRegeln) -> ExitRule:
+    """AC1 (S-040): bildet das beim Kauf gelieferte `ExitRegeln`-Pass-
+    through-DTO (`app.contracts.depot`) auf die zu fixierende `exit_rule`-
+    Zeile ab.
+
+    `stop_parameter` ist je nach `stop_typ` entweder der ATR-Multiplikator
+    (`atr_trailing` → `atr_multiplikator`) oder ein fixer Stop-Loss-
+    Prozentsatz (`fix_pct` → `stop_loss_pct`) — bei `fundamental`/
+    `technisch`/`keiner` gibt es keinen numerischen Stop-Parameter
+    (qualitativer/kursbezogener Mechanismus, analog zur Interpretation in
+    `app.db.exit_regel_ableitung.leite_exit_regeln_ab`).
+
+    `time_box` bleibt hier unbefüllt (`None`): `ExitRegeln.time_box` ist
+    als Freitext (`str | None`) typisiert (S-015), `exit_rule.time_box`
+    erwartet dagegen ein strukturiertes `INTERVAL` — AC6 lässt die
+    Time-Box explizit optional; eine strukturierte Time-Box-Eingabe ist
+    Sache einer künftigen Erweiterung des Fill-Input-Vertrags (siehe
+    Spec-Präzisierung `docs/specs/strategie-exit-regeln.md` §Verträge)."""
+    stop_loss_pct: Decimal | None = None
+    atr_multiplikator: Decimal | None = None
+    if exit_regeln.stop_typ == "atr_trailing":
+        atr_multiplikator = _als_decimal(exit_regeln.stop_parameter)
+    elif exit_regeln.stop_typ == "fix_pct":
+        stop_loss_pct = _als_decimal(exit_regeln.stop_parameter)
+
+    return ExitRule(
+        position_id=position_id,
+        stop_loss_pct=stop_loss_pct,
+        take_profit_pct=_als_decimal(exit_regeln.take_profit),
+        stop_typ=exit_regeln.stop_typ,
+        atr_multiplikator=atr_multiplikator,
+        thesis_invalidation=exit_regeln.thesis_invalidierung,
+        time_box=None,
+    )
+
+
 def _exit_regeln_aus_zeile(zeile: ExitRule | None) -> ExitRegelnBestand:
     """AC9 (S-036): bildet eine `exit_rule`-Zeile auf `ExitRegelnBestand`
-    ab — existiert (noch) keine Zeile (kein Aufrufer legt bislang eine an,
-    S-037/S-038), liefert dies ein Objekt mit ausschliesslich `None`-
-    Feldern statt eines Fehlers."""
+    ab — existiert (noch) keine Zeile (Positionen von vor S-040, oder ein
+    Aufrufer ohne Exit-Regeln-Pass-through), liefert dies ein Objekt mit
+    ausschliesslich `None`-Feldern statt eines Fehlers."""
     if zeile is None:
         return ExitRegelnBestand(
             stop_loss_pct=None,

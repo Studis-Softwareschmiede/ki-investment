@@ -2,6 +2,14 @@
 DBA-Zweit-Review).
 
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
+Covers (strategie-exit-regeln): AC1, AC10
+
+S-040 (AC1) ergänzt: `lege_position_an` legt jetzt zusätzlich eine
+`ExitRule`-Zeile aus `fill.exit_regeln` an (`_exit_rule_aus_fill`) — Tests
+decken die Mapping-Fälle `atr_trailing`→`atr_multiplikator`,
+`fix_pct`→`stop_loss_pct` sowie `fundamental`/`keiner` (kein numerischer
+Stop-Parameter) ab. S-040 (AC10) ergänzt: `alle_offenen_positionen`
+liefert zusätzlich `these`/`zeithorizont_id` je Lot.
 
 Deckt die Bestandsermittlung, auf der `app.domain.portfolio.fill_booking
 .pruefe_fill` die AC10-Prüfung "keine resultierende negative Menge"
@@ -327,6 +335,113 @@ def test_lege_position_an_persistiert_kauf_mit_aufgeloester_strategie() -> None:
         assert position.these == "Langfristiger Index-Halter."
 
 
+def test_lege_position_an_fixiert_exit_rule_atr_trailing() -> None:
+    """@trace strategie-exit-regeln#AC1 — bei `stop_typ="atr_trailing"`
+    wird `stop_parameter` als `atr_multiplikator` fixiert, `stop_loss_pct`
+    bleibt `None` (kein numerischer Fix-Prozent-Stop bei diesem Typ)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(
+            instrument_id,
+            exit_regeln=ExitRegeln(
+                stop_typ="atr_trailing",
+                stop_parameter=2.5,
+                take_profit=30.0,
+                thesis_invalidierung="Wachstum < 5%.",
+            ),
+        )
+
+        position_id = repository.lege_position_an(
+            fill, einstand_preis=Decimal("101"), einstand_methode="gleitender_durchschnitt"
+        )
+        session.commit()
+
+        exit_rule = session.get(ExitRule, uuid.UUID(position_id))
+        assert exit_rule is not None
+        assert exit_rule.stop_typ == "atr_trailing"
+        assert exit_rule.atr_multiplikator == Decimal("2.5")
+        assert exit_rule.stop_loss_pct is None
+        assert exit_rule.take_profit_pct == Decimal("30.0")
+        assert exit_rule.thesis_invalidation == "Wachstum < 5%."
+
+
+def test_lege_position_an_fixiert_exit_rule_fix_pct() -> None:
+    """@trace strategie-exit-regeln#AC1 — bei `stop_typ="fix_pct"` wird
+    `stop_parameter` als `stop_loss_pct` fixiert, `atr_multiplikator`
+    bleibt `None`."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(
+            instrument_id,
+            exit_regeln=ExitRegeln(stop_typ="fix_pct", stop_parameter=-27.5),
+        )
+
+        position_id = repository.lege_position_an(
+            fill, einstand_preis=Decimal("101"), einstand_methode="gleitender_durchschnitt"
+        )
+        session.commit()
+
+        exit_rule = session.get(ExitRule, uuid.UUID(position_id))
+        assert exit_rule is not None
+        assert exit_rule.stop_typ == "fix_pct"
+        assert exit_rule.stop_loss_pct == Decimal("-27.5")
+        assert exit_rule.atr_multiplikator is None
+
+
+def test_lege_position_an_fixiert_exit_rule_ohne_numerischen_stop_parameter() -> None:
+    """@trace strategie-exit-regeln#AC1 — bei `stop_typ` ∈ {fundamental,
+    technisch, keiner} bleibt sowohl `stop_loss_pct` als auch
+    `atr_multiplikator` `None` (kein numerischer, sondern ein
+    qualitativer/kursbezogener Stop-Mechanismus)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(
+            instrument_id,
+            exit_regeln=ExitRegeln(stop_typ="fundamental", thesis_invalidierung="These bricht."),
+        )
+
+        position_id = repository.lege_position_an(
+            fill, einstand_preis=Decimal("101"), einstand_methode="gleitender_durchschnitt"
+        )
+        session.commit()
+
+        exit_rule = session.get(ExitRule, uuid.UUID(position_id))
+        assert exit_rule is not None
+        assert exit_rule.stop_typ == "fundamental"
+        assert exit_rule.stop_loss_pct is None
+        assert exit_rule.atr_multiplikator is None
+
+
+def test_lege_position_an_fixiert_exit_rule_stop_typ_technisch() -> None:
+    """@trace strategie-exit-regeln#AC1 — `stop_typ="technisch"`
+    (Daytrade/Swing-Default, AC8-Präzisierung S-038) wird persistiert —
+    die CHECK-Constraint auf `exit_rule.stop_typ` wurde dafür in S-040
+    (Migration `d19a6f5c7b3e`) erweitert."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        fill = _kauf_fill(
+            instrument_id,
+            exit_regeln=ExitRegeln(stop_typ="technisch", thesis_invalidierung="These bricht."),
+        )
+
+        position_id = repository.lege_position_an(
+            fill, einstand_preis=Decimal("101"), einstand_methode="gleitender_durchschnitt"
+        )
+        session.commit()
+
+        exit_rule = session.get(ExitRule, uuid.UUID(position_id))
+        assert exit_rule is not None
+        assert exit_rule.stop_typ == "technisch"
+
+
 def test_lege_position_an_lehnt_unbekannte_strategie_ab() -> None:
     """@trace depot#AC2,AC3,AC5 — eine Strategie, die nicht als
     Stammdatenzeile existiert, kann keine Position anlegen (FK-
@@ -641,7 +756,10 @@ def test_alle_offenen_positionen_ist_leer_ohne_bestand() -> None:
 def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
     """@trace depot#AC8 — die depotweite Sicht liefert Anlageklasse,
     GICS-Branche, Menge, Einstandspreis und Strategie über MEHRERE Titel
-    hinweg (nicht nur einen wie `offene_positionen`)."""
+    hinweg (nicht nur einen wie `offene_positionen`).
+
+    @trace strategie-exit-regeln#AC10 — zusätzlich `these`/
+    `zeithorizont_id` je Lot (S-040)."""
     engine = _make_engine()
     with Session(engine) as session:
         _seed_stammdaten(session)
@@ -667,6 +785,8 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
         assert eintrag_a.menge == Decimal("10")
         assert eintrag_a.einstand_preis == Decimal("100")
         assert eintrag_a.strategie == "Index"
+        assert eintrag_a.these == "These."
+        assert eintrag_a.zeithorizont_id == 8
         eintrag_b = next(p for p in bestand if p.titel_id == str(instrument_b))
         assert eintrag_b.gics_branche == "Healthcare"
 

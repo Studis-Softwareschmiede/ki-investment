@@ -12,16 +12,30 @@ noch nicht fixierte ABLEITUNG mit Freitext-Begründung (`stop_hinweis`,
 (`stop_unbestimmt`, ATR-Edge-Case) trägt — unterschiedliche Lebenszyklus-
 Stufe desselben Spec-Verträge, keine strukturelle Duplikation
 (architecture.md P2: verschiedene Zwecke, kein gemeinsamer Aufrufer).
-Story S-040 (AC1/AC5/AC10/AC11, „Attribut-Bündel-Fixierung") ist dafür
-zuständig, aus einem `ExitDefaultVorschlag` (oder einer manuellen
-Override-Eingabe) das fixierte `ExitRegeln`-Bündel abzuleiten und in
-`exit_rule` zu persistieren — NICHT Teil dieser Story.
+Story S-040 (AC1/AC5/AC10/AC11, „Attribut-Bündel-Fixierung") liefert dazu
+zwei Ergänzungen:
+
+- **AC1 (DB-Fixierung):** aus dem beim Kauf gelieferten
+  `app.contracts.depot.ExitRegeln`-Pass-through-DTO wird die `exit_rule`-
+  Zeile abgeleitet und persistiert
+  (`app.adapters.repositories.position_repository._exit_rule_aus_fill`,
+  aufgerufen aus `SqlAlchemyPositionRepository.lege_position_an`).
+- **AC11 (Annotierte Kauf-Order, VOR der Order-Ausführung):**
+  `AnnotierteKaufOrder` — das Bündel, das Ordergrösse (Position-Sizing,
+  S-039) plus das vollständig geprüfte Attribut-Bündel (Strategie,
+  Zeithorizont, `ExitDefaultVorschlag`, These) an das Risikomanagement
+  weiterreicht (Spec §Verträge „Output"). Erzeugt von
+  `app.domain.strategy.attribut_fixierung.fixiere_attribut_buendel` —
+  bewusst NICHT identisch mit dem oben beschriebenen `exit_rule`-DB-
+  Schreibpfad: diese Annotierung geschieht VOR der tatsächlichen
+  Order-Ausführung (Main Success Scenario Schritt 5), der DB-Schreibpfad
+  erst NACH einem eingegangenen Fill.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -38,10 +52,10 @@ ExitKategorie = Literal[
 ]
 
 #: Stop-Mechanismus-Typen — deckungsgleich mit den in AC8 genannten
-#: Mechanismen. Bewusst NICHT identisch mit
-#: `app.db.models.EXIT_RULE_STOP_TYP_VALUES` (jenes Enum ist die bereits in
-#: S-015 fixierte Persistenz-Spalte `exit_rule.stop_typ`) — die Erweiterung
-#: um 'technisch' bei der tatsächlichen Fixierung ist Sache von S-040.
+#: Mechanismen. Zwei eigenständige Wertemengen mit seit S-040 identischem
+#: Inhalt (`app.db.models.EXIT_RULE_STOP_TYP_VALUES`, die fixierte
+#: Persistenz-Spalte `exit_rule.stop_typ`) — bewusst nicht zu einer
+#: gemeinsamen Konstante zusammengelegt, siehe Kommentar dort.
 StopTyp = Literal["fundamental", "atr_trailing", "fix_pct", "technisch", "keiner"]
 
 
@@ -74,3 +88,30 @@ class ExitDefaultVorschlag:
     take_profit_hinweis: str | None
     time_box: timedelta | None
     thesis_invalidierung: str
+
+
+@dataclass(frozen=True)
+class AnnotierteKaufOrder:
+    """AC11 (S-040): die annotierte Kauf-Order — Ordergrösse (Position-
+    Sizing, S-039) plus das vollständig fixierte Attribut-Bündel
+    (Strategie, Zeithorizont, Exit-Regeln, These), wie an das
+    Risikomanagement weitergereicht (Spec §Verträge „Output": `strategie`,
+    `zeithorizont`, `exit_regeln`, `these`, `fixiert_am`,
+    `unveraenderlich`).
+
+    Entsteht ausschliesslich über
+    `app.domain.strategy.attribut_fixierung.fixiere_attribut_buendel` —
+    dessen Vollständigkeits-Prüfung (AC11, Edge-Case „Fehlende oder
+    unvollständige Exit-Regeln … verhindern die Weitergabe an das
+    Risikomanagement") stellt sicher, dass eine Instanz dieser Klasse
+    niemals ein unvollständiges Bündel trägt (`unveraenderlich` ist daher
+    immer `True` — kein Konstruktionspfad liefert `False`)."""
+
+    titel_id: str
+    ordergroesse: Decimal
+    strategie: str
+    zeithorizont: int
+    exit_regeln: ExitDefaultVorschlag
+    these: str
+    fixiert_am: datetime
+    unveraenderlich: Literal[True] = True

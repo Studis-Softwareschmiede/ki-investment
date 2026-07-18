@@ -1,12 +1,21 @@
-"""Tests für die Positions-Grundgerüst-Migration (Story S-015 + S-053).
+"""Tests für die Positions-Grundgerüst-Migration (Story S-015 + S-053 + S-040).
 
 Covers (depot): AC1, AC10, AC6
+Covers (strategie-exit-regeln): AC1
 
 S-053 (AC6, FX-Attribution) ergänzt Tests für die drei neuen, nullable
 Spalten `einstand_fx_rate`/`fx_kapital_gv`/`fx_waehrungs_gv` (Migration
 `f065be116c72`) — analog zur bestehenden Konvention werden nur die
 strukturellen Constraints (hier: NULLable, kein CHECK) gegen SQLite
 geprüft.
+
+S-040 (AC1) ergänzt einen Test für die erweiterte `exit_rule.stop_typ`-
+CHECK-Constraint (Migration `d19a6f5c7b3e`, `'technisch'` als fünfter
+gültiger Wert) — die positive Seite (ein `stop_typ="technisch"`-Insert
+gelingt) ist bereits über `tests/adapters/repositories
+/test_position_repository.py
+::test_lege_position_an_fixiert_exit_rule_stop_typ_technisch` gedeckt;
+hier die negative Seite (weiterhin ungültige Werte werden abgelehnt).
 
 `instrument`/`strategy`/`time_horizon` sind leere FK-Voraussetzungen (kein
 Seed — siehe Docstring von `app/db/migrations/versions/
@@ -265,3 +274,19 @@ def test_position_fx_attribution_spalten_persistieren_werte() -> None:
         assert position.einstand_fx_rate == Decimal("0.90")
         assert position.fx_kapital_gv == Decimal("270")
         assert position.fx_waehrungs_gv == Decimal("26")
+
+
+def test_exit_rule_rejects_stop_typ_ausserhalb_erweiterter_wertemenge() -> None:
+    """@trace strategie-exit-regeln#AC1 — auch nach der S-040-Erweiterung
+    um `'technisch'` bleiben nur die 5 definierten `stop_typ`-Werte gültig
+    (`fix_pct`, `atr_trailing`, `fundamental`, `technisch`, `keiner`)."""
+    engine = _engine()
+    with Session(engine) as session:
+        instrument, strategy = _seed_stammdaten(session)
+        position = _valid_position(instrument, strategy)
+        session.add(position)
+        session.commit()
+
+        session.add(ExitRule(position_id=position.id, stop_typ="ungueltig"))
+        with pytest.raises(IntegrityError):
+            session.commit()
