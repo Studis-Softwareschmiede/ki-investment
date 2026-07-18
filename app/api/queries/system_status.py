@@ -25,21 +25,23 @@ Diese Query nutzt deshalb die neuen reinen Gegenstücke `app.core
 .drawdown_monitor.status()` und `app.core.hallucination_kpi
 .aktueller_kpi()` (S-068).
 
-**Modus je Anlageklasse (→ BR-019):** siehe `app.contracts.system_status
-.SystemStatusResponse`-Docstring für die Cold-Start-Begründung (kein
-persistenter Modus-Override-Store existiert vor S-074) — jede der elf
-Anlageklassen (`asset_class.id ∈ 1..11`, `docs/data-model.md` BR-100)
-löst sich mangels Override auf den globalen Default `ModusKonfiguration
-().global_modus` ("simuliert") auf."""
+**Modus je Anlageklasse (→ BR-019, S-074 schliesst die Cold-Start-Lücke):**
+`app.core.modus_override` ist der seit S-074 existierende persistente
+(In-Prozess) Modus-Override-Store, den `POST /api/control/modus`
+(`app.api.control`) schreibt — diese Query liest ihn read-only (kein
+`app.domain.execution`-Import hier, AC2-Boundary bleibt gewahrt: die
+MVP-Live-Sperre selbst validiert bereits beim Schreiben in
+`app.core.modus_override`, siehe dortiger Modul-Docstring). Jede der elf
+Anlageklassen (`asset_class.id ∈ 1..11`, `docs/data-model.md` BR-100) löst
+sich auf einen etwaigen Override oder sonst den globalen Modus auf."""
 
 from __future__ import annotations
 
-from app.contracts.ausfuehrung_paper import ModusKonfiguration
 from app.contracts.betriebssicherung import DrawdownStatus, HeartbeatEintrag, KillSwitchStatus
 from app.contracts.depot import Modus
 from app.contracts.llm_grounding import HalluzinationsKpiErgebnis
 from app.contracts.system_status import SystemStatusResponse
-from app.core import drawdown_monitor, hallucination_kpi, heartbeat, kill_switch
+from app.core import drawdown_monitor, hallucination_kpi, heartbeat, kill_switch, modus_override
 from app.domain.lernschleife.ports import GateErgebnisRepository
 
 #: BR-100: `asset_class.id` liegt IMMER in 1..11 (DB-CHECK-Constraint,
@@ -61,7 +63,7 @@ def system_status_uebersicht(
     drawdown_status: DrawdownStatus = drawdown_monitor.status()
     halluzinations_kpi: HalluzinationsKpiErgebnis = hallucination_kpi.aktueller_kpi()
 
-    modus_konfiguration = ModusKonfiguration()
+    modus_konfiguration = modus_override.aktuelle_konfiguration()
     modus_je_anlageklasse: dict[int, Modus] = {
         asset_class_id: modus_konfiguration.modus_je_anlageklasse.get(
             asset_class_id, modus_konfiguration.global_modus

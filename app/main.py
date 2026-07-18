@@ -10,6 +10,7 @@ in `app/web/templates_setup.py` (`configure_web`)."""
 from fastapi import FastAPI
 
 from app.api.config import router as config_router
+from app.api.control import router as control_router
 from app.api.dashboard import router as dashboard_router
 from app.api.depot import router as depot_router
 from app.api.kandidaten import router as kandidaten_router
@@ -29,6 +30,7 @@ app.include_router(trades_router)
 app.include_router(config_router)
 app.include_router(system_status_router)
 app.include_router(kandidaten_router)
+app.include_router(control_router)
 # --- end cockpit routers ---
 
 
