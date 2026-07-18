@@ -1,0 +1,17 @@
+# Secrets — dürfen NIE im Image-Layer landen (Review S-063, security/R01):
+# decrypt-env.sh legt auf dem Deploy-Host eine Klartext-.env ins Repo-Root =
+# Build-Context; die build-Stage kopiert mit `COPY . /app` sonst alles mit.
+.env
+.env.*
+!.env.example
+!.env.gpg
+
+# Nie im Image gebraucht
+.git
+.venv
+__pycache__
+**/__pycache__
+node_modules
+.claude/
+.pytest_cache
+.ruff_cache
