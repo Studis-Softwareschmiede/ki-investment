@@ -10,8 +10,13 @@ Ports & Adapters). Deckt:
   normalisieren die beiden bestehenden Modul-Ausgänge — die gebilligte
   Kauf-Order des Risikomanagement-Gates (`AnnotierteKaufOrder` +
   `GateEntscheid`, S-040/S-044) bzw. den Verkaufsauftrag des Exit-Sizings
-  (`Verkaufsauftrag`, S-042/S-055) — auf das EINE `OrderAnfrage`-DTO;
-  `fuehre_order_aus` führt beide über denselben Aufruf aus.
+  (`Verkaufsauftrag`, S-042/S-055) — auf das gemeinsame `OrderAnfrage`-
+  DTO; `fuehre_order_aus` führt jede einzelne `OrderAnfrage` über
+  denselben Aufruf aus. `_fuer_kauf` liefert genau EINE `OrderAnfrage`;
+  `_fuer_verkauf` liefert eine LISTE von `OrderAnfrage` — eine je
+  `auftrag.tranchen`-Element (Tranchierung aus S-042/S-055 bleibt
+  erhalten, siehe `erstelle_order_anfrage_fuer_verkauf`-Docstring), bei
+  `ausfuehrungsprofil="sofort"` eine 1-Element-Liste.
 
 - **AC4** — `fuehre_order_aus` ist der GEMEINSAME Order-Code-Pfad: die
   Funktion selbst enthält keine Fallunterscheidung nach Order-Quelle
@@ -142,19 +147,37 @@ def erstelle_order_anfrage_fuer_kauf(
 
 def erstelle_order_anfrage_fuer_verkauf(
     auftrag: Verkaufsauftrag, *, asset_class_id: int
-) -> OrderAnfrage:
+) -> list[OrderAnfrage]:
     """AC1: normalisiert einen Verkaufsauftrag (Exit-Sizing, S-042/S-055)
-    auf das gemeinsame `OrderAnfrage`-DTO — `order_typ`/`preis` kommen
-    bereits vollständig vom Exit-Sizing (AC12: "kein Risikomanagement-Gate
-    dazwischen", hier entsprechend keine zusätzliche Prüfung)."""
-    return OrderAnfrage(
-        titel_id=auftrag.titel_id,
-        asset_class_id=asset_class_id,
-        richtung="verkauf",
-        groesse=auftrag.menge,
-        order_typ=_VERKAUF_ORDER_TYP_MAP[auftrag.order_typ],
-        preis=auftrag.preis,
-    )
+    auf eine LISTE von `OrderAnfrage`-DTOs — eine je Element von
+    `auftrag.tranchen` (Review-Fix: die volle `auftrag.menge` allein hätte
+    bei `ausfuehrungsprofil="gestaffelt"` die Tranchierung aus S-042/S-055
+    unterlaufen, da die GESAMTE Position in einer Order an den Broker
+    gegangen wäre statt gestaffelt).
+
+    Bei `ausfuehrungsprofil="sofort"` besteht `auftrag.tranchen` laut
+    Vertrag (`Verkaufsauftrag`-Docstring) aus genau einem Element mit der
+    vollen `menge` — die Rückgabe ist dann eine 1-Element-Liste, deren
+    einzige `OrderAnfrage` bit-identisch zur bisherigen Einzel-Rückgabe
+    ist. `order_typ`/`preis` kommen bereits vollständig vom Exit-Sizing
+    (AC12: "kein Risikomanagement-Gate dazwischen", hier entsprechend
+    keine zusätzliche Prüfung) und gelten unverändert für jede Tranche.
+
+    Ein Aufrufer schickt jede Tranche einzeln durch `fuehre_order_aus`
+    (AC4, der gemeinsame Order-Code-Pfad bleibt dabei unverändert — er
+    führt weiterhin genau EINE `OrderAnfrage` je Aufruf aus)."""
+    order_typ = _VERKAUF_ORDER_TYP_MAP[auftrag.order_typ]
+    return [
+        OrderAnfrage(
+            titel_id=auftrag.titel_id,
+            asset_class_id=asset_class_id,
+            richtung="verkauf",
+            groesse=tranche,
+            order_typ=order_typ,
+            preis=auftrag.preis,
+        )
+        for tranche in auftrag.tranchen
+    ]
 
 
 def fuehre_order_aus(

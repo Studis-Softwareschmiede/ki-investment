@@ -7,7 +7,11 @@ Covers (ausfuehrung-paper): AC1, AC4, AC5, AC6
   Verkaufsauftrag (Exit-Sizing) auf das gemeinsame `OrderAnfrage`-DTO;
   `fuehre_order_aus` führt beide über denselben Aufruf aus. Eine
   blockierte/grössenlose Kauf-Order wird nicht in eine `OrderAnfrage`
-  übersetzt (`ValueError`).
+  übersetzt (`ValueError`). `erstelle_order_anfrage_fuer_verkauf` liefert
+  eine LISTE von `OrderAnfrage` — eine je `tranchen`-Element (Review-Fix:
+  ein gestaffelter Verkaufsauftrag mit N Tranchen erzeugt N
+  `OrderAnfrage`n, deren Mengen-Summe die volle Zielmenge ergibt, statt
+  die Tranchierung durch Verwendung der vollen `menge` zu unterlaufen).
 - AC4: `fuehre_order_aus` ist strukturell derselbe Code-Pfad für Kauf UND
   Verkauf sowie für beliebige injizierte `BrokerPort`-Implementierungen
   (kein `modus`-Parameter, keine Fallunterscheidung nach Order-Quelle) —
@@ -171,18 +175,47 @@ def test_ac1_grossenlose_kauf_order_wird_nicht_ausgefuehrt() -> None:
 
 
 def test_ac1_verkaufsauftrag_wird_auf_gemeinsames_dto_normalisiert() -> None:
-    """@trace ausfuehrung-paper#AC1 — ein Verkaufsauftrag wird auf
-    `OrderAnfrage` normalisiert (richtung="verkauf", groesse aus der
-    Verkaufsmenge)."""
-    anfrage = erstelle_order_anfrage_fuer_verkauf(
+    """@trace ausfuehrung-paper#AC1 — ein Verkaufsauftrag wird auf eine
+    Liste von `OrderAnfrage` normalisiert (richtung="verkauf", groesse aus
+    der einzigen Tranche) — hier eine 1-Element-Tranche, also eine
+    1-Element-Liste."""
+    anfragen = erstelle_order_anfrage_fuer_verkauf(
         _verkaufsauftrag(order_typ="limit", preis=Decimal("140")), asset_class_id=1
     )
 
+    assert len(anfragen) == 1
+    anfrage = anfragen[0]
     assert anfrage.titel_id == "AAPL"
     assert anfrage.richtung == "verkauf"
     assert anfrage.groesse == Decimal("10")
     assert anfrage.order_typ == "limit"
     assert anfrage.preis == Decimal("140")
+
+
+def test_ac1_gestaffelter_verkauf_erzeugt_eine_orderanfrage_je_tranche() -> None:
+    """@trace ausfuehrung-paper#AC1 — ein gestaffelter Verkaufsauftrag
+    (`ausfuehrungsprofil="gestaffelt"`) mit N Tranchen erzeugt N
+    `OrderAnfrage`n, deren Mengen-Summe die volle Zielmenge ergibt (Review-
+    Fix: verhindert, dass die GESAMTE Position in EINER Order an den
+    Broker geht und damit die Tranchierung aus S-042/S-055 unterlaufen
+    wird)."""
+    auftrag = Verkaufsauftrag(
+        titel_id="AAPL",
+        menge=Decimal("30"),
+        tranchen=(Decimal("10"), Decimal("12"), Decimal("8")),
+        order_typ="limit",
+        preis=Decimal("140"),
+        ausfuehrungsprofil="gestaffelt",
+        tranchen_trigger=None,
+    )
+
+    anfragen = erstelle_order_anfrage_fuer_verkauf(auftrag, asset_class_id=1)
+
+    assert len(anfragen) == 3
+    assert [a.groesse for a in anfragen] == [Decimal("10"), Decimal("12"), Decimal("8")]
+    assert sum((a.groesse for a in anfragen), Decimal("0")) == auftrag.menge
+    assert all(a.titel_id == "AAPL" and a.richtung == "verkauf" for a in anfragen)
+    assert all(a.order_typ == "limit" and a.preis == Decimal("140") for a in anfragen)
 
 
 def test_ac1_kauf_und_verkauf_werden_beide_ueber_fuehre_order_aus_ausgefuehrt() -> None:
@@ -195,7 +228,7 @@ def test_ac1_kauf_und_verkauf_werden_beide_ueber_fuehre_order_aus_ausgefuehrt() 
     kauf_anfrage = erstelle_order_anfrage_fuer_kauf(
         _kauf_order(), _gate_entscheid(), asset_class_id=1, order_typ="market"
     )
-    verkauf_anfrage = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
+    (verkauf_anfrage,) = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
 
     kauf_bestaetigung = fuehre_order_aus(
         kauf_anfrage, ibkr_paper_port=ibkr_port, krypto_sim_port=krypto_port
@@ -230,7 +263,7 @@ def test_ac4_gleicher_aufruf_mit_unterschiedlichen_ports_liefert_deren_ergebnis(
     je nach injiziertem `BrokerPort` ein unterschiedliches Ergebnis — der
     EINZIGE variable Punkt ist der injizierte Port, nicht eine
     Fallunterscheidung innerhalb von `fuehre_order_aus` selbst."""
-    anfrage = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
+    (anfrage,) = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=1)
 
     # Zwei strukturell unterschiedliche Fake-Ports (stehen stellvertretend
     # für eine künftige "echt"- vs. "simuliert"-Implementierung, AC4).
@@ -280,7 +313,7 @@ def test_ac5_fuehre_order_aus_routet_krypto_order_an_krypto_sim_port() -> None:
     `ibkr_paper_port`."""
     ibkr_port = _FakeBrokerPort(broker_endpunkt_typ="ibkr_paper")
     krypto_port = _FakeBrokerPort(broker_endpunkt_typ="krypto_sim_brokerless")
-    anfrage = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=7)
+    (anfrage,) = erstelle_order_anfrage_fuer_verkauf(_verkaufsauftrag(), asset_class_id=7)
 
     bestaetigung = fuehre_order_aus(anfrage, ibkr_paper_port=ibkr_port, krypto_sim_port=krypto_port)
 
@@ -317,7 +350,7 @@ def test_ac6_verkauf_order_typen_werden_korrekt_gemappt(
     """@trace ausfuehrung-paper#AC6 — die 4 vom Exit-Sizing erzeugbaren
     `sizing.OrderTyp`-Werte werden korrekt auf den vollen AC6-Wertebereich
     gemappt, insbesondere `stop_market -> stop`."""
-    anfrage = erstelle_order_anfrage_fuer_verkauf(
+    (anfrage,) = erstelle_order_anfrage_fuer_verkauf(
         _verkaufsauftrag(order_typ=sizing_order_typ), asset_class_id=1
     )
     assert anfrage.order_typ == erwarteter_execution_typ
