@@ -4,6 +4,7 @@ DBA-Zweit-Review + S-045).
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 Covers (strategie-exit-regeln): AC1, AC10, AC11
 Covers (risikomanagement): AC9
+Covers (frontend-cockpit): AC6, AC7
 
 S-045 (AC9) ergänzt: `alle_offenen_positionen` liefert zusätzlich
 `korrelations_cluster` je Lot (`Instrument.korrelations_cluster`,
@@ -63,6 +64,11 @@ persistieren `Position.einstand_fx_rate`, `offene_positionen` liefert ihn
 zurück, und `schreibe_transaktion` persistiert bei gesetztem `fx_split`
 zusätzlich `Transaction.fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf`
 (→ BR-129).
+
+S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
+`historie_depotweit`: das depotweite (nicht titel-spezifische) Gegenstück
+zu `historie_je_titel` — schliesst das AC7-Read-Modell-Gap für die
+Cockpit-Trade-Historie-View, optional gefiltert nach Titel und Zeitraum.
 """
 
 from __future__ import annotations
@@ -763,6 +769,144 @@ def test_historie_je_titel_filtert_nach_modus() -> None:
         assert len(simuliert_historie) == 1
         assert echt_historie[0].zeitstempel == _naiv(echt_fill.zeitstempel)
         assert simuliert_historie[0].zeitstempel == _naiv(simuliert_fill.zeitstempel)
+
+
+# --- S-067: depotweite Trade-Historie (AC6/AC7) -----------------------------
+
+
+def test_historie_depotweit_ist_leer_ohne_gebuchte_fills() -> None:
+    """@trace frontend-cockpit#AC6,AC7 — kein gebuchter Fill im Modus ergibt
+    eine leere depotweite Historie, keinen Fehler."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.historie_depotweit(mode="simuliert") == []
+
+
+def test_historie_depotweit_liefert_fills_ueber_mehrere_titel() -> None:
+    """@trace frontend-cockpit#AC6,AC7 — anders als `historie_je_titel`
+    liefert `historie_depotweit` ohne `titel_id`-Filter Fills MEHRERER
+    Titel (das AC7-Gap: bislang nur je Titel abfragbar), aufsteigend nach
+    Zeitstempel sortiert."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_a, _strategy_id = _seed_stammdaten(session)
+        instrument_b = _seed_instrument(
+            session, asset_class_id=1, gics_sector="Technology", symbol="ZWEI"
+        )
+        repository = SqlAlchemyPositionRepository(session)
+        fill_a = _kauf_fill(
+            instrument_a,
+            client_order_id="order-a",
+            zeitstempel=datetime(2026, 7, 12, 9, 0, tzinfo=UTC),
+        )
+        fill_b = _kauf_fill(
+            instrument_b,
+            client_order_id="order-b",
+            zeitstempel=datetime(2026, 7, 12, 15, 0, tzinfo=UTC),
+        )
+        repository.schreibe_transaktion(fill_b, position_id=None)
+        repository.schreibe_transaktion(fill_a, position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(mode="simuliert")
+
+        assert [e.titel_id for e in historie] == [str(instrument_a), str(instrument_b)]
+
+
+def test_historie_depotweit_filtert_nach_modus() -> None:
+    """@trace frontend-cockpit#AC6,AC7 — Mode-Isolation (BR-130), analog
+    `historie_je_titel`."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        echt_fill = _kauf_fill(instrument_id, client_order_id="order-echt", mode="echt")
+        simuliert_fill = _kauf_fill(
+            instrument_id, client_order_id="order-simuliert", mode="simuliert"
+        )
+        repository.schreibe_transaktion(echt_fill, position_id=None)
+        repository.schreibe_transaktion(simuliert_fill, position_id=None)
+        session.commit()
+
+        echt_historie = repository.historie_depotweit(mode="echt")
+        simuliert_historie = repository.historie_depotweit(mode="simuliert")
+
+        assert len(echt_historie) == 1
+        assert len(simuliert_historie) == 1
+
+
+def test_historie_depotweit_filtert_nach_titel_id() -> None:
+    """@trace frontend-cockpit#AC6 — optionaler `titel_id`-Filter grenzt
+    die depotweite Sicht auf genau einen Titel ein (Verträge:
+    `GET /api/trades?titel=`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_a, _strategy_id = _seed_stammdaten(session)
+        instrument_b = _seed_instrument(
+            session, asset_class_id=1, gics_sector="Technology", symbol="ZWEI"
+        )
+        repository = SqlAlchemyPositionRepository(session)
+        fill_a = _kauf_fill(instrument_a, client_order_id="order-a")
+        fill_b = _kauf_fill(instrument_b, client_order_id="order-b")
+        repository.schreibe_transaktion(fill_a, position_id=None)
+        repository.schreibe_transaktion(fill_b, position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(mode="simuliert", titel_id=str(instrument_a))
+
+        assert [e.titel_id for e in historie] == [str(instrument_a)]
+
+
+def test_historie_depotweit_mit_ungueltiger_titel_id_ist_leer() -> None:
+    """@trace frontend-cockpit#AC6 — ein syntaktisch ungültiger
+    `titel_id`-Filter (keine UUID) liefert eine leere Liste statt eines
+    Fehlers (analog `historie_je_titel`/`aktuelle_menge`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        repository.schreibe_transaktion(_kauf_fill(instrument_id), position_id=None)
+        session.commit()
+
+        assert repository.historie_depotweit(mode="simuliert", titel_id="keine-uuid") == []
+
+
+def test_historie_depotweit_filtert_nach_zeitraum() -> None:
+    """@trace frontend-cockpit#AC6 — der `[von, bis]`-Zeitraum-Filter
+    (Verträge: `GET /api/trades?von=&bis=`) ist beidseitig inklusiv und
+    grenzt auf `booked_at` ein."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        frueh = _kauf_fill(
+            instrument_id,
+            client_order_id="order-frueh",
+            zeitstempel=datetime(2026, 7, 1, 9, 0, tzinfo=UTC),
+        )
+        mitte = _kauf_fill(
+            instrument_id,
+            client_order_id="order-mitte",
+            zeitstempel=datetime(2026, 7, 12, 9, 0, tzinfo=UTC),
+        )
+        spaet = _kauf_fill(
+            instrument_id,
+            client_order_id="order-spaet",
+            zeitstempel=datetime(2026, 7, 20, 9, 0, tzinfo=UTC),
+        )
+        for fill in (frueh, mitte, spaet):
+            repository.schreibe_transaktion(fill, position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(
+            mode="simuliert",
+            von=datetime(2026, 7, 5, 0, 0, tzinfo=UTC),
+            bis=datetime(2026, 7, 15, 0, 0, tzinfo=UTC),
+        )
+
+        assert [e.zeitstempel for e in historie] == [_naiv(mitte.zeitstempel)]
 
 
 # --- S-036: depotweite Positions-Sicht (AC8/AC9) ---------------------------

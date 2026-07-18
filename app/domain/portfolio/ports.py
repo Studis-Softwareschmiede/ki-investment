@@ -76,6 +76,13 @@ zu `ExitRegelnBestand` (S-036, oben: liefert `None`-Felder, solange keine
 (`app.adapters.marketdata.live_price.NoOpLivePriceProvider`) für jeden
 Titel `None`; das Dashboard behandelt das gemäss `depot.md` Edge-Cases als
 "nicht bewertbar" statt eines veralteten Werts.
+
+Story S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
+`historie_depotweit`: das depotweite (nicht titel-spezifische) Gegenstück
+zu `historie_je_titel` (S-035) — schliesst das in AC7 benannte Read-Modell-
+Gap (die Trade-Historie lag bislang nur je Titel abfragbar vor), optional
+gefiltert nach Titel und Zeitraum. Rein lesend über dieselbe
+`transaction`-Tabelle, kein neues Order-Pfad-Verhalten (AC7, Nicht-Ziele).
 """
 
 from __future__ import annotations
@@ -334,6 +341,28 @@ class PositionRepository(Protocol):
 
         **S-040 (AC10/AC11):** liefert zusätzlich `these`/`zeithorizont_id`
         je Lot — vervollständigt das beim Kauf fixierte Attribut-Bündel."""
+        ...
+
+    def historie_depotweit(
+        self,
+        *,
+        mode: Modus,
+        titel_id: str | None = None,
+        von: datetime | None = None,
+        bis: datetime | None = None,
+    ) -> list[TransaktionsEintrag]:
+        """AC6/AC7 (S-067, `docs/specs/frontend-cockpit.md`): liefert die
+        depotweite (nicht titel-spezifische) Fill-/Transaktionshistorie
+        **im angegebenen `mode`** (Mode-Isolation, BR-130) — schliesst das
+        in AC7 benannte Read-Modell-Gap (die Trade-Historie lag bislang nur
+        als `historie_je_titel`, S-035, je Titel abfragbar vor). Optional
+        zusätzlich gefiltert auf `titel_id` (exakte Titel-UUID; ist sie
+        keine gültige UUID, liefert dies eine leere Liste statt eines
+        Fehlers, analog `historie_je_titel`) und/oder den beidseitig
+        inklusiven Zeitraum `[von, bis]` (Vergleich gegen `booked_at`) —
+        `None` heisst je "kein Filter". Aufsteigend nach `booked_at`
+        sortiert (wie `historie_je_titel`). Leere Liste, falls im Modus
+        (bzw. im gefilterten Ausschnitt) kein Fill gebucht wurde."""
         ...
 
 
