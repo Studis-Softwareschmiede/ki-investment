@@ -67,10 +67,17 @@ def _quantize_prozent(wert: Decimal) -> Decimal:
     return wert.quantize(_PROZENT_QUANTUM, rounding=ROUND_HALF_UP)
 
 
-def _positionswert(position: PositionsBestand) -> Decimal:
+def positionswert(position: PositionsBestand) -> Decimal:
     """Bewertungsgrundlage je Position für die Aggregation: Kostenbasis
     (`menge × Ø-Einstandspreis`) — siehe Moduldocstring, keine
-    Live-Kurs-Abhängigkeit."""
+    Live-Kurs-Abhängigkeit.
+
+    Öffentlich (kein führender Unterstrich), weil `app.domain
+    .risikomanagement.gate` (S-044, AC2 "Sektor-Grenzen über alle
+    Positionen hinweg") dieselbe Bewertungsgrundlage für die
+    Sektor-Konzentrations-Prüfung braucht — Zweitnutzung derselben
+    Ein-Zeilen-Formel, DRY statt Duplikat (analog zur Lesson "bei
+    Mehrfachnutzung verschieben/promoten statt kopieren")."""
     return position.menge * position.einstand_preis
 
 
@@ -119,7 +126,7 @@ def berechne_portfolio_aggregat(positionen: Iterable[PositionsBestand]) -> Portf
     den übergebenen offenen Positionen (bereits mode-isoliert gelesen,
     siehe Moduldocstring)."""
     positionsliste = list(positionen)
-    gesamtwert = sum((_positionswert(p) for p in positionsliste), Decimal("0"))
+    gesamtwert = sum((positionswert(p) for p in positionsliste), Decimal("0"))
 
     if gesamtwert == 0:
         return PortfolioAggregat(
@@ -130,7 +137,7 @@ def berechne_portfolio_aggregat(positionen: Iterable[PositionsBestand]) -> Portf
     klassen_werte: dict[int, Decimal] = {}
     for position in positionsliste:
         branche = position.gics_branche or UNBEKANNTE_BRANCHE
-        wert = _positionswert(position)
+        wert = positionswert(position)
         branchen_werte[branche] = branchen_werte.get(branche, Decimal("0")) + wert
         klassen_werte[position.asset_class_id] = (
             klassen_werte.get(position.asset_class_id, Decimal("0")) + wert
