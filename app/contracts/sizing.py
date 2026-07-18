@@ -1,6 +1,7 @@
 """Modul-Vertrag Position-Sizing-Kern (Story S-039, Spec
 `docs/specs/sizing.md` AC1/AC2/AC3/AC4/AC7) + Exit-Sizing-Ausführung
-(Story S-042, AC8/AC12).
+(Story S-042, AC8/AC12) + Exit-Sizing-Feintuning (Story S-055,
+AC9/AC10/AC11).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO in `app/contracts/`. Dieses Modul bildet den
@@ -22,6 +23,7 @@ Kapitalbasis + Kosten zur absoluten `ordergroesse`.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -146,13 +148,14 @@ class OrdergroessenErgebnis(BaseModel):
     verworfen: str | None = None
 
 
-#: AC8 (Story S-042): der Wertebereich des Verträge-Felds "Exit-Sizing
-#: Output ... order_typ: market|stop_market|limit|twap". `"market"` und
-#: `"twap"` sind hier bereits Teil des vollen Vertrags-Wertebereichs
-#: (AC8-Alternative bzw. AC10, TWAP-Schwelle), werden von dieser Story
-#: (AC8/AC12) aber nicht erzeugt — siehe Moduldocstring
-#: `app.domain.sizing.exit_sizing`, das ausschliesslich `"stop_market"`
-#: (Hard-Exit) bzw. `"limit"` (Soft-Exit-Default) liefert.
+#: AC8 (Story S-042) + AC10 (Story S-055): der Wertebereich des
+#: Verträge-Felds "Exit-Sizing Output ... order_typ:
+#: market|stop_market|limit|twap". `"market"` bleibt Teil des vollen
+#: Vertrags-Wertebereichs, wird aber von `app.domain.sizing.exit_sizing`
+#: weiterhin nicht erzeugt (Hard-Exit liefert `"stop_market"`, nicht
+#: `"market"` — Edge-Cases-Begründung "Fill sicher, Preis nicht"). `"twap"`
+#: wird seit S-055 (AC10) für Soft-Exits erzeugt, deren Positionsgrösse
+#: relativ zum Handelsvolumen die konfigurierte TWAP-Schwelle erreicht.
 OrderTyp = Literal["market", "stop_market", "limit", "twap"]
 
 #: AC8 (Story S-042): die zwei Ausführungsprofile eines Verkaufsauftrags —
@@ -160,22 +163,78 @@ OrderTyp = Literal["market", "stop_market", "limit", "twap"]
 #: (Soft-Exit).
 Ausfuehrungsprofil = Literal["sofort", "gestaffelt"]
 
+#: AC11 (Story S-055): der Wertebereich des Abstands-Auslösers zwischen
+#: aufeinanderfolgenden Tranchen eines gestaffelten Exits — "zeitbasiert"
+#: (fester Zeitabstand) oder "ereignisbasiert" (Spec-Wortlaut: "weitere
+#: −X % oder weitere negative News").
+TranchenAbstandsArt = Literal["zeitbasiert", "ereignisbasiert"]
+
+
+class TranchenAbstandsTrigger(BaseModel):
+    """AC11: beschreibt, wodurch der Abstand zwischen aufeinanderfolgenden
+    Tranchen eines gestaffelten Exits ausgelöst wird — entweder
+    zeitbasiert (`zeitabstand` zwischen zwei Tranchen) oder ereignisbasiert
+    (`weitere_bewegung_pct`: eine weitere negative Kursbewegung um X % seit
+    der letzten Tranche löst die nächste aus; "weitere negative News" ist
+    als Ereignis-Trigger derselben `art` gedacht, aber nicht Teil dieses
+    reinen Domain-Kerns — News-Erkennung kommt aus `[[analyse-pipelines]]`,
+    nicht aus Exit-Sizing).
+
+    Trägt jeweils nur das zur `art` passende Feld — das andere bleibt
+    `None` (kein gemischter Trigger)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    art: TranchenAbstandsArt
+    zeitabstand: timedelta | None = None
+    weitere_bewegung_pct: Decimal | None = None
+
+
+class ExitSizingKonfiguration(BaseModel):
+    """AC9/AC10/AC11 (Story S-055): die konfigurierbaren Exit-Sizing-
+    Feintuning-Parameter (Verträge: "Limit-Anteil-Ziel (Default 95 %),
+    TWAP-Schwelle, Default-Tranchenzahl") — alle Werte sind Defaults,
+    provisorisch, konfigurierbar (Spec-Formulierung, analog
+    `KellyFraktionsKonfiguration`/`OrdergroessenKonfiguration`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    #: AC9: Ziel-Anteil an Limit-Orders über alle Ausführungen (Spec: "≥
+    #: 95 % Limit-Orders").
+    limit_anteil_ziel: Decimal = Field(default=Decimal("0.95"), gt=0, le=1)
+    #: AC10: Auslöse-Schwelle für TWAP als Positionsgrösse relativ zum
+    #: Handelsvolumen (Anteil 0–1, z.B. 0.10 = 10 % des Tagesvolumens).
+    twap_schwelle_pct: Decimal = Field(default=Decimal("0.10"), gt=0)
+    #: AC11: Anzahl Tranchen eines gestaffelten Exits (Spec-Bereich 3–4).
+    anzahl_tranchen: int = Field(default=3, ge=3, le=4)
+    #: AC11: welche Art von Abstands-Auslöser zwischen den Tranchen gilt.
+    tranchen_abstand_art: TranchenAbstandsArt = "zeitbasiert"
+    #: AC11: Default-Zeitabstand zwischen zwei Tranchen, sofern
+    #: `tranchen_abstand_art == "zeitbasiert"`.
+    tranchen_zeitabstand: timedelta = Field(default=timedelta(days=1))
+    #: AC11: Default-Schwelle für "weitere −X %"-Kursbewegung, sofern
+    #: `tranchen_abstand_art == "ereignisbasiert"`.
+    tranchen_weitere_bewegung_pct: Decimal = Field(default=Decimal("0.05"), gt=0)
+
 
 class Verkaufsauftrag(BaseModel):
-    """AC8/AC12-Vertrag "Exit-Sizing Output" (Story S-042): `{ titel_id,
-    menge, tranchen[], order_typ, preis?, ausfuehrungsprofil }` — die
-    direkte Übergabe von Exit-Sizing an das Kauf- & Verkaufsmodul (AC12,
-    umgeht bewusst das Risikomanagement, siehe `app.domain.sizing
-    .exit_sizing`-Moduldocstring).
+    """AC8/AC11/AC12-Vertrag "Exit-Sizing Output" (Story S-042, erweitert
+    S-055): `{ titel_id, menge, tranchen[], order_typ, preis?,
+    ausfuehrungsprofil }` — die direkte Übergabe von Exit-Sizing an das
+    Kauf- & Verkaufsmodul (AC12, umgeht bewusst das Risikomanagement,
+    siehe `app.domain.sizing.exit_sizing`-Moduldocstring).
 
     `menge` ist die volle Zielmenge des Verkaufs (die Entscheidung, WIE
     VIEL der Position verkauft wird, ist Teil der beim Kauf fixierten
     Exit-Regeln, → C-014, Nicht-Ziel dieser Spec); `tranchen` zerlegt
-    diese Menge in einzelne Ausführungs-Teilmengen — in dieser Story
-    (AC8, ohne AC11) ein Einzel-Element mit der vollen `menge` (die
-    3-4-Tranchen-Zerlegung samt zeit-/ereignisbasierter Abstands-Logik ist
-    AC11, eine spätere Story). `preis` bleibt optional/`None`, solange
-    keine Preisfindung Teil einer umgesetzten AC ist."""
+    diese Menge in einzelne Ausführungs-Teilmengen — bei Hard-Exit
+    (`ausfuehrungsprofil="sofort"`) weiterhin ein Einzel-Element mit der
+    vollen `menge` (AC8), bei Soft-Exit (`ausfuehrungsprofil="gestaffelt"`)
+    seit S-055 die AC11-Zerlegung in 3–4 Teilmengen (Summe == `menge`,
+    keine Rundungsverluste). `tranchen_trigger` (AC11) beschreibt, wodurch
+    der Abstand zwischen den Tranchen ausgelöst wird — `None` bei
+    Hard-Exit (Einzel-Tranche, kein Abstand). `preis` bleibt optional/
+    `None`, solange keine Preisfindung Teil einer umgesetzten AC ist."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -185,14 +244,39 @@ class Verkaufsauftrag(BaseModel):
     order_typ: OrderTyp
     preis: Decimal | None = None
     ausfuehrungsprofil: Ausfuehrungsprofil
+    tranchen_trigger: TranchenAbstandsTrigger | None = None
+
+
+class LimitAnteilKpi(BaseModel):
+    """AC9-Vertrag: die messbare Betriebs-Kennzahl "Limit-Anteil" über
+    eine Menge bereits erzeugter `Verkaufsauftrag`-Ausführungen (Spec: "über
+    alle Ausführungen sollen ≥ 95 % Limit-Orders sein ... als messbare
+    Betriebs-Kennzahl geführt").
+
+    `limit_anteil` ist der Anteil (0–1) der Ausführungen mit
+    `order_typ == "limit"` an `anzahl_gesamt`; bei `anzahl_gesamt == 0`
+    (keine Ausführungen) gilt `limit_anteil == 1` und `ziel_erreicht ==
+    True` (kein Datenpunkt verletzt das Ziel — vakuose Wahrheit)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    anzahl_gesamt: int = Field(ge=0)
+    anzahl_limit: int = Field(ge=0)
+    limit_anteil: Decimal = Field(ge=0, le=1)
+    ziel: Decimal = Field(gt=0, le=1)
+    ziel_erreicht: bool
 
 
 __all__ = [
     "Ausfuehrungsprofil",
+    "ExitSizingKonfiguration",
     "KellyFraktionsKonfiguration",
+    "LimitAnteilKpi",
     "OrderTyp",
     "OrdergroessenErgebnis",
     "OrdergroessenKonfiguration",
     "PositionSizingErgebnis",
+    "TranchenAbstandsArt",
+    "TranchenAbstandsTrigger",
     "Verkaufsauftrag",
 ]
