@@ -1,5 +1,5 @@
 """Modul-Verträge Depotstrategie-Konfiguration + Gate-Entscheid (Storys
-S-043 AC1/AC3/AC4/AC11 und S-044 AC2/AC5/AC6/AC12, Spec
+S-043 AC1/AC3/AC4/AC11, S-044 AC2/AC5/AC6/AC12 und S-045 AC8/AC9/AC10, Spec
 `docs/specs/risikomanagement.md`).
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang

@@ -375,9 +375,19 @@ class SqlAlchemyPositionRepository:
         AC10) und `zeithorizont_id` — zusammen mit `strategie`/
         `exit_regeln` das vollständige, beim Kauf fixierte Attribut-Bündel
         je Lot, wie es an das Risikomanagement/die Depot-Überwachung
-        weitergereicht wird (AC11)."""
+        weitergereicht wird (AC11).
+
+        **S-045 (AC9):** liefert zusätzlich `korrelations_cluster`
+        (`Instrument.korrelations_cluster`, → BR-138) — Grundlage der
+        Cluster-Konzentrationsprüfung des Risikomanagement-Gates."""
         stmt = (
-            select(Position, Instrument.gics_sector, Strategy.name, ExitRule)
+            select(
+                Position,
+                Instrument.gics_sector,
+                Instrument.korrelations_cluster,
+                Strategy.name,
+                ExitRule,
+            )
             .join(Instrument, Instrument.id == Position.instrument_id)
             .join(Strategy, Strategy.id == Position.strategy_id)
             .outerjoin(ExitRule, ExitRule.position_id == Position.id)
@@ -397,8 +407,11 @@ class SqlAlchemyPositionRepository:
                 exit_regeln=_exit_regeln_aus_zeile(exit_rule_zeile),
                 these=position.these,
                 zeithorizont_id=position.time_horizon_id,
+                korrelations_cluster=korrelations_cluster,
             )
-            for position, gics_sector, strategie_name, exit_rule_zeile in zeilen
+            for position, gics_sector, korrelations_cluster, strategie_name, exit_rule_zeile in (
+                zeilen
+            )
         ]
 
 

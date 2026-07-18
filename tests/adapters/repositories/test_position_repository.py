@@ -1,8 +1,14 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
-DBA-Zweit-Review).
+DBA-Zweit-Review + S-045).
 
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 Covers (strategie-exit-regeln): AC1, AC10, AC11
+Covers (risikomanagement): AC9
+
+S-045 (AC9) ergänzt: `alle_offenen_positionen` liefert zusätzlich
+`korrelations_cluster` je Lot (`Instrument.korrelations_cluster`,
+→ BR-138) — Grundlage der Korrelations-Cluster-Konzentrationsprüfung des
+Risikomanagement-Gates.
 
 S-040 (AC1) ergänzt: `lege_position_an` legt jetzt zusätzlich eine
 `ExitRule`-Zeile aus `fill.exit_regeln` an (`_exit_rule_aus_fill`) — Tests
@@ -763,7 +769,12 @@ def test_historie_je_titel_filtert_nach_modus() -> None:
 
 
 def _seed_instrument(
-    session: Session, *, asset_class_id: int, gics_sector: str | None, symbol: str
+    session: Session,
+    *,
+    asset_class_id: int,
+    gics_sector: str | None,
+    symbol: str,
+    korrelations_cluster: str | None = None,
 ) -> uuid.UUID:
     instrument = Instrument(
         id=uuid.uuid4(),
@@ -771,6 +782,7 @@ def _seed_instrument(
         name=f"{symbol} Inc",
         asset_class_id=asset_class_id,
         gics_sector=gics_sector,
+        korrelations_cluster=korrelations_cluster,
         currency="CHF",
     )
     session.add(instrument)
@@ -794,13 +806,20 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
     hinweg (nicht nur einen wie `offene_positionen`).
 
     @trace strategie-exit-regeln#AC10 — zusätzlich `these`/
-    `zeithorizont_id` je Lot (S-040)."""
+    `zeithorizont_id` je Lot (S-040).
+
+    @trace risikomanagement#AC9 — zusätzlich `korrelations_cluster` je Lot
+    (S-045, → BR-138)."""
     engine = _make_engine()
     with Session(engine) as session:
         _seed_stammdaten(session)
         strategy_id = session.scalars(select(Strategy.id)).first()
         instrument_a = _seed_instrument(
-            session, asset_class_id=1, gics_sector="Technology", symbol="TECH"
+            session,
+            asset_class_id=1,
+            gics_sector="Technology",
+            symbol="TECH",
+            korrelations_cluster="growth_tech",
         )
         instrument_b = _seed_instrument(
             session, asset_class_id=1, gics_sector="Healthcare", symbol="PHARMA"
@@ -822,8 +841,10 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
         assert eintrag_a.strategie == "Index"
         assert eintrag_a.these == "These."
         assert eintrag_a.zeithorizont_id == 8
+        assert eintrag_a.korrelations_cluster == "growth_tech"
         eintrag_b = next(p for p in bestand if p.titel_id == str(instrument_b))
         assert eintrag_b.gics_branche == "Healthcare"
+        assert eintrag_b.korrelations_cluster is None
 
 
 def test_alle_offenen_positionen_ignoriert_geschlossene_positionen() -> None:
