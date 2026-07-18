@@ -177,7 +177,15 @@ class PositionsBestand:
     Fakes (die diese Felder nicht setzen) nicht zu brechen — bei einer
     real über `SqlAlchemyPositionRepository.alle_offenen_positionen`
     gelesenen Position sind sie stets gesetzt (`Position.these`/
-    `Position.time_horizon_id` sind NOT NULL)."""
+    `Position.time_horizon_id` sind NOT NULL).
+
+    `korrelations_cluster` (S-045, `docs/specs/risikomanagement.md` AC9):
+    Korrelations-Cluster-Zuordnung (`Instrument.korrelations_cluster`,
+    → BR-138) — unabhängig von `gics_branche`, Grundlage der
+    Cluster-Konzentrationsprüfung im Risikomanagement-Gate. `None` mit
+    Default (analog `gics_branche` NULLable), da keine Story die
+    Erst-Anlage der Korrelations-Cluster-Zuordnung besitzt (siehe
+    `app.db.models.Instrument`-Docstring)."""
 
     position_id: str
     titel_id: str
@@ -189,6 +197,7 @@ class PositionsBestand:
     exit_regeln: ExitRegelnBestand
     these: str | None = None
     zeithorizont_id: int | None = None
+    korrelations_cluster: str | None = None
 
 
 class PositionRepository(Protocol):

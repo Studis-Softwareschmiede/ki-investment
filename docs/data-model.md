@@ -208,6 +208,7 @@ erDiagram
 | asset_class_id | SMALLINT | FK → asset_class.id, NOT NULL |
 | gics_sector | TEXT | (GICS-Branche; Pflicht für Depotstrategie-Prüfung → BR-128) |
 | gics_industry | TEXT | |
+| korrelations_cluster | TEXT | (Korrelations-Cluster-Zuordnung, unabhängig von gics_sector; Depotstrategie-Korrelationsprüfung → BR-138, S-045) |
 | currency | TEXT | NOT NULL, CHECK 3-stelliger ISO-Code (FX-Attribution → BR-129) |
 | liquiditaet | NUMERIC(20,8) | Liquiditätskennzahl (ADV/RVOL; aus Datenquellen-Abfrage) |
 | volatilitaet | NUMERIC(10,6) | annualisierte Volatilität (Exit-Sizing, ATR-Klasse) |
@@ -823,6 +824,7 @@ bislang nicht führte).
 | BR-135 | strategy.cluster / strategy_cluster.freigeschaltet | Eine Strategie-Zuordnung ausserhalb des freigeschalteten Clusters wird abgelehnt (MVP: nur passiv_regelbasiert); deterministisch, ohne LLM-Beteiligung (`docs/specs/strategie-exit-regeln.md` AC2/E2, S-037). *(Beim Merge von F-012 von BR-132 auf BR-135 umnummeriert.)* | App |
 | BR-136 | rule_hypothesis | Mindest-Evidenz-Protokoll (`anzahl_faelle > 0`, `zeitraum_bis >= zeitraum_von`, `signalquelle`, `asset_class_id` alle Pflicht) UND marktlogische Begründung (`marktlogik` Pflicht) — ohne beides wird keine Hypothese ans Gate übergeben (`docs/specs/lernschleife.md` AC1/AC2, S-058) | DB-NOT NULL/CHECK + App (`app.domain.research.hypothesen_erzeugung.erzeuge_hypothesen`) |
 | BR-137 | position.strategy_id / position.time_horizon_id / position.these | Beim Kauf fixiert; nach Position-Open unveränderlich (kein UPDATE dieser drei Spalten — alle übrigen `position`-Spalten bleiben regulär fortschreibbar) — Disciplined-Exit, ergänzt BR-111 um den Positions-Teil des Attribut-Bündels (`docs/specs/strategie-exit-regeln.md` AC5, S-040) | DB-Trigger (`BEFORE UPDATE`, Spalten-Vergleich) |
+| BR-138 | instrument.korrelations_cluster | Konzentration je Korrelations-Cluster wird unabhängig vom (nominellen) Sektorlimit geprüft — ein Titel eines bereits stark vertretenen Clusters kann gedeckelt/blockiert werden, auch wenn `gics_sector` noch Spielraum hätte (`docs/specs/risikomanagement.md` AC9, S-045) | App (`app.domain.risikomanagement.gate.pruefe_kauf_gate`) |
 
 ---
 

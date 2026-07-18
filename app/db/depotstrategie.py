@@ -22,14 +22,17 @@ Deckt `docs/specs/risikomanagement.md`:
 - **AC11 (Gate bezieht Limits ausschliesslich aus der Depotstrategie):**
   `lade_aktive_depotstrategie()` ist der EINZIGE Lesepfad, der die
   vollständige, aktuell aktive Konfiguration als
-  `DepotstrategieKonfiguration`-Vertrag zusammenstellt — ein künftiges
-  Risikomanagement-Gate (AC5-AC10, ausserhalb dieser Story) konsumiert
-  ausschliesslich diesen Vertrag und definiert keine eigenen Grenzwerte.
+  `DepotstrategieKonfiguration`-Vertrag zusammenstellt — das
+  Risikomanagement-Gate (AC5-AC10, `app.domain.risikomanagement.gate
+  .pruefe_kauf_gate`, S-044/S-045, ausserhalb DIESER Story S-043)
+  konsumiert ausschliesslich diesen Vertrag und definiert keine eigenen
+  Grenzwerte.
 
 Das Risikomanagement-Gate selbst (AC5-AC10: Klumpenrisiko-/Korrelations-
-/Drawdown-Prüfung, Drei-Wege-Entscheid) ist NICHT Teil dieser Story — dieses
-Modul liefert ausschliesslich das konfigurierbare Regelwerk, das ein
-künftiges Gate konsumiert (AC11).
+/Kelly-Cap-Prüfung, Drei-Wege-Entscheid) ist NICHT Teil DIESER Story — dieses
+Modul liefert ausschliesslich das konfigurierbare Regelwerk, das das Gate
+konsumiert (AC11, seit S-044/S-045 umgesetzt in `app.domain.risikomanagement
+.gate`).
 """
 
 from __future__ import annotations

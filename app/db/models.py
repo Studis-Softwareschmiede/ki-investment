@@ -983,6 +983,15 @@ class Instrument(Base):
     (S-015) legt selbst KEINE Instrument-Zeilen an; ein Fill referenziert
     `titel_id` als bereits existierende `instrument.id` (angelegt von einem
     vorgelagerten, hier noch nicht gebauten Modul).
+
+    **S-045 (AC9, Korrelations-Cluster-Prüfung):** `korrelations_cluster`
+    ergänzt einen zweiten, von `gics_sector` unabhängigen Gruppierungs-
+    Schlüssel — analog NULLable, analoges "kein Seed"-Muster (→ BR-138):
+    die eigentliche Korrelations-Messung (Datenquelle/Zeitfenster) ist laut
+    `docs/specs/risikomanagement.md` "Offene Punkte" explizit noch offen;
+    diese Spalte liefert nur die strukturelle Andockstelle, die das
+    Risikomanagement-Gate (`app.domain.risikomanagement.gate.pruefe_kauf_
+    gate`) konsumiert.
     """
 
     __tablename__ = "instrument"
@@ -1003,6 +1012,9 @@ class Instrument(Base):
     )
     gics_sector: Mapped[str | None] = mapped_column(String, nullable=True)
     gics_industry: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: S-045 (AC9, → BR-138): Korrelations-Cluster-Zuordnung, unabhängig von
+    #: `gics_sector` — siehe Klassen-Docstring.
+    korrelations_cluster: Mapped[str | None] = mapped_column(String, nullable=True)
     currency: Mapped[str] = mapped_column(String, nullable=False)
     liquiditaet: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     volatilitaet: Mapped[Decimal | None] = mapped_column(Numeric(10, 6), nullable=True)
@@ -1400,9 +1412,11 @@ class PortfolioStrategy(Base):
     Trägt das AC1-Grenzwert-Regelwerk (max. Einzelposition, max. Gewicht je
     Branche/Sektor — GICS, EIN flacher Wert je Depotstrategie statt
     sektor-spezifischer Einzelwerte, siehe Spec-Verträge — sowie die
-    Cash-Quote). `gesamt_exposure_cap_pct` ist der AC10-Kelly-Cap-Platzhalter
-    (Spalte bereits Teil des bindenden data-model.md-Schemas; die
-    eigentliche Gate-Durchsetzung — AC5-AC10 — ist ausserhalb dieser Story).
+    Cash-Quote). `gesamt_exposure_cap_pct` ist der AC10-Kelly-Cap-Wert
+    (Spalte bereits Teil des bindenden data-model.md-Schemas seit S-043;
+    die eigentliche Gate-Durchsetzung — AC5-AC10 — war ausserhalb DIESER
+    Story S-043 und ist seit S-045 in `app.domain.risikomanagement.gate
+    .pruefe_kauf_gate` umgesetzt).
 
     `aktiv`: genau eine Zeile darf `aktiv=True` tragen (BR-117). DB-seitig
     durch einen partiellen UNIQUE-Index erzwungen (`ux_portfolio_strategy_

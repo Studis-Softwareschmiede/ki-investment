@@ -51,6 +51,28 @@ Zwei zusammengehörige Bausteine: (a) die **Depotstrategie** als nutzerkonfiguri
 - **AC11** — Das Gate bezieht seine Limits ausschliesslich aus der Depotstrategie und definiert keine eigenen Grenzwerte.
 - **AC12** — Kann der aktuelle Depot-Stand nicht geladen werden, gibt das Gate den Kauf nicht frei (deckt E1).
 
+> **Präzisierung (S-045):** AC8 nennt "Drawdown-Limits" als eine von vier
+> Prüfmatrix-Dimensionen, ohne dafür — anders als für Korrelation (AC9) und
+> Kelly-Cap (AC10) — einen eigenen Grenzwert zu definieren. Das ist bewusst
+> so: die Nicht-Ziele schliessen einen "Gesamt-Drawdown-Kill-Switch" im
+> Risikomanagement-Gate explizit aus ("gehört in [[betriebssicherung]]"),
+> und "Offene Punkte" verweist die Gesamt-Drawdown-Kill-Switch-Schwelle
+> ausdrücklich dorthin. Die Drawdown-Überwachung/-Schwelle ist bereits in
+> `docs/specs/betriebssicherung.md` (AC2/AC5, S-025, `app.core
+> .drawdown_monitor`/`kill_switch`) umgesetzt — das Risikomanagement-Gate
+> definiert dafür KEINEN eigenen, zweiten Grenzwert (das wäre entweder eine
+> Duplikation der bestehenden Kill-Switch-Schwelle oder ein von AC11 nicht
+> gedecktes neues Depotstrategie-Feld). Die Korrelationsprüfung (AC9)
+> verwendet mangels eigenem Depotstrategie-Feld denselben Grenzwert wie die
+> Sektor-Prüfung (`max_sektor_pct`, AC11-konform: kein neues Limit-Feld
+> erfunden) — angewendet auf eine von der GICS-Branche unabhängige
+> Gruppierungsachse (Korrelations-Cluster, → BR-138 in `docs/data-model.md`).
+> Eine echte Stress-vs.-Normalphasen-Korrelationsmessung (Datenquelle/
+> Zeitfenster) bleibt laut "Offene Punkte" weiterhin offen; fehlt die
+> Cluster-Zuordnung eines Titels, fällt er in einen gemeinsamen
+> "unbekannt"-Bucket statt die Prüfung zu überspringen (konservative
+> Operationalisierung des Edge-Case "Korrelations-Daten nicht verfügbar").
+
 > **Traceability:** Jeder Test trägt das kanonische Trace-Tag `@trace risikomanagement#AC<n>`
 > gemäss `knowledge/<lang>.md` → `## Spec-Tagging`. Der `tester` rechnet das Coverage-Gate
 > (jede genannte AC ≥ 1 deckender Test).
