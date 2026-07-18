@@ -1,5 +1,6 @@
 """Modul-Verträge Anlageklassen-Konfiguration — Toggle-Guard (Story S-019,
-Spec `docs/specs/anlageklassen-config.md` AC4/AC5).
+Spec `docs/specs/anlageklassen-config.md` AC4/AC5) + Cockpit-Konfigurations-
+Read-Modell (Story S-069, `docs/specs/frontend-cockpit.md` AC9).
 
 Deckt exakt den in der Spec genannten "Konsumenten-Kontrakt Toggle": jedes
 nachgelagerte Modul (Kandidatensuche, Datenquellen-Abfrage, Analyse,
@@ -15,11 +16,19 @@ ab und erhält daraus abgeleitet, welche Aktionen erlaubt sind.
 - `Verarbeitungserlaubnis` — Output des Guards (AC4/AC5): genau die zwei
   Buckets, auf die sich alle fünf Konsumenten-Module laut AC5-Wortlaut
   ("neue Käufe" vs. "Überwachung und Exit-Ausführung") reduzieren.
+- `AnlageklasseEintrag` — Cockpit-Read-Modell (AC9, `GET /api/config/
+  anlageklassen`): eine der 11 Anlageklassen mit Toggle-Zustand + Prio.
+  `prio_stufe` bleibt bewusst `str` statt eines `Literal` über die
+  CHECK-Constraint-Werte (`app.db.models.PRIO_STUFE_VALUES`) — ein drittes,
+  unverdrahtetes Wertemengen-Duplikat in der Contracts-Schicht widerspräche
+  der S-037-Lesson (`.claude/lessons/coder.md`); Analog-Präzedenzfall:
+  `DepotstrategieKonfiguration.risk_profile_name` (`app.contracts
+  .risikomanagement`) ist aus demselben Grund ebenfalls `str`.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ToggleZustand(BaseModel):
@@ -61,3 +70,19 @@ class Verarbeitungserlaubnis(BaseModel):
 
     neue_verarbeitung_erlaubt: bool
     bestandspflege_erlaubt: bool
+
+
+class AnlageklasseEintrag(BaseModel):
+    """Cockpit-Read-Modell einer Anlageklasse (AC9, `GET /api/config/
+    anlageklassen`): Stammdaten-Identität + Toggle-Zustand + Prio.
+
+    `id`/`name` sind zur Identifikation des Eintrags unvermeidlich (keine
+    sinnvolle Liste ohne sie) — AC9 selbst nennt nur "Toggle-Zustand + Prio"
+    als Inhalt."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: int
+    name: str = Field(min_length=1)
+    aktiv: bool
+    prio_stufe: str = Field(min_length=1)
