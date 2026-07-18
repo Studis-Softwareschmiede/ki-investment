@@ -1,0 +1,29 @@
+id: S-071
+parent: F-017
+title: HTML-View Depot — KPI-Tiles, Depot-Datentabelle (Klassen-Chip, G/V-Kodierung),
+  Verlauf-Chart, Empty-State, Live-Polling
+status: To Do
+priority: P2
+spec: docs/specs/frontend-cockpit.md
+implements:
+- AC14
+- AC19
+depends:
+- S-064
+- S-065
+labels:
+- ui
+size_est: M
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine Baseline-Tokens);
+  estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-18T04:24:19Z'
+updated_at: '2026-07-18T04:26:30Z'
+done_at: null

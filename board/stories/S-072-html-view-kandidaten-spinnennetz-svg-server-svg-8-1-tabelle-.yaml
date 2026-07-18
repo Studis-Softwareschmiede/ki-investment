@@ -1,0 +1,28 @@
+id: S-072
+parent: F-017
+title: HTML-View Kandidaten + Spinnennetz-SVG (server-SVG §8.1) — Tabelle, Detail-Panel,
+  Kategorie-Werttabelle, Sanity-Cap-Hinweis
+status: To Do
+priority: P2
+spec: docs/specs/frontend-cockpit.md
+implements:
+- AC15
+depends:
+- S-064
+- S-066
+labels:
+- ui
+size_est: L
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine Baseline-Tokens);
+  estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-18T04:24:20Z'
+updated_at: '2026-07-18T04:26:37Z'
+done_at: null

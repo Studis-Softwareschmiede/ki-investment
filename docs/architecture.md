@@ -168,13 +168,22 @@ app/
   api/                    # HTTP-Layer (FastAPI-Router): Anzeige/Reporting (C-017) + Control-Plane
     dashboard.py          #   reine Anzeige (Depot, Live-Kurse, Spinnennetz) — verändert nie Trading-Logik
     control.py            #   Kill-Switch, Modus-Schalter, Toggles, Health
+    queries/              #   Read-Query-Service (§13.3): liefert View-DTOs (P2); geteilt von JSON- UND HTML-Routen (P4/DRY)
+    ui.py                 #   server-gerenderte Cockpit-Views (Jinja2 + HTMX, §13.1) — reine Anzeige/Control-Plane, ruft NUR queries/ + Control-Plane-Funktionen
+  web/                    # UI-Assets — liegen bewusst UNTER app/ (Dockerfile kopiert nur /app/app, §13.4)
+    templates/            #   Jinja2-Templates: base-Layout + je View + HTMX-Partials
+    static/               #   vendored htmx.min.js + Chart-Lib + CSS (kein CDN, §13.4); Design-Tokens/Styles → designer
+  demo/                   # Demo-/Seed-Modus (§13.6): idempotenter Seed, env-gated (SEED_DEMO), NIE im Order-Pfad
 tests/                    # pytest (uv run pytest); Domain-Kern ohne Netzwerk testbar
+tests/regression/         # Playwright-Regression (.spec.ts) gegen die gerenderten Cockpit-Views (§13.5)
 ```
 
 **Boundary-Regeln (prüfbar):**
 - `app/domain/**` darf **nicht** importieren: `fastapi`, `sqlalchemy`, `redis`, `app.adapters.*`, `app.api.*`, `app.db.*`, `app.scheduler.*`. (Import-Linter/Grep-prüfbar.)
 - Zugriff des Kerns auf DB/Broker/LLM ausschließlich über **Ports** (abstrakte Protokolle in `app/domain/**/ports.py`), implementiert in `app/adapters/**`.
 - `app/api/dashboard.py` ruft **keine** Order-, Sizing- oder Risiko-Funktion auf (nur Lese-Queries) — Anzeige verändert keine Trading-Logik (C-017).
+- **UI-Boundary (§13, prüfbar):** `app/api/ui.py` und `app/api/queries/**` importieren **nichts** aus `app/domain/sizing`, `app/domain/risikomanagement`, `app/domain/execution`, `app/orchestration/*_pipeline`, `app/orchestration/execution_service` und rufen keine Buchungs-/Schreibfunktion des Depotmoduls auf (nur Lese-Ports + Control-Plane-Funktionen aus `app/core/**`). Query-Funktionen sind read-only (kein `session.add/commit`).
+- **Asset-Boundary (§13.4, prüfbar):** Templates/Statics liegen unter `app/web/**` (im Runtime-Image); kein Cockpit-Template referenziert eine externe CDN-URL (`grep`-prüfbar: kein `//cdn`/`https://` auf JS/CSS in `app/web/templates/**`).
 
 ## 5. Kern-Datenflüsse
 
@@ -235,6 +244,9 @@ Format kurz (Kontext → Entscheidung → Konsequenz/verworfene Alternative), MA
 - **ADR-009 — Eigenbau für Technische Analyse + Risiko/Quantitativ.** Kontext: 0×AUTO / viele BUILD (C-018). Entscheidung: `domain/quant` mit numpy/scipy/pandas-ta (Volatilität, Beta, Sharpe/Sortino, VaR, Max Drawdown, Monte Carlo). Konsequenz: keine Blackbox im Order-relevanten Rechenkern.
 - **ADR-010 — Geldarithmetik in `Decimal`, Statistik in `float`.** Entscheidung: P7. Konsequenz: keine Float-Rundungsfehler in Beträgen/G/V; klare Grenze zwischen Geld (Decimal) und Score/Statistik (float/numpy).
 - **ADR-011 — Fill→Depot-Fortschreibung idempotent (Client-Order-ID).** Entscheidung: at-least-once-Zustellung, Dedup über Order-ID (architecture/R06). Konsequenz: doppelte Events verfälschen den Bestand nicht (Bestand = Wahrheit, C-017).
+- **ADR-012 — Betriebs-Cockpit server-gerendert (HTMX + Jinja2), keine SPA.** Kontext: read-heavy Cockpit (Status/Tabellen/Charts, wenige Control-Toggles), Ein-Personen-Python-Team, ein Docker-Image (`uvicorn app.main:app`), keine Frontend-Spezialisten. Entscheidung: die UI-Schicht rendert HTML in FastAPI über Jinja2, progressive Interaktivität (Polling der Ampel/Live-Kurse, Partial-Refresh von Tabellen, Toggle-/Kill-Switch-POSTs) über HTMX; Charts (Spinnennetz C-007, Verlauf) über eine kleine, **vendored** JS-Chart-Lib. **Verworfen: SPA (React/Svelte/SvelteKit)** — brächte einen separaten Node-Build, Bundler und ein zweites Artefakt/Deploy in ein bislang build-freies Ein-Image-Backend, ohne dass der Cockpit-Charakter die SPA-Interaktivität rechtfertigt (die benötigte Interaktivität ist genau HTMXs Kernfall). Der bereits vorhandene Playwright-Stack testet server-gerendertes HTML unverändert (Playwright ist Test-Toolchain, kein Frontend-Framework — kein Argument für eine SPA). Konsequenz: kein Node-Build-Schritt im Deploy, ein Image bleibt die einzige Deploy-Einheit; neue Runtime-Deps `jinja2` + `python-multipart` (Form-POSTs). Trade-off bewusst akzeptiert: hoch-interaktive Client-Zustände (Drag&Drop, Offline) sind nicht das Ziel dieses Cockpits; entstünde später ein solcher Bedarf für einen abgegrenzten Teilbereich, kann er als isolierte Insel über die bereits vorhandenen JSON-Read-Endpoints (§13.3) nachgezogen werden, ohne die Server-Render-Basis zu ersetzen.
+- **ADR-013 — UI-Assets vendored unter `app/web/`, kein CDN.** Kontext: Finanz-/Betriebs-Cockpit, Ein-Image-Deploy, Dockerfile kopiert nur `/app/app`. Entscheidung: `htmx.min.js`, die Chart-Lib und CSS liegen als statische Dateien unter `app/web/static/` (im Image), ausgeliefert über FastAPI-`StaticFiles`; Templates unter `app/web/templates/`. Verworfen: CDN-Referenzen (externe Laufzeit-Abhängigkeit, Offline-/Supply-Chain-Risiko) und ein Verzeichnis außerhalb `app/` (fiele aus dem Runtime-Image, siehe Dockerfile). Konsequenz: reproduzierbares Offline-Deploy, keine Drittanbieter-Requests aus dem Cockpit; Asset-Boundary `grep`-prüfbar (§4-Boundary-Regeln).
+- **ADR-014 — Demo-/Seed-Modus env-gated, read-only sichtbar, nie im Order-Pfad.** Kontext: die Views dürfen nicht leer bleiben, obwohl im MVP weder Live-Ingest noch Broker-Fills laufen. Entscheidung: ein idempotenter Seed (`app/demo/`) befüllt Bronze/Silver/Gold, einige Paper-Positionen (`mode="simuliert"`), Kandidaten-Analysen inkl. 5 Kategorie-Scores, Trade-Historie und eine Gate-Ampel — geschaltet über `SEED_DEMO` (default **aus**), damit die Produktion nie versehentlich seedet. Der Seed schreibt über dieselben Repository-/Booking-Pfade bzw. klar als Fixture markierte Inserts, hält P7 (`Decimal`) ein und löst **keine** Order aus (kein Sizing/Risiko/Execution-Aufruf, BR-001-neutral). Konsequenz: das Cockpit ist ohne Live-Betrieb vollständig sicht- und Playwright-testbar; der Demo-Zustand ist von echten Daten durch `mode`/Kennzeichnung unterscheidbar.
 
 ## 9. Geschäftsregeln (BR-Katalog)
 
@@ -330,7 +342,7 @@ Eine Regel wird nur in Suchkriteria/Depot-Suchkriterien übernommen, wenn das Va
 - **Kein separates Backtesting-System** — ersetzt durch Modus-Schalter + Validierungs-Gate (C-004, ADR-007).
 - **Kein Live-Trading im MVP** (BR-019).
 - **Kein DB-Detailmodell hier** — Entitäten/Constraints/Indizes → `docs/data-model.md` (`dba`). Diese Datei nennt nur Repository-Ports und Datenschichten.
-- **Kein Visual-Design** — Dashboard-Gestaltung → `designer`; hier nur die Anzeige-Schicht als Boundary (reine Lese-Schicht, C-017).
+- **Kein Visual-Design** — Dashboard-Gestaltung (Farben, Typografie, Layout-Raster, Komponenten-Look, Design-Tokens) → `designer`; §13 fixiert nur das **technische Substrat** (server-gerenderte HTML/CSS + HTMX, vendored Assets), auf dem der Designer sein Design-System aufbaut, sowie die Anzeige-Schicht als Boundary (reine Lese-Schicht, C-017).
 - **Rebalancing, CH-Steuerreport, Bestätigungspflicht-Modus, LSEG, ML-Infrastruktur** — geparkt/Stufe 2+ (C-004, C-012, C-018).
 
 ## 12. Offene technische Punkte
@@ -344,3 +356,76 @@ Eine Regel wird nur in Suchkriteria/Depot-Suchkriterien übernommen, wenn das Va
 - **Point-in-Time-Historie für nachrichtengetriebene Signale** (Gate-Stufe A) (C-012).
 - **Drawdown-Kill-Switch-Schwelle** (BR-022) — konkreter Wert offen (C-015).
 - **Import-Boundary-Enforcement**: Tool-Wahl (z. B. import-linter) zur automatischen Prüfung von P1/BR-001 im CI — in der Spec-/Setup-Phase festzulegen.
+- **UI-Chart-Lib-Wahl** (§13.1): konkrete vendored JS-Chart-Lib für Spinnennetz/Verlauf (Kriterien: klein, keine Build-Kette, Canvas/SVG, MIT-nah) — Vorschlag in der Spec-/Design-Phase, Freigabe mit `designer`.
+- **UI-Auth/Zugang** (§13.7): das Cockpit steuert einen Kill-Switch/Modus — Zugangsschutz (mind. einfacher Auth-Layer, nicht öffentlich) ist vor jedem nicht-lokalen Deploy zu klären; im MVP local-only.
+
+---
+
+## 13. Frontend / UI-Schicht (Betriebs-Cockpit) — bindend für `designer` + `requirement`
+
+> Diese Schicht war bisher nur als Boundary skizziert (`app/api/dashboard.py`, C-017). §13 macht sie zur vollständigen, bindenden Architektur-Vorgabe. **Stack-Entscheidung durch `architekt` + `designer` getroffen** (Owner-Delegation); der `designer` baut sein Design-System auf §13.1 auf, `requirement` schneidet Stories gegen §13.3/§13.6.
+
+### 13.1 Stack-Entscheidung: server-gerendert (HTMX + Jinja2), keine SPA (ADR-012)
+
+Das Cockpit wird **server-gerendert** in FastAPI ausgeliefert: **Jinja2**-Templates + **HTMX** für progressive Interaktivität, eine kleine **vendored** JS-Chart-Lib für Spinnennetz (C-007) und Verlaufs-Charts. Begründung (Abwägung explizit):
+
+| Kriterium | Server-rendered (HTMX + Jinja2) — **gewählt** | SPA (React/Svelte/SvelteKit) — verworfen |
+|---|---|---|
+| Team | Python-Team, keine FE-Spezialisten → HTML/Jinja im vertrauten Stack | eigener JS/TS-Ökosystem-Betrieb nötig |
+| Cockpit-Charakter | read-heavy: Status/Tabellen/Charts + wenige Toggles → HTMXs Kernfall (Polling, Partial-Refresh, Form-POST) | SPA-Interaktivität durch den Charakter nicht gerechtfertigt |
+| Deploy | **ein** Docker-Image, kein Node-Build (`uvicorn app.main:app` bleibt einzige Einheit) | zweiter Build/Artefakt + Bundler + Serving-Frage |
+| Wartung | ein Sprach-Stack, DTOs (P2) direkt als Template-Kontext | JSON-Client-State + Typen-Duplikat FE/BE |
+| Playwright | testet gerendertes HTML unverändert (Test-Toolchain, **kein** FE-Framework-Signal) | kein SPA-Vorteil, Playwright ist stack-neutral |
+| Contracts (P2) | dieselben Pydantic-View-DTOs speisen HTML **und** JSON (§13.3) | Serialisierung ohnehin, aber ohne Server-Render-Ersparnis |
+
+Trade-off bewusst: Kein Ziel sind hoch-interaktive Client-Zustände (Drag&Drop, Offline-First). Entsteht später ein solcher Bedarf in einem abgegrenzten Teilbereich, wird er als isolierte Insel über die JSON-Read-Endpoints (§13.3) nachgezogen — die Server-Render-Basis bleibt.
+
+### 13.2 Wie die UI ans Backend andockt
+
+- **Zwei Oberflächen, ein Read-Kern (P4/DRY):** Jede Cockpit-View bezieht ihre Daten aus einer **Query-Funktion** (`app/api/queries/**`, read-only, liefert ein Pydantic-View-DTO aus `app/contracts/**`). Diese Query wird von **zwei** Routen konsumiert: der HTML-Route (`app/api/ui.py`, rendert das DTO via Jinja2) **und** einer JSON-Route (`app/api/…`, `response_model=<DTO>`, für programmatischen Zugriff, Regression, spätere Insel-Widgets). Keine View baut ihre Daten in der Route selbst zusammen.
+- **Read-only gegenüber der Domäne (C-017, P1):** Query-Funktionen lesen ausschließlich über die vorhandenen **Repository-Lese-Ports** (z. B. `PositionRepository.alle_offenen_positionen` / `historie_je_titel`, S-036/S-035) und den **`LivePriceProvider`** (P5 — die UI baut keine eigene Preisanbindung). Sie rufen **keine** Sizing-/Risiko-/Order-/Booking-Funktion auf (siehe UI-Boundary, §4).
+- **Live-Aktualisierung** (Ampel, Live-Kurse) über HTMX-Polling (`hx-trigger="every Ns"`) gegen kleine Partial-Endpunkte, die dasselbe DTO/Partial-Template rendern — kein WebSocket im MVP (kein Sub-Sekunden-Bedarf, NFR §10 „Latenz-Toleranz“).
+- **Control-Plane (schreibend, klar getrennt):** Toggles (BR-017/BR-018), Modus-Schalter (BR-019), Kill-Switch (BR-021) laufen über POSTs in `app/api/control.py` (in §4 bereits vorgesehen), die **ausschließlich** die dafür vorgesehenen Zustands-Funktionen in `app/core/**` bzw. Konfig-Schreibpfade aufrufen (z. B. `app.core.kill_switch.ausloesen`/`freigeben`) — nie Trading-Logik. HTMX rendert nach dem POST das aktualisierte Status-Partial zurück.
+
+### 13.3 Nötige neue Backend-Read-Endpoints je Cockpit-View
+
+Jeder Endpunkt ist eine **Query-Funktion + JSON-Route + HTML-View** (§13.2). JSON-Pfade unter `/api/**` (neu, additiv); der bestehende `GET /dashboard/depot` bleibt und wird von der Depot-View mitgenutzt/generalisiert. „Quelle“ nennt die vorhandenen Bausteine, an die die Query andockt.
+
+| View | Read-Endpoint (JSON) | Inhalt (View-DTO) | Quelle / Andockpunkt |
+|---|---|---|---|
+| **Depot / Portfolio** | `GET /api/depot` (generalisiert `GET /dashboard/depot`) | Bestand je Titel (Menge, Einstand, Live-Kurs, unrealisierter G/V), Portfolio-Aggregate (Gewichtungen, Cash-Quote), realisierter G/V | `PositionRepository.alle_offenen_positionen`, `portfolio_aggregate`, `LivePriceProvider` |
+| **Kandidaten & Analyse-Scores** | `GET /api/kandidaten` | Liste bewerteter Kandidaten: Titel, Gesamtscore, Signal (BR-007), 5 Kategorie-Scores (Spinnennetz-Achsen, C-007/AC10), `as_of` | `domain/scoring/score_engine` (`AnalyseErgebnis`), Analyse-Ergebnis-Read-Modell* |
+| ↳ Detail | `GET /api/kandidaten/{id}` | Kategorie-Fakten inkl. Quellen-ID + Timestamp (BR-002), Begründung, Sanity-Cap-Status (BR-008) | `analysis_new`, LLM-Grounding-Output (schema-validiert) |
+| **Order- / Trade-Historie** | `GET /api/trades` | Fills/Transaktionen (Titel, Richtung, Menge, Fill-Preis, Arrival-Price, Slippage/TCA, Kosten, FX-Split, Zeit), Filter `mode`/Titel/Zeitraum | `PositionRepository.historie_je_titel` (S-035), depotweites Historien-Read* |
+| **System-Status (Kill-Switch/Modus/Ampel)** | `GET /api/system/status` | konsolidiert: Kill-Switch-Zustand (BR-021), aktiver Modus je Klasse (BR-019), Heartbeat, Drawdown, Halluzinations-KPI (BR-006), Gate-Ampel (BR-025) | `core/kill_switch`, `core/heartbeat`, `core/drawdown_monitor`, `core/hallucination_kpi`, `validation`/Gate |
+| **Konfiguration / Toggles** | `GET /api/config/anlageklassen` · `GET /api/config/depotstrategie` | 11 Klassen mit Toggle-Zustand + Prio (C-006); aktive Depotstrategie-Grenzwerte/Preset (C-015) | `domain/assetclasses`, `db/*`-Konfig (`category_weight`, Risk-Profile/Portfolio-Strategy) |
+
+*Ein **Read-Modell-Gap** ist erkennbar: Kandidaten-Analysen und eine depotweite Trade-Historie sind als Domänen-Rechnung/Repository vorhanden, aber noch nicht als abfragbares Read-Modell über HTTP persistiert/exponiert. `requirement`/`dba` schneiden dafür ggf. eine schlanke Read-Persistenz bzw. Query (kein neues Order-Pfad-Verhalten) — die Query-Funktion ist der einzige Ort, an dem dieser Gap geschlossen wird. Detail-Datenmodell → `dba`.
+
+### 13.4 Deploy-Modell
+
+- **Gleiches Image, kein separater Build.** Die UI ist Teil der FastAPI-App; `uvicorn app.main:app` bleibt die einzige Deploy-Einheit (ghcr-Image, Port 8080). Kein Node/Bundler im Runtime-Deploy.
+- **Neue Runtime-Deps:** `jinja2` (Templates) + `python-multipart` (Form-POSTs) in `[project].dependencies` — direkt importierte Libs sind direkte Deps (coder-Lesson S-005).
+- **Asset-/Template-Ort (harte Regel, ADR-013):** Templates unter `app/web/templates/`, Statics unter `app/web/static/` — **unter `app/`**, weil der Dockerfile nur `/app/app` ins Runtime-Image kopiert. Liegen sie außerhalb `app/`, fehlen sie zur Laufzeit (404). Vendored `htmx.min.js` + Chart-Lib + CSS, **kein CDN**.
+- **Static-Mount** via `StaticFiles` in `app/main.py`; `Jinja2Templates` mit Verzeichnis `app/web/templates`.
+
+### 13.5 Regression (Playwright, vorhanden)
+
+Der vorhandene Playwright-Stack (`playwright.config.ts`, `tests/regression/**/*.spec.ts`, `REGRESSION_BASE_URL`) testet die gerenderten Cockpit-Views end-to-end gegen die laufende App (Preview/Deploy) — im Demo-Seed-Zustand (§13.6) deterministisch. Server-Rendering ändert daran nichts; die Views tragen prüfbare Verankerungen (stabile `id`/`data-`-Attribute), die der `designer`/`coder` setzt.
+
+### 13.6 Demo-/Seed-Modus (ADR-014)
+
+- **Zweck:** alle Views mit plausiblen Daten füllen, ohne Live-Ingest/Broker — sichtbar machen + Playwright-Determinismus.
+- **Schaltung:** env-gated über `SEED_DEMO` (default **aus**); Produktion seedet nie versehentlich. Idempotent (Mehrfach-Ausführung = ein Zustand).
+- **Inhalt:** Bronze/Silver/Gold-Beispieldaten, einige Paper-Positionen (`mode="simuliert"`), Kandidaten-Analysen inkl. 5 Kategorie-Scores + Signal, Trade-Historie mit Slippage/TCA, eine Gate-Ampel, aktive/inaktive Klassen-Toggles.
+- **Invarianten:** schreibt über bestehende Repository-/Booking-Pfade oder klar als Fixture markierte Inserts; hält P7 (`Decimal`); löst **keine** Order aus (kein Sizing/Risiko/Execution-Aufruf — BR-001 bleibt strukturell unberührt). Der Demo-Zustand ist über `mode="simuliert"` von echten Daten unterscheidbar.
+- **Ort:** `app/demo/` (eigenes Paket), aufrufbar als CLI/Startup-Hook nur wenn `SEED_DEMO` gesetzt.
+
+### 13.7 Prüfbare UI-Konformitätskriterien (Review-Kriterium)
+
+1. `app/api/ui.py` + `app/api/queries/**` importieren nichts aus `domain/sizing`, `domain/risikomanagement`, `domain/execution`, `orchestration/*_pipeline`, `execution_service` und rufen keinen Depot-Schreibpfad auf (grep/import-linter).
+2. Query-Funktionen sind read-only (kein `session.add`/`commit`); Live-Kurse nur über `LivePriceProvider` (P5).
+3. Kein Cockpit-Template referenziert eine externe CDN-URL; Templates/Statics liegen unter `app/web/**` (im Image).
+4. Jede JSON-Read-Route trägt ein `response_model`-Pydantic-DTO (P2); HTML-Route und JSON-Route teilen dieselbe Query-Funktion (P4/DRY — kein zweiter Datenzusammenbau).
+5. Control-Aktionen (Toggle/Modus/Kill-Switch) laufen ausschließlich über `app/api/control.py` → `app/core/**`-Zustandsfunktionen, nie über die UI-/Query-Schicht.
+6. Der Demo-Seed ist env-gated (`SEED_DEMO`, default aus), idempotent und erzeugt keinen Order-Pfad-Aufruf.

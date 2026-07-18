@@ -1,0 +1,31 @@
+id: S-075
+parent: F-017
+title: HTML-View System-Status + Live-Polling — Ampel/Kill-Switch/Modus/Heartbeat/Drawdown/KPI/Gate-Ampel,
+  Banner bei kritisch
+status: To Do
+priority: P2
+spec: docs/specs/frontend-cockpit.md
+implements:
+- AC17
+- AC19
+depends:
+- S-064
+- S-068
+- S-074
+labels:
+- ui
+- betrieb
+size_est: M
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine Baseline-Tokens);
+  estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-18T04:24:22Z'
+updated_at: '2026-07-18T04:26:55Z'
+done_at: null

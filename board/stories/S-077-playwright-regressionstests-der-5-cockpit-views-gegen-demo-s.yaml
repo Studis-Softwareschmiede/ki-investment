@@ -1,0 +1,33 @@
+id: S-077
+parent: F-017
+title: Playwright-Regressionstests der 5 Cockpit-Views gegen Demo-Seed (data-testid-Anker
+  §7/§8)
+status: To Do
+priority: P2
+spec: docs/specs/frontend-cockpit.md
+implements:
+- AC23
+depends:
+- S-070
+- S-071
+- S-072
+- S-073
+- S-075
+- S-076
+labels:
+- ui
+- test
+size_est: M
+dispo_est: null
+dispo_act: null
+dispo_forecast: null
+estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine Baseline-Tokens);
+  estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
+confidence: low
+tok_est: null
+branch: null
+pr: null
+blocked_reason: null
+created_at: '2026-07-18T04:24:23Z'
+updated_at: '2026-07-18T04:27:00Z'
+done_at: null

@@ -1,0 +1,35 @@
+id: F-017
+title: Betriebs-Cockpit (server-gerenderte Anzeige-/Control-Plane)
+goal: Fünf Kern-Views (Depot · Kandidaten/Scores · Trades/TCA · System-Status · Konfiguration)
+  server-gerendert über HTMX+Jinja2 in einer geteilten read-only Query-Schicht + getrennter
+  Control-Plane ausliefern; Read-Modell-Gap (Kandidaten-Analysen + depotweite Trade-Historie)
+  rein lesend schliessen; env-gateter Demo-Seed für gefüllte, Playwright-testbare
+  Views.
+status: Backlog
+priority: P1
+spec: docs/specs/frontend-cockpit.md
+definition_of_done: null
+labels:
+- ui
+- cockpit
+- mvp
+depends: null
+owner: null
+stories:
+- S-064
+- S-065
+- S-066
+- S-067
+- S-068
+- S-069
+- S-070
+- S-071
+- S-072
+- S-073
+- S-074
+- S-075
+- S-076
+- S-077
+progress: 0/14 done
+created_at: '2026-07-18T04:23:47Z'
+updated_at: '2026-07-18T04:27:13Z'
