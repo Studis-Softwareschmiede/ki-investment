@@ -1,6 +1,6 @@
-"""Modul-Verträge Lernschleife — Validierungs-Gate Stufe A (historisch)
-(Story S-060, Spec `docs/specs/lernschleife.md` AC4/AC5/AC6/AC7, →
-`docs/data-model.md` §6).
+"""Modul-Verträge Lernschleife — Validierungs-Gate Stufe A (historisch,
+Story S-060, AC4/AC5/AC6/AC7) und Stufe B (Paper-Bewährung, Story S-061,
+AC8/AC9), Spec `docs/specs/lernschleife.md`, → `docs/data-model.md` §6.
 
 architecture.md §2 P2 ("Explizite Modul-Verträge"): jeder Modul-Übergang
 läuft über ein typisiertes DTO in `app/contracts/`. Dieses Modul bildet
@@ -28,18 +28,33 @@ den Verträge-Abschnitt der Spec ab:
   können; die Spec nennt diese Zustände in Fliesstext (Main Success
   Scenario Schritt 4-5, Alternative Flows A2/A3), auch wenn der
   "Verträge"-Abschnitt nur die vier Metrik-Felder explizit auflistet.
+- **`StufeBKonfiguration`** — die laut AC12 konfigurierbare Schwelle, die
+  Stufe B betrifft (`psr_schwelle`, AC8); Default ist der von der Spec
+  beschlossene Wert (95%).
+- **`StufeBReport`** — der volle Output-Vertrag von Stufe B (Spec
+  "Verträge": `{ psr, benchmark_sharpe (=0), mintrl_restlaufzeit }`),
+  ergänzt um `hypothesis_id`, `n_trades`, `psr_schwelle`, `psr_bestanden`
+  (AC8-Bestehen-Flag: PSR >= Schwelle) und `begruendung` (Audit-Trail
+  analog `StufeAReport`). `psr`/`mintrl_restlaufzeit` sind `None`, wenn
+  die zugrunde liegende Renditeverteilung degeneriert ist (< 2 Trades,
+  Standardabweichung 0, Sharpe Ratio 0) — analog der S-060-DSR-
+  Robustheits-Konvention wird dann kontrolliert gewertet statt
+  abzustürzen (siehe `app.domain.lernschleife.stage_b`).
 
-**Bewusst NICHT Teil dieser Story:** `ampel` (AC10/AC11, S-062), `psr`/
-`min_trl` (AC8/AC9, S-061) — diese Felder gehören zu `gate_result`
-(`docs/data-model.md` §6), das laut §11-Migrationsreihenfolge nach
-`rule_hypothesis` (S-058, noch offen) kommt und deshalb hier bewusst noch
-nicht angelegt wird (kein Gold-Plating über AC4-AC7 hinaus).
+**Bewusst NICHT Teil dieser Story:** `ampel` (AC10/AC11, S-062) — dieses
+Feld gehört zu `gate_result` (`docs/data-model.md` §6), dessen Persistenz
+(inkl. der `psr`/`min_trl`-Spalten) laut Ampel-Umsetzung (AC10/AC11)
+weiterhin S-062-Scope ist (kein Gold-Plating über AC8/AC9 hinaus). S-061
+(unten: `StufeBKonfiguration`, `StufeBReport`) liefert PSR/MinTRL als
+reinen Domain-Kern-Output (P1, kein I/O/DB) — die DB-Spalten `gate_result.
+psr`/`gate_result.min_trl` entstehen erst mit der `gate_result`-Migration
+in S-062.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -123,3 +138,41 @@ class StufeAReport(BaseModel):
     ergebnis: StufeAErgebnis
     begruendung: str
     splits: list[WalkForwardSplitErgebnis] = Field(default_factory=list)
+
+
+class StufeBKonfiguration(BaseModel):
+    """AC12-Schwelle, die Stufe B betrifft — konfigurierbar, Default ist
+    der von der Spec beschlossene Wert:
+
+    - `psr_schwelle` (AC8): Probabilistic Sharpe Ratio (gegen Benchmark-
+      Sharpe 0) muss >= diese Schwelle sein, damit Stufe B besteht.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    psr_schwelle: Decimal = Field(default=Decimal("0.95"))
+
+
+class StufeBReport(BaseModel):
+    """Der volle Output-Vertrag von Stufe B (Spec "Verträge": `{ psr,
+    benchmark_sharpe (=0), mintrl_restlaufzeit }`), ergänzt um
+    `hypothesis_id`, `n_trades`, `psr_schwelle`, `psr_bestanden` (AC8:
+    PSR >= Schwelle) und `begruendung` (Audit-Trail analog
+    `StufeAReport`).
+
+    `psr`/`mintrl_restlaufzeit` sind `None`, wenn die zugrunde liegende
+    Renditeverteilung degeneriert ist (< 2 Trades, Standardabweichung 0,
+    Sharpe Ratio 0) — die Bewertung bricht dann NICHT ab, sondern weist
+    dies kontrolliert aus (analog der S-060-DSR-Robustheits-Konvention,
+    `psr_bestanden` ist in diesem Fall `False`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    hypothesis_id: uuid.UUID
+    n_trades: int = Field(ge=0)
+    psr: Decimal | None = None
+    benchmark_sharpe: Decimal = Decimal("0")
+    psr_schwelle: Decimal
+    psr_bestanden: bool
+    mintrl_restlaufzeit: timedelta | None = None
+    begruendung: str
