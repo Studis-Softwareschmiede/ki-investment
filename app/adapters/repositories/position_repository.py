@@ -434,6 +434,17 @@ class SqlAlchemyPositionRepository:
             )
         ]
 
+    def realisierter_gv_gesamt(self, *, mode: Modus) -> Decimal:
+        """AC3 (S-065): depotweite Summe von `Position.realisierter_gv`
+        über ALLE Positionen (offen UND geschlossen) **im angegebenen
+        `mode`** (Mode-Isolation, BR-130) — bewusst OHNE
+        `Position.status`-Filter (anders als `alle_offenen_positionen`),
+        da ein Vollverkauf den Lot schliesst, sein bereits realisierter
+        G/V aber im Depot-Read-Modell erhalten bleiben muss."""
+        stmt = select(Position.realisierter_gv).where(Position.mode == mode)
+        werte = self._session.scalars(stmt).all()
+        return sum(werte, Decimal("0"))
+
 
 def _als_decimal(wert: float | None) -> Decimal | None:
     """AC1 (S-040): `ExitRegeln`-Felder sind `float`-typisiert (Pass-

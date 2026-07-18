@@ -83,6 +83,17 @@ zu `historie_je_titel` (S-035) — schliesst das in AC7 benannte Read-Modell-
 Gap (die Trade-Historie lag bislang nur je Titel abfragbar vor), optional
 gefiltert nach Titel und Zeitraum. Rein lesend über dieselbe
 `transaction`-Tabelle, kein neues Order-Pfad-Verhalten (AC7, Nicht-Ziele).
+
+Story S-065 (`docs/specs/frontend-cockpit.md` AC3) ergänzt
+`realisierter_gv_gesamt`: den depotweiten realisierten G/V **über alle
+Positionen (offen UND geschlossen) eines `mode`** — `Position
+.realisierter_gv` (S-016, AC2/AC3) akkumuliert bereits je Lot bei jedem
+Teil-/Vollverkauf; diese Methode summiert nur über die bereits
+akkumulierten Werte (keine neue Formel, reine Aggregation, P1). Anders als
+`alle_offenen_positionen` (nur `status == "offen"`) zählt diese Summe
+bewusst auch geschlossene Lots mit — ein Vollverkauf schliesst den Lot,
+sein bereits realisierter G/V darf im Depot-Read-Modell aber nicht
+verschwinden.
 """
 
 from __future__ import annotations
@@ -363,6 +374,14 @@ class PositionRepository(Protocol):
         `None` heisst je "kein Filter". Aufsteigend nach `booked_at`
         sortiert (wie `historie_je_titel`). Leere Liste, falls im Modus
         (bzw. im gefilterten Ausschnitt) kein Fill gebucht wurde."""
+        ...
+
+    def realisierter_gv_gesamt(self, *, mode: Modus) -> Decimal:
+        """AC3 (S-065): depotweite Summe von `Position.realisierter_gv`
+        **über alle Positionen (offen UND geschlossen) im angegebenen
+        `mode`** (Mode-Isolation, BR-130) — `Decimal("0")`, falls kein
+        Fill je verkauft wurde. Reine Aggregation über bereits akkumulierte
+        Werte (siehe Moduldocstring), keine neue G/V-Formel."""
         ...
 
 

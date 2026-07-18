@@ -1,10 +1,15 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
-DBA-Zweit-Review + S-045).
+DBA-Zweit-Review + S-045 + S-065).
 
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 Covers (strategie-exit-regeln): AC1, AC10, AC11
 Covers (risikomanagement): AC9
-Covers (frontend-cockpit): AC6, AC7
+Covers (frontend-cockpit): AC6, AC7, AC3
+
+S-065 (`docs/specs/frontend-cockpit.md` AC3) ergänzt
+`realisierter_gv_gesamt`: depotweite Summe von `Position.realisierter_gv`
+über ALLE Positionen (offen UND geschlossen) eines `mode` — Grundlage des
+depotweiten realisierten G/V im `/api/depot`-Read-Modell.
 
 S-045 (AC9) ergänzt: `alle_offenen_positionen` liefert zusätzlich
 `korrelations_cluster` je Lot (`Instrument.korrelations_cluster`,
@@ -1244,3 +1249,58 @@ def test_schreibe_transaktion_chf_hat_keinen_fx_rate() -> None:
         assert eintrag.fx_rate is None
         assert eintrag.kapital_gv_chf is None
         assert eintrag.waehrungs_gv_chf is None
+
+
+def test_realisierter_gv_gesamt_ist_null_ohne_bestand() -> None:
+    """@trace frontend-cockpit#AC3 — ohne jede Position ist der depotweite
+    realisierte G/V 0, kein Fehler."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        _instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.realisierter_gv_gesamt(mode="simuliert") == Decimal("0")
+
+
+def test_realisierter_gv_gesamt_summiert_offene_und_geschlossene_positionen() -> None:
+    """@trace frontend-cockpit#AC3 — ein Vollverkauf schliesst den Lot
+    (`status=geschlossen`), sein bereits realisierter G/V darf im
+    depotweiten Read-Modell trotzdem nicht verschwinden — die Summe zählt
+    bewusst OHNE `status`-Filter."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        offen = _make_position(instrument_id, strategy_id, menge=Decimal("5"), status="offen")
+        offen.realisierter_gv = Decimal("30")
+        geschlossen = _make_position(
+            instrument_id, strategy_id, menge=Decimal("0"), status="geschlossen"
+        )
+        geschlossen.realisierter_gv = Decimal("70")
+        session.add(offen)
+        session.add(geschlossen)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.realisierter_gv_gesamt(mode="simuliert") == Decimal("100")
+
+
+def test_realisierter_gv_gesamt_zaehlt_nur_den_eigenen_modus() -> None:
+    """@trace frontend-cockpit#AC3 — Mode-Isolation (BR-130): ein
+    "echt"-Lot darf den "simuliert"-Wert nicht mitzählen (und umgekehrt)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        echt = _make_position(
+            instrument_id, strategy_id, menge=Decimal("5"), status="offen", mode="echt"
+        )
+        echt.realisierter_gv = Decimal("10")
+        simuliert = _make_position(
+            instrument_id, strategy_id, menge=Decimal("5"), status="offen", mode="simuliert"
+        )
+        simuliert.realisierter_gv = Decimal("999")
+        session.add(echt)
+        session.add(simuliert)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.realisierter_gv_gesamt(mode="echt") == Decimal("10")
+        assert repository.realisierter_gv_gesamt(mode="simuliert") == Decimal("999")
