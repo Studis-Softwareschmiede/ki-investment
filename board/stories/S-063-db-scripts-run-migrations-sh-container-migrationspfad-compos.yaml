@@ -1,7 +1,7 @@
 id: S-063
 parent: F-001
 title: db_scripts/run-migrations.sh + Container-Migrationspfad (Compose-Migrations-Runner)
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/projekt-setup.md
 implements:
@@ -11,7 +11,7 @@ labels:
 - infra
 - deploy
 - db
-size_est: null
+size_est: M
 dispo_est: null
 dispo_act: null
 dispo_forecast: null
@@ -27,9 +27,9 @@ estimate_note: 'docker-compose.yml referenziert im ''migrations''-Service ./db_s
   --sql'' rendern und via psql einspielen; (b) alternativ alembic.ini + migrations
   ins Prod-Image aufnehmen. Aktuell im lokalen Deploy per Host-alembic umgangen.'
 confidence: null
-branch: null
-pr: null
+branch: feat/S-063-run-migrations
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/44
 blocked_reason: null
 created_at: '2026-07-18T03:53:30Z'
-updated_at: '2026-07-18T03:53:53Z'
-done_at: null
+updated_at: '2026-07-18T21:51:58Z'
+done_at: '2026-07-18T21:51:55Z'

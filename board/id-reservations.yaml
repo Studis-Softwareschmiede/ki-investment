@@ -1,0 +1,11 @@
+schema_version: 1
+namespaces:
+  BR:
+    block_size: 10
+    reservations:
+    - feature_id: S-079
+      range_start: 1
+      range_end: 10
+      status: released
+      reserved_at: '2026-07-19T00:09:36Z'
+      high_water: null
