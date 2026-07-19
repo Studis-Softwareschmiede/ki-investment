@@ -2,7 +2,7 @@ id: S-077
 parent: F-017
 title: Playwright-Regressionstests der 5 Cockpit-Views gegen Demo-Seed (data-testid-Anker
   §7/§8)
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -25,9 +25,9 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
   estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-077-playwright-regression
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/59
 blocked_reason: null
 created_at: '2026-07-18T04:24:23Z'
-updated_at: '2026-07-18T04:27:00Z'
-done_at: null
+updated_at: '2026-07-19T01:19:04Z'
+done_at: '2026-07-19T01:19:01Z'
