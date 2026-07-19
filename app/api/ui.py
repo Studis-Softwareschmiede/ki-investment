@@ -31,6 +31,13 @@ Toggle-POST selbst läuft clientseitig (`app/web/static/js/konfiguration.js`)
 gegen die bestehende, unveränderte Control-Plane (`app.api.control`,
 S-074) — diese Datei löst/schreibt nichts selbst.
 
+Story S-079 (AC27) befüllt die **Warteliste-View** (`/ui/warteliste`) —
+dieselbe Query-Funktion wie `GET /api/warteliste` (AC26, kein zweiter
+Datenzusammenbau). Bewusst KEIN Eintrag in `KERN_VIEWS`: design.md §5
+schliesst die Hauptnavigation auf fünf Kern-Views ab, die Verträge-Tabelle
+von `frontend-cockpit.md` führt Warteliste als eigene "v2"-Zeile ohne
+Nav-Anspruch — die View bleibt über die direkte URL erreichbar.
+
 **UI-Boundary (AC2):** diese Datei importiert bewusst NICHTS aus
 `app.domain.sizing`, `app.domain.risikomanagement`, `app.domain.execution`,
 `app.orchestration.*_pipeline`, `app.orchestration.execution_service` und
@@ -63,13 +70,16 @@ from app.api.queries.config import (
 from app.api.queries.depot import hole_depot_uebersicht
 from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
 from app.api.queries.trades import hole_trade_historie
+from app.api.queries.warteliste import hole_warteliste
 from app.api.trades import get_position_repository
+from app.api.warteliste import get_warteliste_repository
 from app.contracts.analyse_framework import KATEGORIE_NAMEN
 from app.contracts.anlageklassen_config import AnlageklasseEintrag
 from app.contracts.depot import Modus
 from app.contracts.risikomanagement import DepotstrategieKonfiguration
 from app.domain.portfolio.ports import LivePriceProvider, PositionRepository
 from app.domain.scoring.ports import KandidatenRepository
+from app.domain.warteliste.ports import WartelisteRepository
 from app.web.kandidaten.anlageklassen import anlageklasse_kuerzel
 from app.web.kandidaten.spinnennetz import (
     STANDARD_VIEWBOX,
@@ -77,6 +87,7 @@ from app.web.kandidaten.spinnennetz import (
     spinnennetz_aria_label,
 )
 from app.web.templates_setup import templates
+from app.web.warteliste.blockade_grund import blockade_grund_label
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
@@ -249,6 +260,24 @@ def trades_tabelle_partial(
     über dieselbe Query-Funktion wie die volle View/JSON-Route."""
     kontext = _trades_kontext(mode=mode, titel=titel, von=von, bis=bis, repository=repository)
     return templates.TemplateResponse(request, "partials/trades-tabelle.html", kontext)
+
+
+@router.get("/warteliste", name="ui_warteliste")
+def warteliste_view(
+    request: Request,
+    mode: Modus = "echt",
+    repository: WartelisteRepository = Depends(get_warteliste_repository),
+) -> object:
+    """AC27: Warteliste-Datentabelle — dieselbe Query-Funktion wie
+    `GET /api/warteliste` (AC26, kein zweiter Datenzusammenbau)."""
+    warteliste = hole_warteliste(repository, mode=mode)
+    return _render(
+        request,
+        active_view="warteliste",
+        warteliste=warteliste,
+        anlageklasse_kuerzel=anlageklasse_kuerzel,
+        blockade_grund_label=blockade_grund_label,
+    )
 
 
 @router.get("/system-status", name="ui_system_status")

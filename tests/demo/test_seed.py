@@ -1,28 +1,29 @@
 """Tests für den Demo-/Seed-Modus (Story S-070, `docs/specs/
-frontend-cockpit.md` AC22).
+frontend-cockpit.md` AC22; erweitert um die Warteliste, Story S-079, AC28).
 
-Covers (frontend-cockpit): AC22
+Covers (frontend-cockpit): AC22, AC28
 
 - **Env-Gate (AC22 "env-gated über `SEED_DEMO`, default aus"):**
   `test_ist_demo_seed_aktiv_*` belegen, dass nur ein gesetzter
   Wahrheits-Wert (`"1"`/`"true"`/`"yes"`, gross-/kleinschreibungsunabhängig)
   aktiviert, jeder andere Wert (inkl. fehlender Variable) inaktiv bleibt.
-- **Idempotenz (AC22):** `test_seed_demo_data_is_idempotent` führt
+- **Idempotenz (AC22/AC28):** `test_seed_demo_data_is_idempotent` führt
   `seed_demo_data()` zweimal gegen dieselbe Session aus und belegt, dass
-  sich KEINE der geschriebenen Tabellen zwischen Lauf 1 und Lauf 2 in der
-  Zeilenzahl ändert (kein Duplikat).
+  sich KEINE der geschriebenen Tabellen (inkl. `warteliste_eintrag`)
+  zwischen Lauf 1 und Lauf 2 in der Zeilenzahl ändert (kein Duplikat).
 - **`mode="simuliert"` (AC22 Kern-Invariante):** `test_seed_demo_data_
   schreibt_ausschliesslich_mode_simuliert` belegt, dass jede Position/
-  Transaktion/Analyse ausschliesslich `mode="simuliert"` trägt.
-- **Inhalt (AC22):** `test_seed_demo_data_befuellt_alle_geforderten_
-  entitaeten` belegt, dass alle in AC22 genannten Entitäten tatsächlich
-  entstehen — inklusive genau eines Sanity-Cap-Falls
-  (`AnalysisResult.sanity_cap_applied`) und einer Gate-Ampel
-  (`GateResult.ampel`).
-- **Order-Freiheit (AC22 "löst keine Order aus", §13.7-6):**
+  Transaktion/Analyse/Warteliste-Eintrag ausschliesslich `mode="simuliert"`
+  trägt.
+- **Inhalt (AC22/AC28):** `test_seed_demo_data_befuellt_alle_geforderten_
+  entitaeten` belegt, dass alle in AC22 genannten Entitäten sowie mind.
+  zwei Warteliste-Einträge (AC28) tatsächlich entstehen — inklusive genau
+  eines Sanity-Cap-Falls (`AnalysisResult.sanity_cap_applied`) und einer
+  Gate-Ampel (`GateResult.ampel`).
+- **Order-Freiheit (AC22/AC28 "löst keine Order aus", §13.7-6):**
   `test_demo_modul_importiert_keinen_order_pfad` belegt per Quelltext-Scan,
-  dass kein Modul unter `app/demo/**` `app.domain.sizing`/
-  `app.domain.risikomanagement`/`app.domain.execution`/
+  dass kein Modul unter `app/demo/**` (inkl. `app.demo.warteliste`)
+  `app.domain.sizing`/`app.domain.risikomanagement`/`app.domain.execution`/
   `app.orchestration.*_pipeline`/`app.orchestration.execution_service`
   importiert (analog `tests/architecture/test_order_pfad_invariante.py`).
 
@@ -67,6 +68,7 @@ from app.db.models import (
     TimeHorizon,
     Transaction,
     TrialRegistry,
+    WartelisteEintrag,
 )
 from app.demo.seed import ist_demo_seed_aktiv, seed_demo_data
 
@@ -188,6 +190,13 @@ def test_seed_demo_data_befuellt_alle_geforderten_entitaeten(session: Session) -
     assert session.execute(select(func.count()).select_from(RuleHypothesis)).scalar_one() == 1
     assert session.execute(select(func.count()).select_from(TrialRegistry)).scalar_one() == 1
 
+    warteliste_eintraege = session.execute(select(WartelisteEintrag)).scalars().all()
+    assert len(warteliste_eintraege) >= 2
+    assert all(
+        eintrag.blockade_grund in ("klumpenrisiko", "korrelation", "drawdown", "kelly_cap")
+        for eintrag in warteliste_eintraege
+    )
+
 
 def test_seed_demo_data_schreibt_ausschliesslich_mode_simuliert(session: Session) -> None:
     seed_demo_data(session)
@@ -200,6 +209,9 @@ def test_seed_demo_data_schreibt_ausschliesslich_mode_simuliert(session: Session
 
     analysen = session.execute(select(AnalysisResult)).scalars().all()
     assert analysen and all(a.mode == "simuliert" for a in analysen)
+
+    warteliste_eintraege = session.execute(select(WartelisteEintrag)).scalars().all()
+    assert warteliste_eintraege and all(e.mode == "simuliert" for e in warteliste_eintraege)
 
 
 def _zeilenzahlen(session: Session) -> dict[str, int]:
@@ -217,6 +229,7 @@ def _zeilenzahlen(session: Session) -> dict[str, int]:
         "rule_hypothesis": RuleHypothesis,
         "trial_registry": TrialRegistry,
         "gate_result": GateResult,
+        "warteliste_eintrag": WartelisteEintrag,
     }
     return {
         name: session.execute(select(func.count()).select_from(modell)).scalar_one()

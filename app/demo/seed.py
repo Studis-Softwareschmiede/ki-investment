@@ -24,8 +24,9 @@ aufgerufen wird (z. B. im Docker-Entrypoint NACH den Migrationen, VOR dem
 App-Start, nur im Demo-/Preview-Deployment).
 
 **Reihenfolge (Fremdschlüssel-Abhängigkeiten):** Instrumente zuerst
-(`app.demo.instrumente`, von Depot UND Kandidaten referenziert), danach
-Marktdaten/Depot/Kandidaten/Gate-Ampel unabhängig voneinander."""
+(`app.demo.instrumente`, von Depot, Kandidaten UND Warteliste referenziert
+— S-079/AC28), danach Marktdaten/Depot/Kandidaten/Gate-Ampel/Warteliste
+unabhängig voneinander."""
 
 from __future__ import annotations
 
@@ -40,6 +41,7 @@ from app.demo.instrumente import seed_instrumente
 from app.demo.kandidaten import seed_kandidaten
 from app.demo.lernschleife import seed_gate_ampel
 from app.demo.marktdaten import seed_marktdaten
+from app.demo.warteliste import seed_warteliste
 
 _WAHR_WERTE = frozenset({"1", "true", "yes"})
 
@@ -63,6 +65,7 @@ def seed_demo_data(session: Session) -> None:
     seed_depot(session)
     seed_kandidaten(session)
     seed_gate_ampel(session)
+    seed_warteliste(session)
 
 
 def run() -> None:

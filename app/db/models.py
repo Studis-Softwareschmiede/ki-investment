@@ -2017,3 +2017,67 @@ class GateResult(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"GateResult(trial_id={self.trial_id!r}, stufe={self.stufe!r}, ampel={self.ampel!r})"
+
+
+# data-model.md §4 `warteliste_eintrag`: CHECK blockade_grund ∈ {...}
+# (frontend-cockpit AC26 wörtlich: "Klumpen-/Korrelations-/Drawdown-/
+# Kelly-Cap-Limit", → BR-140)
+WARTELISTE_BLOCKADE_GRUND_VALUES = ("klumpenrisiko", "korrelation", "drawdown", "kelly_cap")
+
+
+class WartelisteEintrag(Base):
+    """Warteliste blockierter Kauf-Kandidaten — reines Cockpit-Read-Modell
+    (data-model.md §4 `warteliste_eintrag`, Spec `docs/specs/
+    frontend-cockpit.md` AC26/AC27/AC28, Story S-079, → BR-140).
+
+    **Kein Backend-Schreib-/Re-Prüf-Pfad** (Spec-Nicht-Ziel: "Keine
+    Warteliste-Schreib-/Re-Prüf-Mechanik ... Im MVP speist ausschliesslich
+    der Demo-Seed das Read-Modell"). `app.domain.risikomanagement.gate
+    .pruefe_kauf_gate` liefert bei einer A2-Blockade lediglich das
+    strukturelle Signal `GateEntscheid.warteliste: bool` (AC7, S-056) —
+    OHNE Persistenz; diese Tabelle ist bewusst eine eigenständige, von der
+    Gate-Domäne komplett entkoppelte Ablage (Boundary AC2: `app/api/ui.py`
+    + `app/api/queries/**` dürfen `app.domain.risikomanagement` nicht
+    importieren, `tests/architecture/test_ui_boundary.py`), analog zu
+    `analysis_result` (S-066): erste persistente, HTTP-abfragbare Ablage
+    ohne (bzw. hier dauerhaft ohne) Domänen-Schreibpfad. Anders als
+    `risk_check_log` (FK auf `position.id`) betrifft diese Tabelle gerade
+    Kandidaten, die NIE zu einer Position werden."""
+
+    __tablename__ = "warteliste_eintrag"
+    __table_args__ = (
+        CheckConstraint(
+            f"blockade_grund IN ({', '.join(repr(v) for v in WARTELISTE_BLOCKADE_GRUND_VALUES)})",
+            name="ck_warteliste_eintrag_blockade_grund",
+        ),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_warteliste_eintrag_mode"),
+        CheckConstraint(
+            "geplante_groesse > 0", name="ck_warteliste_eintrag_geplante_groesse_positiv"
+        ),
+        Index("ix_warteliste_eintrag_mode", "mode"),
+        Index("ix_warteliste_eintrag_instrument_id", "instrument_id"),
+        Index("ix_warteliste_eintrag_asset_class_id", "asset_class_id"),
+        Index("ix_warteliste_eintrag_blockiert_am", "blockiert_am"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    geplante_groesse: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    blockade_grund: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    blockiert_am: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"WartelisteEintrag(id={self.id!r}, instrument_id={self.instrument_id!r}, "
+            f"blockade_grund={self.blockade_grund!r})"
+        )
