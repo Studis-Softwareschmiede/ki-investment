@@ -32,7 +32,16 @@ mehr) — die `client`-Fixture überschreibt die Depot-DI deshalb mit einem
 leeren Fake-Depot (analog `tests/api/test_depot_route.py`), damit diese
 generischen, über alle fünf Views parametrisierten Struktur-Tests ohne
 echte DB laufen. Die Depot-Inhalts-Tests (KPI-Tiles/Datentabelle/Live-
-Polling) liegen dediziert in `tests/web/test_ui_depot.py`."""
+Polling) liegen dediziert in `tests/web/test_ui_depot.py`.
+
+**Story S-076 (AC18):** `/ui/konfiguration` liest seit dieser Story real
+über `lade_anlageklassen_konfiguration`/`lade_depotstrategie_konfiguration`
+(DI über `app.api.config`, DB-Session-gebunden) — die `_db_freie_view_
+overrides`-Fixture überschreibt beide DI-Factories deshalb mit leeren
+Fake-Callables (analog `tests/api/test_config_route.py`), damit diese
+generischen Struktur-Tests ohne echte DB laufen. Die Konfigurations-
+Inhalts-Tests (Toggle-Liste, BR-018-Warn-Band, Depotstrategie-Anzeige)
+liegen dediziert in `tests/web/test_ui_konfiguration.py`."""
 
 from __future__ import annotations
 
@@ -41,6 +50,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.config import get_anlageklassen_reader, get_depotstrategie_reader
 from app.api.depot import get_live_price_provider
 from app.api.depot import get_position_repository as get_depot_position_repository
 from app.api.kandidaten import get_kandidaten_repository
@@ -74,6 +84,8 @@ class _LeereKandidatenRepository:
 def _db_freie_view_overrides():
     app.dependency_overrides[get_position_repository] = _LeeresFakePositionRepository
     app.dependency_overrides[get_kandidaten_repository] = _LeereKandidatenRepository
+    app.dependency_overrides[get_anlageklassen_reader] = lambda: lambda: []
+    app.dependency_overrides[get_depotstrategie_reader] = lambda: lambda: None
     yield
     app.dependency_overrides.clear()
 

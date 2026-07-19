@@ -14,7 +14,16 @@ abweichender Persistenz-Pfad. BR-018 ("Deaktivierung lässt gehaltene
 Positionen nicht erblinden") ist keine Schreib-Sperre — eine Deaktivierung
 mit offenen Positionen bleibt erlaubt (nur `neue_verarbeitung_erlaubt`
 sperrt, `app.domain.assetclasses.toggle_guard`, S-019); diese Funktion
-schreibt den reinen Toggle-Zustand unbedingt."""
+schreibt den reinen Toggle-Zustand unbedingt.
+
+**Präzisierung (Story S-076, AC18):** beide Funktionen liefern zusätzlich
+`hat_offene_positionen` (→ BR-018-Warn-Band der Konfigurations-View) —
+ermittelt über eine direkte `Position.status == "offen"`-Abfrage
+(modus-übergreifend, siehe `AnlageklasseEintrag`-Docstring). Bewusst ohne
+`PositionRepository`-Port/Adapter-Umweg: `app/db/asset_classes.py` hat
+bereits eine gebundene `Session` (Modul-Konvention dieser Datei), eine
+zusätzliche Repository-Instanziierung hier wäre ein unnötiger zweiter
+Zugriffspfad auf dieselbe Tabelle."""
 
 from __future__ import annotations
 
@@ -22,16 +31,32 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.contracts.anlageklassen_config import AnlageklasseEintrag
-from app.db.models import AssetClass
+from app.db.models import AssetClass, Position
+
+
+def _anlageklassen_mit_offenen_positionen(session: Session) -> set[int]:
+    """AC18 (→ BR-018): die Menge der `asset_class_id`, die mindestens eine
+    offene Position (`Position.status == "offen"`) halten — modus-
+    übergreifend (siehe `AnlageklasseEintrag.hat_offene_positionen`-
+    Docstring)."""
+    abfrage = select(Position.asset_class_id).where(Position.status == "offen").distinct()
+    zeilen = session.execute(abfrage).scalars().all()
+    return set(zeilen)
 
 
 def lade_alle_anlageklassen(session: Session) -> list[AnlageklasseEintrag]:
-    """AC9: alle 11 Anlageklassen mit Toggle-Zustand (`aktiv`) + Prio
-    (`prio_stufe`), sortiert nach `id`."""
+    """AC9/AC18: alle 11 Anlageklassen mit Toggle-Zustand (`aktiv`) + Prio
+    (`prio_stufe`) + `hat_offene_positionen` (→ BR-018-Warn-Band),
+    sortiert nach `id`."""
     zeilen = session.execute(select(AssetClass).order_by(AssetClass.id)).scalars().all()
+    offene_klassen = _anlageklassen_mit_offenen_positionen(session)
     return [
         AnlageklasseEintrag(
-            id=zeile.id, name=zeile.name, aktiv=zeile.aktiv, prio_stufe=zeile.prio_stufe
+            id=zeile.id,
+            name=zeile.name,
+            aktiv=zeile.aktiv,
+            prio_stufe=zeile.prio_stufe,
+            hat_offene_positionen=zeile.id in offene_klassen,
         )
         for zeile in zeilen
     ]
@@ -39,17 +64,22 @@ def lade_alle_anlageklassen(session: Session) -> list[AnlageklasseEintrag]:
 
 def setze_toggle(session: Session, asset_class_id: int, aktiv: bool) -> AnlageklasseEintrag | None:
     """AC20 (→ BR-017/BR-018): setzt `AssetClass.aktiv` für genau eine
-    Anlageklasse und liefert den aktualisierten Cockpit-Eintrag zurück —
-    `None`, wenn `asset_class_id` keine bestehende Zeile referenziert
-    (der Router meldet das als 404)."""
+    Anlageklasse und liefert den aktualisierten Cockpit-Eintrag (inkl.
+    `hat_offene_positionen`, AC18) zurück — `None`, wenn `asset_class_id`
+    keine bestehende Zeile referenziert (der Router meldet das als 404)."""
     zeile = session.get(AssetClass, asset_class_id)
     if zeile is None:
         return None
     zeile.aktiv = aktiv
     session.commit()
     session.refresh(zeile)
+    hat_offene_positionen = zeile.id in _anlageklassen_mit_offenen_positionen(session)
     return AnlageklasseEintrag(
-        id=zeile.id, name=zeile.name, aktiv=zeile.aktiv, prio_stufe=zeile.prio_stufe
+        id=zeile.id,
+        name=zeile.name,
+        aktiv=zeile.aktiv,
+        prio_stufe=zeile.prio_stufe,
+        hat_offene_positionen=hat_offene_positionen,
     )
 
 
