@@ -1,9 +1,95 @@
 {% extends "base.html" %}
 {% block title %}Konfiguration — Betriebs-Cockpit{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/views-konfiguration.css') }}">
+<script src="{{ url_for('static', path='js/konfiguration.js') }}"></script>
+{% endblock %}
 {% block view_title %}Konfiguration{% endblock %}
 {% block content %}
-<p class="view-placeholder" data-testid="view-placeholder">
-  Diese Ansicht wird in einer Folge-Story befüllt (Anlageklassen-Toggles,
-  Depotstrategie-Anzeige — <code>docs/specs/frontend-cockpit.md</code> AC18).
+{# Konfigurations-View (Story S-076, `docs/specs/frontend-cockpit.md` AC18;
+   `design.md` §7.9 Anlageklassen-Toggle, BR-017/BR-018). Anlageklassen-
+   Toggles + BR-018-Warn-Band + Depotstrategie-Anzeige (rein lesend, AC18:
+   "Control optional" — kein Preset-Auswahl-Control in dieser Story). #}
+
+<h2>Anlageklassen</h2>
+{% if anlageklassen|length == 0 %}
+<p class="empty-state" data-testid="anlageklassen-empty">Keine Anlageklassen konfiguriert.</p>
+{% else %}
+<ul class="toggle-liste" data-testid="anlageklassen-liste">
+  {% for klasse in anlageklassen %}
+  <li class="toggle-zeile" data-testid="toggle-zeile-{{ klasse.id }}">
+    <span class="chip chip--ac chip--ac-{{ klasse.id }}" data-testid="klassen-chip"
+          data-anlageklasse="{{ klasse.id }}">
+      {{ anlageklasse_kuerzel(klasse.id) }}
+    </span>
+    <label for="toggle-ac-{{ klasse.id }}" class="toggle-name">{{ klasse.name }}</label>
+    <span class="toggle-prio" data-testid="prio-stufe">{{ klasse.prio_stufe }}</span>
+
+    <span class="toggle-control">
+      <input
+        type="checkbox"
+        role="switch"
+        class="toggle-switch"
+        id="toggle-ac-{{ klasse.id }}"
+        data-testid="toggle-ac-{{ klasse.id }}"
+        data-active="{{ 'true' if klasse.aktiv else 'false' }}"
+        data-has-open-positions="{{ 'true' if klasse.hat_offene_positionen else 'false' }}"
+        data-toggle-url="/api/control/anlageklassen/{{ klasse.id }}/toggle"
+        {% if klasse.aktiv %}checked{% endif %}
+        {% if klasse.hat_offene_positionen %}aria-describedby="warnband-ac-{{ klasse.id }}"{% endif %}
+        onchange="konfigurationToggleAnlageklasse(this)"
+      >
+      <span class="toggle-status" data-testid="toggle-status">{{ 'aktiv' if klasse.aktiv else 'inaktiv' }}</span>
+    </span>
+
+    {% if klasse.hat_offene_positionen %}
+    <p class="warnband" role="status" data-testid="warnband-ac-{{ klasse.id }}"
+       id="warnband-ac-{{ klasse.id }}" {% if klasse.aktiv %}hidden{% endif %}>
+      <span aria-hidden="true">⚠</span> inaktiv – Positionen bleiben überwacht
+    </p>
+    {% endif %}
+    <p class="toggle-fehler" role="alert" data-testid="toggle-fehler-{{ klasse.id }}" hidden></p>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Depotstrategie</h2>
+{% if depotstrategie is none %}
+<p class="empty-state" data-testid="depotstrategie-empty">
+  Noch kein Depotstrategie-Preset aktiviert.
 </p>
+{% else %}
+<section class="tiles" aria-label="Depotstrategie-Grenzwerte" data-testid="depotstrategie">
+  <article class="tile" data-testid="depotstrategie-profil">
+    <span class="tile-label">Profil</span>
+    <span class="tile-value" data-value>{{ depotstrategie.risk_profile_name }}</span>
+  </article>
+  <article class="tile" data-testid="depotstrategie-max-einzelposition">
+    <span class="tile-label">Max. Einzelposition</span>
+    <span class="tile-value" data-value>{{ "%.1f"|format(depotstrategie.max_einzelposition_pct) }}%</span>
+  </article>
+  <article class="tile" data-testid="depotstrategie-max-sektor">
+    <span class="tile-label">Max. Sektor (GICS)</span>
+    <span class="tile-value" data-value>{{ "%.1f"|format(depotstrategie.max_sektor_pct) }}%</span>
+  </article>
+  <article class="tile" data-testid="depotstrategie-cash-quote-ziel">
+    <span class="tile-label">Cash-Quote-Ziel</span>
+    <span class="tile-value" data-value>{{ "%.1f"|format(depotstrategie.cash_quote_ziel_pct) }}%</span>
+  </article>
+  <article class="tile" data-testid="depotstrategie-exposure-cap">
+    <span class="tile-label">Gesamt-Exposure-Cap</span>
+    <span class="tile-value" data-value>{{ "%.1f"|format(depotstrategie.gesamt_exposure_cap_pct) }}%</span>
+  </article>
+</section>
+{% if depotstrategie.max_anlageklasse_pct %}
+<ul class="klassen-limit-liste" data-testid="depotstrategie-klassen-limits">
+  {% for asset_class_id, limit_pct in depotstrategie.max_anlageklasse_pct.items() %}
+  <li data-testid="depotstrategie-klassen-limit-{{ asset_class_id }}">
+    {{ anlageklasse_kuerzel(asset_class_id) }}: {{ "%.1f"|format(limit_pct) }}%
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endif %}
 {% endblock %}

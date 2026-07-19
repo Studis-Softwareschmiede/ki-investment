@@ -24,7 +24,16 @@ ab und erhält daraus abgeleitet, welche Aktionen erlaubt sind.
   der S-037-Lesson (`.claude/lessons/coder.md`); Analog-Präzedenzfall:
   `DepotstrategieKonfiguration.risk_profile_name` (`app.contracts
   .risikomanagement`) ist aus demselben Grund ebenfalls `str`.
-"""
+
+  **Präzisierung (Story S-076, `docs/specs/frontend-cockpit.md` AC18):**
+  `hat_offene_positionen` (→ BR-018, Konfigurations-View-Warn-Band
+  "inaktiv – Positionen bleiben überwacht") — `True`, sobald mindestens
+  eine offene Position (`app.db.models.Position.status == "offen"`) dieser
+  Anlageklasse besteht, modus-übergreifend (BR-018 gilt für "eine gehaltene
+  Position" ohne Modus-Einschränkung, anders als die streng modus-
+  isolierten Depot-/Trade-Read-Modelle AC3/AC6, → BR-130). Default `False`
+  (Rückwärtskompatibilität mit bestehenden S-069-Konstruktions-Stellen, die
+  das Feld nicht setzen)."""
 
 from __future__ import annotations
 
@@ -86,3 +95,4 @@ class AnlageklasseEintrag(BaseModel):
     name: str = Field(min_length=1)
     aktiv: bool
     prio_stufe: str = Field(min_length=1)
+    hat_offene_positionen: bool = False

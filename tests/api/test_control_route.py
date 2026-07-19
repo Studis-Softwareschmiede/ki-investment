@@ -1,7 +1,9 @@
 """Tests für die Control-Plane-Endpunkte `app/api/control.py` (Story S-074,
-`docs/specs/frontend-cockpit.md` AC20/AC21).
+`docs/specs/frontend-cockpit.md` AC20/AC21; Story S-076 ergänzt das
+`hat_offene_positionen`-Feld im Toggle-Response-Body, AC18).
 
-Covers (frontend-cockpit): AC20, AC21
+Covers (frontend-cockpit): AC20, AC21, AC18 (nur das Response-Feld
+`hat_offene_positionen` am bestehenden Toggle-Endpunkt)
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Response-Body für `POST /api/control/anlageklassen/
@@ -84,7 +86,13 @@ def test_anlageklassen_toggle_deaktiviert_und_liefert_aktualisierten_eintrag() -
     resp = client.post("/api/control/anlageklassen/1/toggle", json={"aktiv": False})
 
     assert resp.status_code == 200
-    assert resp.json() == {"id": 1, "name": "Aktien", "aktiv": False, "prio_stufe": "MVP"}
+    assert resp.json() == {
+        "id": 1,
+        "name": "Aktien",
+        "aktiv": False,
+        "prio_stufe": "MVP",
+        "hat_offene_positionen": False,
+    }
 
 
 def test_anlageklassen_toggle_liefert_404_fuer_unbekannte_klasse() -> None:
@@ -233,7 +241,13 @@ def test_anlageklassen_toggle_ohne_hx_header_bleibt_json() -> None:
     resp = client.post("/api/control/anlageklassen/1/toggle", json={"aktiv": False})
 
     assert "application/json" in resp.headers["content-type"]
-    assert resp.json() == {"id": 1, "name": "Aktien", "aktiv": False, "prio_stufe": "MVP"}
+    assert resp.json() == {
+        "id": 1,
+        "name": "Aktien",
+        "aktiv": False,
+        "prio_stufe": "MVP",
+        "hat_offene_positionen": False,
+    }
 
 
 def test_anlageklassen_toggle_404_bleibt_json_auch_mit_hx_header() -> None:

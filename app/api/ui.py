@@ -20,6 +20,17 @@ plus einen kleinen HTMX-Partial-Endpunkt (`/ui/depot/partial`) fürs
 Live-Polling (AC19). Der in AC14 ursprünglich genannte Depot-Verlauf-Chart
 ist per Spec v3 nach S-081 (AC32/AC33, Snapshot-Read-Modell) ausgelagert.
 
+Story S-076 (AC18) befüllt die **Konfigurations-View** (`/ui/konfiguration`):
+Anlageklassen-Toggles (§7.9, BR-018-Warn-Band) + Depotstrategie-Anzeige —
+über dieselben Query-Funktionen wie `GET /api/config/anlageklassen`/
+`.../depotstrategie` (AC1/AC10, kein zweiter Datenzusammenbau). Die
+DI-Factories stammen bewusst aus `app.api.config` (analog zu den bereits
+bestehenden Depot-/Trades-Wiederverwendungen oben) statt hier ein eigenes
+`sqlalchemy`/`app.db.session`-Import anzulegen (Boundary AC2). Der
+Toggle-POST selbst läuft clientseitig (`app/web/static/js/konfiguration.js`)
+gegen die bestehende, unveränderte Control-Plane (`app.api.control`,
+S-074) — diese Datei löst/schreibt nichts selbst.
+
 **UI-Boundary (AC2):** diese Datei importiert bewusst NICHTS aus
 `app.domain.sizing`, `app.domain.risikomanagement`, `app.domain.execution`,
 `app.orchestration.*_pipeline`, `app.orchestration.execution_service` und
@@ -36,19 +47,27 @@ verletzen."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request
 
+from app.api.config import get_anlageklassen_reader, get_depotstrategie_reader
 from app.api.depot import get_live_price_provider
 from app.api.depot import get_position_repository as get_depot_position_repository
 from app.api.kandidaten import get_kandidaten_repository
+from app.api.queries.config import (
+    lade_anlageklassen_konfiguration,
+    lade_depotstrategie_konfiguration,
+)
 from app.api.queries.depot import hole_depot_uebersicht
 from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
 from app.api.queries.trades import hole_trade_historie
 from app.api.trades import get_position_repository
 from app.contracts.analyse_framework import KATEGORIE_NAMEN
+from app.contracts.anlageklassen_config import AnlageklasseEintrag
 from app.contracts.depot import Modus
+from app.contracts.risikomanagement import DepotstrategieKonfiguration
 from app.domain.portfolio.ports import LivePriceProvider, PositionRepository
 from app.domain.scoring.ports import KandidatenRepository
 from app.web.kandidaten.anlageklassen import anlageklasse_kuerzel
@@ -238,5 +257,24 @@ def system_status_view(request: Request) -> object:
 
 
 @router.get("/konfiguration", name="ui_konfiguration")
-def konfiguration_view(request: Request) -> object:
-    return _render(request, active_view="konfiguration")
+def konfiguration_view(
+    request: Request,
+    anlageklassen_reader: Callable[[], list[AnlageklasseEintrag]] = Depends(
+        get_anlageklassen_reader
+    ),
+    depotstrategie_reader: Callable[[], DepotstrategieKonfiguration | None] = Depends(
+        get_depotstrategie_reader
+    ),
+) -> object:
+    """AC18: Anlageklassen-Toggles (§7.9, BR-018-Warn-Band) + Depotstrategie-
+    Anzeige — dieselben Query-Funktionen wie `GET /api/config/anlageklassen`/
+    `.../depotstrategie` (AC1/AC10, kein zweiter Datenzusammenbau)."""
+    anlageklassen = lade_anlageklassen_konfiguration(anlageklassen_reader)
+    depotstrategie = lade_depotstrategie_konfiguration(depotstrategie_reader)
+    return _render(
+        request,
+        active_view="konfiguration",
+        anlageklassen=anlageklassen,
+        depotstrategie=depotstrategie,
+        anlageklasse_kuerzel=anlageklasse_kuerzel,
+    )

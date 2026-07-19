@@ -1,7 +1,10 @@
 """Tests für die Konfigurations-Read-Endpunkte `app/api/config.py` (Story
-S-069, `docs/specs/frontend-cockpit.md` AC9/AC10).
+S-069, `docs/specs/frontend-cockpit.md` AC9/AC10; Story S-076 ergänzt das
+`hat_offene_positionen`-Feld, AC18).
 
-Covers (frontend-cockpit): AC9, AC10
+Covers (frontend-cockpit): AC9, AC10, AC18 (nur das Response-Feld
+`hat_offene_positionen` — die Konfigurations-View selbst ist
+`tests/web/test_ui_konfiguration.py`)
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Response-Body für `GET /api/config/anlageklassen` +
@@ -38,7 +41,9 @@ def _reset_overrides():
 def test_anlageklassen_liefert_toggle_zustand_und_prio() -> None:
     anlageklassen = [
         AnlageklasseEintrag(id=1, name="Aktien", aktiv=True, prio_stufe="MVP"),
-        AnlageklasseEintrag(id=10, name="FX", aktiv=False, prio_stufe="Stufe3"),
+        AnlageklasseEintrag(
+            id=10, name="FX", aktiv=False, prio_stufe="Stufe3", hat_offene_positionen=True
+        ),
     ]
     client = _client(anlageklassen=anlageklassen)
 
@@ -46,8 +51,20 @@ def test_anlageklassen_liefert_toggle_zustand_und_prio() -> None:
 
     assert resp.status_code == 200
     assert resp.json() == [
-        {"id": 1, "name": "Aktien", "aktiv": True, "prio_stufe": "MVP"},
-        {"id": 10, "name": "FX", "aktiv": False, "prio_stufe": "Stufe3"},
+        {
+            "id": 1,
+            "name": "Aktien",
+            "aktiv": True,
+            "prio_stufe": "MVP",
+            "hat_offene_positionen": False,
+        },
+        {
+            "id": 10,
+            "name": "FX",
+            "aktiv": False,
+            "prio_stufe": "Stufe3",
+            "hat_offene_positionen": True,
+        },
     ]
 
 
