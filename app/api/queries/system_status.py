@@ -33,14 +33,26 @@ Diese Query nutzt deshalb die neuen reinen Gegenstücke `app.core
 MVP-Live-Sperre selbst validiert bereits beim Schreiben in
 `app.core.modus_override`, siehe dortiger Modul-Docstring). Jede der elf
 Anlageklassen (`asset_class.id ∈ 1..11`, `docs/data-model.md` BR-100) löst
-sich auf einen etwaigen Override oder sonst den globalen Modus auf."""
+sich auf einen etwaigen Override oder sonst den globalen Modus auf.
+
+**MinTRL-Restlaufzeit (AC24, S-078):** `mintrl_restlaufzeit` liest
+`GateErgebnisRepository.letztes_ergebnis().min_trl` unverändert durch
+(`None`, solange kein Stufe-B-Report vorliegt, → `[[lernschleife]]`#AC9).
+`_mintrl_restlaufzeit_dto` formatiert die bereits berechnete Tage-Zahl NUR
+für die Anzeige in einen Jahre-Klartext (`docs/specs/frontend-cockpit.md`
+AC25-Beispiel "noch ≈ 2.7 Jahre bis statistisch signifikant") — kein
+neuer statistischer Rechenpfad (AC24-Boundary: "kein neuer Rechenpfad im
+Cockpit"), reine Einheiten-Umrechnung eines bereits vom Validierungs-Gate
+gelieferten Werts."""
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 from app.contracts.betriebssicherung import DrawdownStatus, HeartbeatEintrag, KillSwitchStatus
 from app.contracts.depot import Modus
 from app.contracts.llm_grounding import HalluzinationsKpiErgebnis
-from app.contracts.system_status import SystemStatusResponse
+from app.contracts.system_status import MintrlRestlaufzeit, SystemStatusResponse
 from app.core import drawdown_monitor, hallucination_kpi, heartbeat, kill_switch, modus_override
 from app.domain.lernschleife.ports import GateErgebnisRepository
 
@@ -50,14 +62,30 @@ from app.domain.lernschleife.ports import GateErgebnisRepository
 #: (`Field(ge=1, le=11)`).
 _ANLAGEKLASSEN_IDS: tuple[int, ...] = tuple(range(1, 12))
 
+#: AC24/AC25 — reine Anzeige-Umrechnung Tage → Jahre für den MinTRL-
+#: Klartext (julianisches Jahr, gängige Konvention für Tage/Jahre-
+#: Umrechnungen; kein fachlicher Rechenpfad, siehe Moduldocstring).
+_TAGE_PRO_JAHR = Decimal("365.25")
+
+
+def _mintrl_restlaufzeit_dto(tage: Decimal) -> MintrlRestlaufzeit:
+    """AC24/AC25 — formatiert die vom Validierungs-Gate gelieferte
+    MinTRL-Restlaufzeit (Tage) zusätzlich als Jahre-Klartext für die
+    Anzeige."""
+    jahre = tage / _TAGE_PRO_JAHR
+    return MintrlRestlaufzeit(
+        tage=tage,
+        klartext=f"noch ≈ {jahre:.1f} Jahre bis statistisch signifikant",
+    )
+
 
 def system_status_uebersicht(
     *, gate_ergebnis_repository: GateErgebnisRepository
 ) -> SystemStatusResponse:
-    """AC8 — konsolidierter Betriebsstatus: Kill-Switch (→ BR-021), Modus
-    global + je Anlageklasse (→ BR-019), Heartbeat je Modul, Drawdown,
-    Halluzinations-KPI (→ BR-006) und die zuletzt ermittelte Gate-Ampel
-    (→ BR-025)."""
+    """AC8/AC24 — konsolidierter Betriebsstatus: Kill-Switch (→ BR-021),
+    Modus global + je Anlageklasse (→ BR-019), Heartbeat je Modul,
+    Drawdown, Halluzinations-KPI (→ BR-006), die zuletzt ermittelte
+    Gate-Ampel (→ BR-025) und deren MinTRL-Restlaufzeit (AC24)."""
     kill_switch_status: KillSwitchStatus = kill_switch.status()
     heartbeats: tuple[HeartbeatEintrag, ...] = heartbeat.alle_heartbeats()
     drawdown_status: DrawdownStatus = drawdown_monitor.status()
@@ -72,6 +100,11 @@ def system_status_uebersicht(
     }
 
     letztes_gate_ergebnis = gate_ergebnis_repository.letztes_ergebnis()
+    mintrl_restlaufzeit = (
+        _mintrl_restlaufzeit_dto(letztes_gate_ergebnis.min_trl)
+        if letztes_gate_ergebnis is not None and letztes_gate_ergebnis.min_trl is not None
+        else None
+    )
 
     return SystemStatusResponse(
         kill_switch=kill_switch_status,
@@ -84,4 +117,5 @@ def system_status_uebersicht(
         gate_ampel_ermittelt_am=(
             letztes_gate_ergebnis.ermittelt_am if letztes_gate_ergebnis is not None else None
         ),
+        mintrl_restlaufzeit=mintrl_restlaufzeit,
     )

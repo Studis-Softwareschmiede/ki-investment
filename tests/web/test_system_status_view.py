@@ -1,8 +1,8 @@
 """Tests für die System-Status-Voll-View (`app.api.ui.system_status_view`/
 `system_status_partial`), Story S-075, `docs/specs/frontend-cockpit.md`
-AC17/AC19.
+AC17/AC19; erweitert um AC24/AC25 (MinTRL-Restlaufzeit, Story S-078).
 
-Covers (frontend-cockpit): AC17, AC19
+Covers (frontend-cockpit): AC17, AC19, AC24, AC25
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Jinja2-Rendering→Response-Body für `GET /ui/system-status`
@@ -27,11 +27,16 @@ dass beide Kill-Switch-Dialoge bei Erfolg das `#system-status-live`-
 Voll-Fragment per `htmx.ajax` sofort nachziehen (statt bis zu 8s stale
 zu bleiben) UND je Dialog ein quittierbares `role="alert"`-Fehlerelement
 tragen, das initial verborgen ist und dessen Sichtbarkeit über
-`hx-on::before-request`/`hx-on::after-request` gesteuert wird."""
+`hx-on::before-request`/`hx-on::after-request` gesteuert wird.
+
+Update S-078 (AC24/AC25): MinTRL-Restlaufzeit neben der Gate-Ampel-Karte —
+E2-Empty-State "—" ohne `min_trl`, sonst Jahre-Klartext + erklärender
+Kurztext ("🟢 heisst noch nicht bewiesen")."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,6 +95,11 @@ def test_cold_start_zeigt_definierte_empty_states_ohne_null_oder_farbe() -> None
     assert 'data-state="unbekannt"' in html
     assert 'data-testid="status-halluzination-kpi"' in html
     assert 'data-testid="banner"' not in html
+    start = html.index('data-testid="gate-ampel-mintrl"')
+    ende = html.index("</p>", start)
+    block = html[start:ende]
+    assert "—" in block
+    assert "noch ≈" not in block
 
 
 def test_kill_switch_normal_zeigt_ausloesen_button_und_dialog() -> None:
@@ -180,6 +190,25 @@ def test_gate_ampel_zeigt_zeitstempel_wenn_vorhanden() -> None:
     assert "15.07.2026" in block
 
 
+def test_gate_ampel_zeigt_mintrl_klartext_und_hinweis_wenn_vorhanden() -> None:
+    """@trace frontend-cockpit#AC24/AC25 — liegt eine MinTRL-Restlaufzeit
+    vor, zeigt die View den Jahre-Klartext (nicht nur die Ampel-Farbe, D3)
+    UND den erklärenden Kurztext."""
+    zeitpunkt = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
+    client = _client(
+        LetztesGateErgebnis(ampel="gruen", ermittelt_am=zeitpunkt, min_trl=Decimal("986"))
+    )
+
+    html = client.get("/ui/system-status").text
+
+    assert 'data-testid="gate-ampel-mintrl"' in html
+    start = html.index('data-testid="gate-ampel-mintrl"')
+    ende = html.index("</p>", start)
+    assert "noch ≈ 2.7 Jahre bis statistisch signifikant" in html[start:ende]
+    assert 'data-testid="gate-ampel-mintrl-hinweis"' in html
+    assert "heisst noch nicht statistisch bewiesen" in html
+
+
 def test_live_polling_markup_ac19() -> None:
     client = _client(None)
 
@@ -232,6 +261,7 @@ def test_partial_endpoint_liefert_dasselbe_datenfragment_ohne_shell() -> None:
     html = resp.text
     assert 'data-testid="gate-ampel"' in html
     assert 'data-ampel-state="gruen"' in html
+    assert 'data-testid="gate-ampel-mintrl"' in html
     # Partial ist kein Voll-Dokument (kein Shell-Rundherum, AC19 "kleine
     # Partial-Endpunkte").
     assert "<html" not in html

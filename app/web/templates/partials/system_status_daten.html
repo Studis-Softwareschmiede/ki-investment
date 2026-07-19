@@ -3,6 +3,8 @@
    Partial, damit `views/system-status.html` (Erstladung) UND
    `GET /ui/system-status/partial` (AC19-Live-Polling) exakt dasselbe
    Markup rendern (kein Layout-Sprung beim Swap, `design.md` §8.3).
+   Update S-078 (AC24/AC25): die Gate-Ampel-Karte zeigt zusätzlich die
+   MinTRL-Restlaufzeit (`status.mintrl_restlaufzeit`, E2-Empty-State "—").
    Erwarteter Kontext (`app.web.system_status_view
    .system_status_view_kontext`): `status` (`SystemStatusResponse`),
    `status_context` (kompaktes Icon/Label-Dict, dieselbe Formatierung wie
@@ -39,6 +41,20 @@
       {%- else -%}
       —
       {%- endif -%}
+    </p>
+    {# AC24/AC25 — MinTRL-Restlaufzeit neben der Gate-Ampel: Klartext mit
+       Einheit (E2-Empty-State "—" statt 0/Farbzustand) samt erklärendem
+       Kurztext ("🟢 heisst noch nicht bewiesen", → C-012/IDEA-025). #}
+    <p class="status-full-meta" data-testid="gate-ampel-mintrl">
+      MinTRL-Restlaufzeit:
+      {%- if status.mintrl_restlaufzeit -%}
+      {{ status.mintrl_restlaufzeit.klartext }}
+      {%- else -%}
+      —
+      {%- endif -%}
+    </p>
+    <p class="status-full-meta" data-testid="gate-ampel-mintrl-hinweis">
+      🟢 heisst noch nicht statistisch bewiesen — MinTRL zeigt die verbleibende Bewährungszeit.
     </p>
   </article>
 

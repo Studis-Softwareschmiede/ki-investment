@@ -1,7 +1,8 @@
 """Tests für den System-Status-Endpunkt (`app.api.system_status`, Story
-S-068, `docs/specs/frontend-cockpit.md` AC8/AC10).
+S-068, `docs/specs/frontend-cockpit.md` AC8/AC10; erweitert um AC24,
+Story S-078).
 
-Covers (frontend-cockpit): AC8, AC10
+Covers (frontend-cockpit): AC8, AC10, AC24
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Response-Body für `GET /api/system/status` ab (Status-Code
@@ -11,11 +12,13 @@ zustände sind In-Process-Singletons, per `reset_fuer_tests()` isoliert).
 Deckt: Cold-Start (`response_model` erfüllt, `gate_ampel=None`), einen
 ausgelösten Kill-Switch spiegelt sich im Response-Body wider, `modus_je_
 anlageklasse` enthält alle elf Anlageklassen als String-Keys (JSON-Encoding
-von `dict[int, Modus]`)."""
+von `dict[int, Modus]`) sowie (AC24, S-078) `mintrl_restlaufzeit` im
+Response-Body: `null` ohne `min_trl`, sonst `{tage, klartext}`."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -71,6 +74,7 @@ def test_cold_start_liefert_200_mit_leerzustaenden_und_ohne_gate_ampel():
     assert body["halluzinations_kpi"]["llm_status"] == "aktiv"
     assert body["gate_ampel"] is None
     assert body["gate_ampel_ermittelt_am"] is None
+    assert body["mintrl_restlaufzeit"] is None
 
 
 def test_modus_je_anlageklasse_enthaelt_alle_elf_anlageklassen_als_json():
@@ -110,3 +114,21 @@ def test_gate_ampel_wird_aus_dem_repository_uebernommen():
     body = resp.json()
     assert body["gate_ampel"] == "rot"
     assert body["gate_ampel_ermittelt_am"] is not None
+
+
+def test_mintrl_restlaufzeit_im_response_body_wenn_min_trl_vorliegt():
+    """@trace frontend-cockpit#AC24 — der volle HTTP-Pfad liefert
+    `mintrl_restlaufzeit` als `{tage, klartext}`-Objekt, sobald das
+    Repository ein `min_trl` liefert."""
+    zeitpunkt = datetime(2026, 7, 15, 12, 0, tzinfo=UTC)
+    client = _client(
+        LetztesGateErgebnis(ampel="gruen", ermittelt_am=zeitpunkt, min_trl=Decimal("986"))
+    )
+
+    resp = client.get("/api/system/status")
+
+    body = resp.json()
+    assert body["mintrl_restlaufzeit"] == {
+        "tage": "986",
+        "klartext": "noch ≈ 2.7 Jahre bis statistisch signifikant",
+    }

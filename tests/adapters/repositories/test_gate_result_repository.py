@@ -1,11 +1,13 @@
 """Tests für `SqlAlchemyGateErgebnisRepository` (Story S-068, Spec
-`docs/specs/frontend-cockpit.md` AC8).
+`docs/specs/frontend-cockpit.md` AC8; erweitert um AC24, Story S-078).
 
-Covers (frontend-cockpit): AC8
+Covers (frontend-cockpit): AC8, AC24
 
 Deckt: Cold-Start (kein `gate_result` vorhanden → `None`, kein Absturz),
-"neueste Zeile über ALLE Trials hinweg gewinnt" (nicht nur je Trial) sowie
-die korrekte Feld-Übernahme (`ampel`, `ermittelt_am`)."""
+"neueste Zeile über ALLE Trials hinweg gewinnt" (nicht nur je Trial), die
+korrekte Feld-Übernahme (`ampel`, `ermittelt_am`) sowie (AC24, S-078) die
+`min_trl`-Durchreichung: gesetzt sobald ein Stufe-B-Report vorliegt, sonst
+`None` (Stufe A allein)."""
 
 from __future__ import annotations
 
@@ -123,3 +125,44 @@ def test_letztes_ergebnis_uebernimmt_rote_ampel_unverfaelscht() -> None:
 
     assert ergebnis is not None
     assert ergebnis.ampel == "rot"
+
+
+def test_letztes_ergebnis_ist_ohne_stufe_b_report_min_trl_none() -> None:
+    """@trace frontend-cockpit#AC24 — nur Stufe A ausgewertet (kein
+    `StufeBReport`): `min_trl` bleibt `None` (deckungsgleich mit "Stufe B
+    nicht aktiv", AC24)."""
+    session = _session()
+    registriere_gate_ergebnis(
+        session,
+        trial_id=uuid.uuid4(),
+        ampel="rot",
+        stufe_a_report=_stufe_a_report(ergebnis="durchgefallen"),
+    )
+
+    repository = SqlAlchemyGateErgebnisRepository(session)
+    ergebnis = repository.letztes_ergebnis()
+
+    assert ergebnis is not None
+    assert ergebnis.min_trl is None
+
+
+def test_letztes_ergebnis_liefert_min_trl_wenn_stufe_b_report_vorliegt() -> None:
+    """@trace frontend-cockpit#AC24 — liegt ein `StufeBReport` mit
+    `mintrl_restlaufzeit` vor, reicht das Repository die persistierten
+    Tage (`gate_result.min_trl`) unverändert durch (nicht-runder Wert,
+    python/R14: 42 Tage + 8h ist kein binär-exakter Bruchteil eines
+    Jahres)."""
+    session = _session()
+    registriere_gate_ergebnis(
+        session,
+        trial_id=uuid.uuid4(),
+        ampel="gruen",
+        stufe_a_report=_stufe_a_report(),
+        stufe_b_report=_stufe_b_report(mintrl_restlaufzeit=timedelta(days=42, hours=8)),
+    )
+
+    repository = SqlAlchemyGateErgebnisRepository(session)
+    ergebnis = repository.letztes_ergebnis()
+
+    assert ergebnis is not None
+    assert ergebnis.min_trl == Decimal("42.33")

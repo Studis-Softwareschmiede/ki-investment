@@ -1,14 +1,17 @@
 """Tests für die Query-Funktion `system_status_uebersicht` (Story S-068,
-`docs/specs/frontend-cockpit.md` AC8/AC10).
+`docs/specs/frontend-cockpit.md` AC8/AC10; erweitert um AC24, Story
+S-078).
 
-Covers (frontend-cockpit): AC8, AC10
+Covers (frontend-cockpit): AC8, AC10, AC24
 
 Deckt: Konsolidierung aller sechs Indikatoren (Kill-Switch, Modus je
 Anlageklasse, Heartbeat, Drawdown, Halluzinations-KPI, Gate-Ampel),
 Cold-Start ohne jede Gate-Auswertung (`gate_ampel=None`), Read-only-
 Seiteneffektfreiheit (kein Alert/Kill-Switch-Trigger durch den Aufruf
-selbst — belegt über `app.core.alerts.alle_alerts()`), sowie dass ALLE elf
-Anlageklassen (1..11) im `modus_je_anlageklasse`-Ergebnis auftauchen."""
+selbst — belegt über `app.core.alerts.alle_alerts()`), dass ALLE elf
+Anlageklassen (1..11) im `modus_je_anlageklasse`-Ergebnis auftauchen sowie
+(AC24, S-078) die MinTRL-Restlaufzeit: `None` ohne Stufe-B-`min_trl` bzw.
+ohne jede Gate-Auswertung, sonst Tage + Jahre-Klartext."""
 
 from __future__ import annotations
 
@@ -138,6 +141,49 @@ def test_gate_ampel_wird_aus_dem_repository_uebernommen() -> None:
 
     assert ergebnis.gate_ampel == "gruen"
     assert ergebnis.gate_ampel_ermittelt_am == zeitpunkt
+
+
+def test_mintrl_restlaufzeit_ist_none_ohne_gate_ergebnis() -> None:
+    """@trace frontend-cockpit#AC24 — Cold-Start (keine Gate-Auswertung):
+    `mintrl_restlaufzeit` ist `None`, nie 0/Farbzustand (E2-Muster)."""
+    ergebnis = system_status_uebersicht(gate_ergebnis_repository=_FakeGateErgebnisRepository(None))
+
+    assert ergebnis.mintrl_restlaufzeit is None
+
+
+def test_mintrl_restlaufzeit_ist_none_ohne_stufe_b_min_trl() -> None:
+    """@trace frontend-cockpit#AC24 — es liegt zwar eine Gate-Auswertung
+    vor, aber (noch) keine Stufe-B-`min_trl` ("Stufe B nicht aktiv") →
+    `None`."""
+    repository = _FakeGateErgebnisRepository(
+        LetztesGateErgebnis(
+            ampel="gelb", ermittelt_am=datetime(2026, 7, 15, 12, 0, tzinfo=UTC), min_trl=None
+        )
+    )
+
+    ergebnis = system_status_uebersicht(gate_ergebnis_repository=repository)
+
+    assert ergebnis.mintrl_restlaufzeit is None
+
+
+def test_mintrl_restlaufzeit_liefert_tage_und_jahre_klartext() -> None:
+    """@trace frontend-cockpit#AC24/AC25 — liegt `min_trl` vor, trägt die
+    Query sowohl den maschinenlesbaren Tage-Wert als auch den Jahre-
+    Klartext (deckt exakt das Spec-Beispiel "noch ≈ 2.7 Jahre" ab,
+    python/R14: nicht-runder Wert 986 Tage / 365.25 ≈ 2.6996...)."""
+    repository = _FakeGateErgebnisRepository(
+        LetztesGateErgebnis(
+            ampel="gruen",
+            ermittelt_am=datetime(2026, 7, 15, 12, 0, tzinfo=UTC),
+            min_trl=Decimal("986"),
+        )
+    )
+
+    ergebnis = system_status_uebersicht(gate_ergebnis_repository=repository)
+
+    assert ergebnis.mintrl_restlaufzeit is not None
+    assert ergebnis.mintrl_restlaufzeit.tage == Decimal("986")
+    assert ergebnis.mintrl_restlaufzeit.klartext == "noch ≈ 2.7 Jahre bis statistisch signifikant"
 
 
 def test_aufruf_selbst_loest_keinen_alert_und_keinen_kill_switch_aus() -> None:
