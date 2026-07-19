@@ -8,6 +8,7 @@ StaticFiles-Mount + Jinja2Templates-Setup lebt bewusst NICHT hier, sondern
 in `app/web/templates_setup.py` (`configure_web`)."""
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from app.api.config import router as config_router
 from app.api.control import router as control_router
@@ -38,6 +39,14 @@ app.include_router(control_router)
 app.include_router(warteliste_router)
 app.include_router(entscheide_router)
 # --- end cockpit routers ---
+
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    """Einstieg: `/` leitet auf die Depot-View des Cockpits weiter —
+    ohne diese Route lieferte die Wurzel-Adresse nur 404 `Not Found`
+    (Owner-Fund 2026-07-19)."""
+    return RedirectResponse(url="/ui/depot", status_code=307)
 
 
 @app.get("/health")
