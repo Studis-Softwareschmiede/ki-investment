@@ -2,7 +2,7 @@ id: S-079
 parent: F-017
 title: Cockpit — Warteliste-Read-Modell + View (blockierte Kauf-Kandidaten, Blockade-Grund,
   Zeitpunkt) inkl. Demo-Seed
-status: To Do
+status: Done
 priority: P2
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -23,13 +23,13 @@ dispo_forecast: null
 estimate_note: 'Heuristik-Groesse L (3 AC + ~5 Komponenten inkl. Read-Modell-Persistenz
   + ui/db-Label). Cold-Start: baseline.json fehlt (dispo_est/tok_est=null); estimator
   (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse. Read-only Boundary
-  AC2; Warteliste-Write-Path (blockierte Kaeufe erfassen) ist Backend-Scope/offen ->
-  MVP speist nur der Demo-Seed.'
+  AC2; Warteliste-Write-Path (blockierte Kaeufe erfassen) ist Backend-Scope/offen
+  -> MVP speist nur der Demo-Seed.'
 confidence: low
 tok_est: null
-branch: null
-pr: null
+branch: feat/S-079-warteliste
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/56
 blocked_reason: null
 created_at: '2026-07-18T06:20:00Z'
-updated_at: '2026-07-18T06:20:00Z'
-done_at: null
+updated_at: '2026-07-19T00:33:57Z'
+done_at: '2026-07-19T00:33:55Z'
