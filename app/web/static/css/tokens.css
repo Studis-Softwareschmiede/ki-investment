@@ -27,6 +27,12 @@
   --info-fg: light-dark(#0969DA, #58A6FF);
   --on-solid: #FFFFFF;
 
+  /* Story S-075 (System-Status-Voll-View, AC17): erster Konsument einer
+     `-solid`-Füllung (§7.10 Vollbreite-Banner, §7.3 HALTED-Aktionsbutton) —
+     kein Vorratsanlegen der übrigen `-solid`-Varianten, bis eine Story sie
+     tatsächlich braucht. */
+  --danger-solid: light-dark(#CF222E, #DA3633);
+
   /* §2.3 Gewinn/Verlust (G/V) — Story S-073 (Trades-View, AC16
      Slippage/TCA-Vorzeichen-Kodierung) ist die erste Content-View-Story,
      die diese Tokens braucht (tokens.css-Konvention: kein Vorratsanlegen). */

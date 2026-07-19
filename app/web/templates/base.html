@@ -38,5 +38,10 @@
   </div>
 
   <script src="{{ url_for('static', path='vendor/htmx.min.js') }}"></script>
+  {# Additiver Erweiterungspunkt (Hot-Spot-Konvention S-075: base.html nur
+     additiv) — je View optionale First-Party-Skripte, die NACH htmx
+     geladen werden müssen (z.B. `htmx.defineExtension`-Aufrufe). Default
+     leer, kein Effekt auf Views, die diesen Block nicht überschreiben. #}
+  {% block scripts %}{% endblock %}
 </body>
 </html>

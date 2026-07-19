@@ -1,0 +1,190 @@
+/* System-Status-Voll-View (docs/design.md §7.2-§7.5/§7.10/§7.11,
+   `docs/specs/frontend-cockpit.md` AC17/AC19) — Story S-075. Eigene Datei
+   statt shell.css/views-depot.css (Hot-Spot-Konvention: die anderen
+   Views/Stories bleiben unangetastet). Nur Token-Referenzen (css/R01),
+   keine Werte ausserhalb der Skalen (§4). */
+
+.text-unbekannt {
+  color: var(--text-3);
+}
+
+/* §7.10 Banner: Vollbreite, maximale visuelle Priorität (A1, D5). */
+.banner {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-4);
+  font-weight: 600;
+}
+
+.banner--danger {
+  background: var(--danger-solid);
+  color: var(--on-solid);
+}
+
+/* §7.1-artige Karten für die Voll-View-Indikatoren. */
+.status-full-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.status-full-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.status-full-titel {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin: 0;
+  font-weight: 500;
+}
+
+.status-full-wert {
+  font-size: var(--fs-lg);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.status-full-meta {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  margin: 0;
+}
+
+.status-full-meta--danger {
+  color: var(--danger-fg);
+  font-weight: 600;
+}
+
+/* §7.3 Kill-Switch-Aktionsbutton (44px Touch-Target, §9 A11y). */
+.btn {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: var(--space-1);
+}
+
+.btn--danger-outline {
+  background: none;
+  border: 1px solid var(--danger-fg);
+  color: var(--danger-fg);
+}
+
+.btn--danger-solid {
+  background: var(--danger-solid);
+  border: 1px solid var(--danger-solid);
+  color: var(--on-solid);
+}
+
+/* §7.5 Heartbeat je Modul. */
+.heartbeat-liste {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.heartbeat-modul {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+}
+
+.heartbeat-modul[data-state="ausgefallen"] {
+  border-color: var(--danger-fg);
+  color: var(--danger-fg);
+}
+
+.heartbeat-modul-id {
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.heartbeat-modul-alter {
+  color: var(--text-2);
+}
+
+/* §8.3 Live-Update: kein Layout-Sprung beim Poll-Swap. */
+.system-status-live {
+  min-height: 360px;
+}
+
+/* E1: fehlgeschlagener Poll -> Stale-Hinweis statt falschem Frischwert
+   (eigenständig deklariert, keine Abhängigkeit von views-depot.css). */
+.stale-hinweis {
+  color: var(--warn-fg);
+  font-size: var(--fs-sm);
+  margin-top: var(--space-2);
+}
+
+/* Native Bestätigungs-Dialoge (§7.3/§7.11, html/R08 command/commandfor). */
+.control-dialog {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  max-width: 420px;
+  width: 100%;
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+
+.control-dialog::backdrop {
+  background: color-mix(in oklab, black 50%, transparent);
+}
+
+.control-dialog menu {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.control-dialog label {
+  display: block;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin-bottom: var(--space-1);
+}
+
+.control-dialog input[type="text"] {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+/* §7.11 sichtbarer Fehlerpfad je Control-Dialog (Iteration 2, Review-
+   Finding): fehlgeschlagener POST bleibt sonst kommentarlos ohne
+   Rückmeldung. */
+.dialog-fehler {
+  color: var(--danger-fg);
+  font-size: var(--fs-sm);
+  margin-top: var(--space-2);
+}

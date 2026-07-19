@@ -1,10 +1,113 @@
 {% extends "base.html" %}
 {% block title %}System-Status — Betriebs-Cockpit{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/views-system-status.css') }}">
+{% endblock %}
 {% block view_title %}System-Status{% endblock %}
 {% block content %}
-<p class="view-placeholder" data-testid="view-placeholder">
-  Diese Ansicht wird in einer Folge-Story befüllt (Statusleisten-Komponenten
-  als Voll-View, Gate-Ampel, Banner —
-  <code>docs/specs/frontend-cockpit.md</code> AC17).
+{# System-Status-Voll-View (Story S-075, `docs/specs/frontend-cockpit.md`
+   AC17/AC19). Die Statusleisten-Komponenten (§7.2-§7.5) als volle Seite;
+   kritische Zustände als Vollbreite-Banner (§7.10, A1). Der Live-Bereich
+   pollt alle 8s (design.md §8.3 "Statusleiste/Ampel ~5-10s"); ein
+   fehlgeschlagener Poll zeigt den Stale-Hinweis statt eines falschen
+   Frischwerts (E1). Ein erfolgreicher Kill-Switch-POST (unten) zieht
+   dieses Fragment zusätzlich SOFORT per `htmx.ajax` nach — sonst zeigt
+   die Statusleiste bereits HALTED/NORMAL, während Banner/Kill-Switch-
+   Karte hier bis zu 8s stale bleiben (widersprüchliches Bild nach einer
+   sicherheitskritischen Aktion, Analog-Muster `konfiguration.js`/S-076). #}
+<div
+  id="system-status-live"
+  class="system-status-live"
+  hx-get="{{ url_for('ui_system_status_partial') }}"
+  hx-trigger="every 8s"
+  hx-target="this"
+  hx-swap="innerHTML"
+  hx-on::after-request="
+    document.getElementById('system-status-stale').hidden = event.detail.successful;
+    if (!event.detail.successful) {
+      document.getElementById('system-status-stale-zeit').textContent = new Date().toLocaleTimeString('de-CH');
+    }
+  "
+  aria-live="polite"
+  data-testid="system-status-live-region"
+>{% include "partials/system_status_daten.html" %}</div>
+<p id="system-status-stale" class="stale-hinweis" hidden data-testid="system-status-stale-hinweis" role="status">
+  ⚠ veraltet (seit <span id="system-status-stale-zeit"></span>)
 </p>
+
+{# Bestätigungs-Dialoge (§7.3/§7.11) bewusst AUSSERHALB der gepollten
+   Region — ein offener Dialog darf beim Poll-Swap nicht geschlossen
+   werden (AC19 "kein Fokusverlust"). Die ÖFFNEN-Buttons im Partial oben
+   referenzieren diese IDs per `commandfor` unabhängig von ihrer
+   DOM-Position (html/R08, dokumentweite ID-Referenz). Je Dialog ein
+   eigenes `role="alert"`-Fehlerelement (§7.10): bei einem nicht
+   erfolgreichen POST (5xx/Netzwerkfehler) bleibt der Dialog offen UND
+   zeigt sichtbar einen Fehlertext (statt kommentarlos nichts zu tun);
+   `hx-on::before-request` blendet ihn bei jedem neuen Versuch wieder aus. #}
+<dialog id="dialog-kill-switch-ausloesen" class="control-dialog"
+        data-testid="dialog-kill-switch-ausloesen"
+        aria-labelledby="dialog-kill-switch-ausloesen-titel">
+  <h2 id="dialog-kill-switch-ausloesen-titel">Kill-Switch auslösen?</h2>
+  <p>Storniert offene Orders, stellt bestehende Positionen glatt und sperrt neue Käufe — bis zur manuellen Freigabe.</p>
+  <form
+    hx-post="{{ url_for('kill_switch_ausloesen') }}"
+    hx-ext="json-enc"
+    hx-target="[data-testid='statusleiste']"
+    hx-swap="innerHTML"
+    hx-on::before-request="document.getElementById('dialog-kill-switch-ausloesen-fehler').hidden = true;"
+    hx-on::after-request="
+      if (event.detail.successful) {
+        document.getElementById('dialog-kill-switch-ausloesen').close();
+        htmx.ajax('GET', '{{ url_for('ui_system_status_partial') }}', {target: '#system-status-live', swap: 'innerHTML'});
+      } else {
+        document.getElementById('dialog-kill-switch-ausloesen-fehler').hidden = false;
+      }
+    "
+  >
+    <label for="kill-switch-grund">Grund</label>
+    <input type="text" id="kill-switch-grund" name="grund" required minlength="1"
+           data-testid="dialog-kill-switch-grund">
+    <p class="dialog-fehler" role="alert" data-testid="dialog-kill-switch-ausloesen-fehler" hidden>
+      Fehler beim Auslösen – bitte erneut versuchen.
+    </p>
+    <menu>
+      <li><button type="button" command="close" commandfor="dialog-kill-switch-ausloesen"
+                  data-testid="dialog-kill-switch-abbrechen">Abbrechen</button></li>
+      <li><button type="submit" data-testid="dialog-kill-switch-bestaetigen">Bestätigen</button></li>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="dialog-kill-switch-freigeben" class="control-dialog"
+        data-testid="dialog-kill-switch-freigeben"
+        aria-labelledby="dialog-kill-switch-freigeben-titel">
+  <h2 id="dialog-kill-switch-freigeben-titel">System zurücksetzen?</h2>
+  <p>Setzt den Kill-Switch von HALTED zurück auf NORMAL — der Handel wird wieder freigegeben.</p>
+  <p class="dialog-fehler" role="alert" data-testid="dialog-kill-switch-freigeben-fehler" hidden>
+    Fehler beim Zurücksetzen – bitte erneut versuchen.
+  </p>
+  <menu>
+    <li><button type="button" command="close" commandfor="dialog-kill-switch-freigeben"
+                data-testid="dialog-kill-switch-freigeben-abbrechen">Abbrechen</button></li>
+    <li>
+      <button type="button"
+              hx-post="{{ url_for('kill_switch_freigeben') }}"
+              hx-target="[data-testid='statusleiste']"
+              hx-swap="innerHTML"
+              hx-on::before-request="document.getElementById('dialog-kill-switch-freigeben-fehler').hidden = true;"
+              hx-on::after-request="
+                if (event.detail.successful) {
+                  document.getElementById('dialog-kill-switch-freigeben').close();
+                  htmx.ajax('GET', '{{ url_for('ui_system_status_partial') }}', {target: '#system-status-live', swap: 'innerHTML'});
+                } else {
+                  document.getElementById('dialog-kill-switch-freigeben-fehler').hidden = false;
+                }
+              "
+              data-testid="dialog-kill-switch-freigeben-bestaetigen">Bestätigen</button>
+    </li>
+  </menu>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='js/system-status.js') }}"></script>
 {% endblock %}
