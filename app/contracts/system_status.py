@@ -43,13 +43,23 @@ Verträgen, OHNE sie zu duplizieren.
   vorliegt (Cold-Start, kein Trial ausgewertet; AC4/A3-"kein Urteil"-Fall
   wird laut `app.db.gate_result`-Docstring ohnehin nie persistiert).
 
-Nicht Teil dieser Story (Board-Item-Scope): `mintrl_restlaufzeit` (AC24,
-S-078 — eigenes Feld/eigene Story, siehe dortige Spec-Sektion "Betriebs-
-Cockpit-Lücken")."""
+**Update S-078 (AC24):** `SystemStatusResponse.mintrl_restlaufzeit` — die
+MinTRL-Restlaufzeit der laufenden Stufe-B-Paper-Bewährung, gelesen aus
+`GateErgebnisRepository.letztes_ergebnis().min_trl`
+(`app.db.models.GateResult.min_trl`, S-062, → `[[lernschleife]]`#AC9,
+→ BR-025). Read-only, kein neuer Rechenpfad im Cockpit (AC2-Boundary):
+die Tage-Zahl selbst kommt unverändert aus dem persistierten Stufe-B-
+Report; nur die `klartext`-Formatierung (Tage → Jahre-Text) entsteht in
+`app.api.queries.system_status` (reine Anzeige-Formatierung, keine neue
+Statistik). `None`, solange die zuletzt persistierte Gate-Auswertung
+keinen Stufe-B-Report trägt (`min_trl IS NULL` — deckungsgleich mit
+"Stufe B nicht aktiv", da `app.db.gate_result.registriere_gate_ergebnis`
+`min_trl` ausschliesslich setzt, wenn ein `StufeBReport` vorliegt)."""
 
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -59,8 +69,21 @@ from app.contracts.kandidatensuche import Ampel
 from app.contracts.llm_grounding import HalluzinationsKpiErgebnis
 
 
+class MintrlRestlaufzeit(BaseModel):
+    """AC24 — MinTRL-Restlaufzeit EINER laufenden Stufe-B-Paper-Bewährung:
+    sowohl maschinenlesbar (`tage`, deckungsgleich mit `gate_result
+    .min_trl`) als auch als vorformatierter Klartext (`klartext`, AC25
+    zeigt ihn unverändert neben der Gate-Ampel an, z. B. "noch ≈ 2.7 Jahre
+    bis statistisch signifikant")."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tage: Decimal
+    klartext: str
+
+
 class SystemStatusResponse(BaseModel):
-    """AC8/AC10 — das konsolidierte System-Status-View-DTO. `response_model`
+    """AC8/AC10/AC24 — das konsolidierte System-Status-View-DTO. `response_model`
     von `GET /api/system/status` (`app.api.system_status`); dieselbe Query-
     Funktion (`app.api.queries.system_status.system_status_uebersicht`)
     speist künftig auch die HTML-Statusleiste/-View (S-075, AC10, P4/DRY —
@@ -76,3 +99,4 @@ class SystemStatusResponse(BaseModel):
     halluzinations_kpi: HalluzinationsKpiErgebnis
     gate_ampel: Ampel | None = None
     gate_ampel_ermittelt_am: datetime | None = None
+    mintrl_restlaufzeit: MintrlRestlaufzeit | None = None

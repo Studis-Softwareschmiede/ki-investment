@@ -38,6 +38,7 @@ def get_gate_ergebnis_repository(
 def system_status(
     gate_ergebnis_repository: GateErgebnisRepository = Depends(get_gate_ergebnis_repository),
 ) -> SystemStatusResponse:
-    """AC8: konsolidierter Betriebsstatus (Kill-Switch, Modus je
-    Anlageklasse, Heartbeat, Drawdown, Halluzinations-KPI, Gate-Ampel)."""
+    """AC8/AC24: konsolidierter Betriebsstatus (Kill-Switch, Modus je
+    Anlageklasse, Heartbeat, Drawdown, Halluzinations-KPI, Gate-Ampel,
+    MinTRL-Restlaufzeit)."""
     return system_status_uebersicht(gate_ergebnis_repository=gate_ergebnis_repository)

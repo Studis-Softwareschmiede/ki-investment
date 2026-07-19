@@ -12,12 +12,18 @@ Die konkrete Implementierung liegt im Adapter `app.adapters.repositories
 (`app.db.gate_result.registriere_gate_ergebnis`, S-062) bleibt unverändert
 — dieser Port ergänzt nur einen zusätzlichen Lese-Pfad "neueste Auswertung
 über ALLE Trials hinweg" (bislang existierte nur `gate_ergebnisse_fuer_trial`,
-das bereits eine bekannte `trial_id` voraussetzt)."""
+das bereits eine bekannte `trial_id` voraussetzt).
+
+**Update S-078 (AC24, `docs/specs/frontend-cockpit.md`):** `LetztesGateErgebnis`
+trägt zusätzlich `min_trl` (`GateResult.min_trl`, additiv, Default `None`)
+— die MinTRL-Restlaufzeit (Tage) der zuletzt persistierten Gate-Auswertung,
+`None` solange kein Stufe-B-Report vorliegt (→ `[[lernschleife]]`#AC9)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 
 from app.contracts.kandidatensuche import Ampel
@@ -26,12 +32,14 @@ from app.contracts.kandidatensuche import Ampel
 @dataclass(frozen=True)
 class LetztesGateErgebnis:
     """Schreibgeschützte Sicht auf die zuletzt persistierte Gate-Auswertung
-    — nur die für die System-Status-Ampel (AC8) benötigten Felder (nicht
-    der volle `GateResult`-Datensatz inkl. Metriken/Begründung — das ist
-    Kandidaten-/Trial-Detail-Scope, kein Cockpit-System-Status-Scope)."""
+    — nur die für die System-Status-Ampel (AC8) + MinTRL-Restlaufzeit
+    (AC24, S-078) benötigten Felder (nicht der volle `GateResult`-
+    Datensatz inkl. Metriken/Begründung — das ist Kandidaten-/Trial-
+    Detail-Scope, kein Cockpit-System-Status-Scope)."""
 
     ampel: Ampel
     ermittelt_am: datetime
+    min_trl: Decimal | None = None
 
 
 class GateErgebnisRepository(Protocol):

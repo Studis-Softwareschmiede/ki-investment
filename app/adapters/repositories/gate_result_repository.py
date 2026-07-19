@@ -8,7 +8,10 @@ strukturell (Protocol, keine explizite Vererbung nötig, analog
 .SqlAlchemyPositionRepository`) gegen die `gate_result`-Tabelle
 (`app.db.models.GateResult`, S-062). Read-only: kein Schreibpfad — die
 Schreibseite bleibt unverändert `app.db.gate_result
-.registriere_gate_ergebnis`."""
+.registriere_gate_ergebnis`.
+
+**Update S-078 (AC24):** `letztes_ergebnis()` gibt zusätzlich `min_trl`
+unverändert durch (`None`, solange kein Stufe-B-Report vorliegt)."""
 
 from __future__ import annotations
 
@@ -36,4 +39,8 @@ class SqlAlchemyGateErgebnisRepository:
         )
         if zeile is None:
             return None
-        return LetztesGateErgebnis(ampel=zeile.ampel, ermittelt_am=zeile.created_at)  # type: ignore[arg-type]
+        return LetztesGateErgebnis(
+            ampel=zeile.ampel,  # type: ignore[arg-type]
+            ermittelt_am=zeile.created_at,
+            min_trl=zeile.min_trl,
+        )
