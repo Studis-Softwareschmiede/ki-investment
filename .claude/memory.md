@@ -26,9 +26,10 @@ Kill-Switch), Demo-Seed (SEED_DEMO) und Playwright-Regressionstests
 
 ## Offene Fäden
 
-- S-081 (P3, To Do): Depot-Verlauf-Chart + Portfolio-Wert-Snapshot-
-  Read-Modell — Chart-Bibliothek wartet auf Owner-/Designer-Freigabe
-  (uPlot vs. server-SVG), Spec frontend-cockpit AC32/AC33.
+- S-081 ist DONE (2026-07-19): Depot-Verlauf-Chart mit vendored
+  TradingView Lightweight Charts 5.2.0 (Owner-Freigabe), Snapshot-Tabelle
+  + Scheduler-Job (BEWUSST noch nicht in main.py/Lifespan verdrahtet —
+  analog S-020-Scheduler; Verdrahtung = offener Punkt).
 - Bug-Fund aus S-077 (noch ohne Story): Trades-Filter liefert 422 bei
   leeren von/bis-Datumsfeldern (GET /ui/trades/tabelle) — leerer String
   sollte als "kein Filter" gelten; betrifft S-073/AC16.
