@@ -50,6 +50,8 @@ erDiagram
     analysis_result ||--o{ analysis_category_score : "Score je Kategorie"
     analysis_result ||--o{ analysis_fact : "geerdete Fakten"
     analysis_result ||--o{ hallucination_log : "Cross-Check"
+    category_weight_version ||--o{ analysis_result : "Konfig-Version zugrunde"
+    analysis_method_version ||--o{ analysis_result : "Konfig-Version zugrunde"
 
     risk_profile ||--o{ portfolio_strategy : "prägt"
     portfolio_strategy ||--o{ portfolio_class_limit : "je Klasse"
@@ -412,14 +414,17 @@ erDiagram
 | id | UUID | PK |
 | instrument_id | UUID | FK → instrument.id, NOT NULL |
 | analyse_typ | TEXT | CHECK ∈ {neue_titel, bestehende_titel} (zwei getrennte Pfade C-011) |
-| asset_class_id | SMALLINT | FK → asset_class.id |
-| gesamtscore | NUMERIC(6,3) | CHECK `0 ≤ gesamtscore ≤ 10` (→ BR-104) |
-| signal_enum | TEXT | CHECK ∈ {KAUF, BEOBACHTEN, HALTEN, REDUZIEREN, VERKAUF} (Score-Schwellen → BR-105) |
+| asset_class_id | SMALLINT | FK → asset_class.id, **NOT NULL** (S-066-Präzisierung: jede Analyse hängt an einem Instrument mit fixer, NOT-NULL-Anlageklasse — spiegelt `instrument.asset_class_id` wider, denormalisiert für Filter/Anzeige ohne Join) |
+| category_weight_version_id | UUID | FK → category_weight_version.id, **NOT NULL** (§11-Vorgabe: welche Kategoriegewichte-Version dieser Analyse zugrunde lag, AC10 `anlageklassen-config`) |
+| analysis_method_version_id | UUID | FK → analysis_method_version.id, **NOT NULL** (§11-Vorgabe: welche Methodentabellen-Version zugrunde lag) |
+| gesamtscore | NUMERIC(6,3) | CHECK `0 ≤ gesamtscore ≤ 10` (→ BR-104); NULL bei No-Evidence-No-Trade-Übersprung (→ BR-108) |
+| signal_enum | TEXT | CHECK ∈ {KAUF, BEOBACHTEN, HALTEN, REDUZIEREN, VERKAUF} (Score-Schwellen → BR-105); NULL bei Übersprung |
 | exit_urgency | TEXT | CHECK ∈ {hard_exit, soft_exit, none} (nur Sell-Pfad, C-011) |
 | sanity_cap_applied | BOOLEAN | NOT NULL DEFAULT false (Risiko-Score < 3 → max HALTEN, → BR-106) |
 | schema_valid | BOOLEAN | NOT NULL (JSON-Schema-Validierung bestanden, C-008 Sicherung 2) |
 | llm_model | TEXT | verwendetes Modell (Audit) |
 | mode | TEXT | CHECK ∈ {echt, simuliert} |
+| begruendung | TEXT | S-066-Präzisierung (`docs/specs/frontend-cockpit.md` AC5, "die Begründung"): Freitext-Begründung der Analyse, identisch zum `AnalyseOutput.begruendung`-Vertrag (`app.contracts.llm_grounding`) — analog `gate_result.begruendung` |
 | created_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
 
 ### `analysis_category_score` — Score je Kategorie (C-007)
@@ -616,6 +621,43 @@ bislang nicht führte).
 | begruendung | TEXT | |
 | created_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
 
+### `warteliste_eintrag` — Warteliste blockierter Kauf-Kandidaten (Cockpit-Read-Modell, `docs/specs/frontend-cockpit.md` AC26/AC27/AC28, Story S-079)
+
+Reines, von `risk_check_log` **unabhängiges** Cockpit-Read-Modell — anders
+als `risk_check_log` (FK auf `position.id`, wird erst nach einer real
+gebuchten Position/Order befüllt) betrifft die Warteliste gerade
+**blockierte** Kauf-Kandidaten, die **nie** zu einer Position werden (kein
+`position_id` verfügbar). `app.domain.risikomanagement.gate
+.pruefe_kauf_gate` liefert bei einer A2-Blockade nur das strukturelle
+Signal `GateEntscheid.warteliste: bool` (AC7, S-056), OHNE Persistenz —
+die eigentliche Warteliste-Mechanik (Persistenz, Re-Prüfung) ist laut
+`docs/specs/risikomanagement.md` "Offene Punkte" weiterhin offen und
+bewusst **nicht** Teil dieser Story (Spec-Nicht-Ziel `frontend-cockpit.md`:
+"Im MVP speist ausschliesslich der Demo-Seed das Read-Modell", AC28). Diese
+Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
+(Fixture-Insert, analog `app.demo.kandidaten`) füllt sie.
+### `hybrid_entscheid` — offener, bestätigungspflichtiger Hybrid-Entscheid (C-016; `docs/specs/frontend-cockpit.md` AC29/AC30/AC31, S-080)
+> Kein bestehendes Modul legt heute eine "wartet auf Bestätigung"-Zeile an — der Buy-/Sell-Pfad (S-028/S-034) gibt ein reines In-Prozess-Signal weiter, keine Entscheidungs-Queue; die S-056-Warteliste (`risk_check_log`/`GateEntscheid.warteliste`) ist ein reiner Struktur-Flag ohne eigene Persistenz. Diese Tabelle ist die schlanke, HTTP-abfragbare Persistenz für das AC29-Read-Modell UND das Ziel des AC30-Control-Plane-Schreibpfads (`app.db.hybrid_entscheide.entscheide`, `offen` → `bestaetigt`/`abgelehnt`) — ausschliesslich vom feature-gateten Demo-Seed (AC31) order-frei befüllt. `vorgeschlagene_order` ist bewusst Klartext (kein FK auf `order`/`position` — die Order-Anhalte-Mechanik selbst ist laut Spec-Nicht-Ziel post-MVP-Backend-Scope).
+
+| Feld | Typ | Constraint |
+|---|---|---|
+| id | UUID | PK |
+| instrument_id | UUID | FK → instrument.id, NOT NULL |
+| asset_class_id | SMALLINT | FK → asset_class.id, NOT NULL |
+| geplante_groesse | NUMERIC(20,8) | NOT NULL, CHECK > 0 |
+| blockade_grund | TEXT | NOT NULL, CHECK ∈ {klumpenrisiko, korrelation, drawdown, kelly_cap} (Prüfmatrix-Dimension, AC26 wörtlich) |
+| mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
+| blockiert_am | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| richtung | TEXT | CHECK ∈ {kauf, verkauf}, NOT NULL |
+| groesse | NUMERIC(20,8) | NOT NULL, CHECK > 0 |
+| vorgeschlagene_order | TEXT | NOT NULL (Klartext-Beschreibung, kein Order-Objekt) |
+| frist | TIMESTAMPTZ | NOT NULL (Ablauf) |
+| begruendung | TEXT | NOT NULL |
+| status | TEXT | CHECK ∈ {offen, bestaetigt, abgelehnt}, NOT NULL DEFAULT 'offen' |
+| mode | TEXT | CHECK ∈ {simuliert} — **kein** `echt`-Wert möglich (→ BR-141, AC30-MVP-Live-Sperre auf Schema-Ebene), NOT NULL DEFAULT 'simuliert' |
+| erstellt_am | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| entschieden_am | TIMESTAMPTZ | NULL, gesetzt bei Übergang `offen` → `bestaetigt`/`abgelehnt` |
+
 ---
 
 ## 5 · Depot-Aggregate (C-015, C-017)
@@ -764,6 +806,8 @@ bislang nicht führte).
 | trade_fill | (order_id), (executed_at) | Fills je Order |
 | transaction | (position_id), (instrument_id), (booked_at), (mode) | Steuer-/Dashboard-Historie |
 | risk_check_log | (position_id), (created_at) | Risiko-Audit |
+| warteliste_eintrag | (mode), (instrument_id), (asset_class_id), (blockiert_am) | Cockpit-Warteliste-View mode-Filter (→ BR-130), Titel-Join, FK-Index (sql/R05), Sortierung |
+| hybrid_entscheid | (status, mode, frist), (instrument_id) | offene Entscheide je Modus, nach Frist sortiert (AC29-Query, Covering-Index), Titel-Join |
 | depot_fill_dedup | PK (client_order_id), (instrument_id) | Idempotenz-Lookup (ADR-011/BR-134) + Fills je Titel |
 | portfolio_weight | (snapshot_id) | Gewichtungen je Snapshot |
 | rule_hypothesis | (asset_class_id) | Hypothesen je Anlageklasse |
@@ -838,6 +882,8 @@ bislang nicht führte).
 | BR-137 | position.strategy_id / position.time_horizon_id / position.these | Beim Kauf fixiert; nach Position-Open unveränderlich (kein UPDATE dieser drei Spalten — alle übrigen `position`-Spalten bleiben regulär fortschreibbar) — Disciplined-Exit, ergänzt BR-111 um den Positions-Teil des Attribut-Bündels (`docs/specs/strategie-exit-regeln.md` AC5, S-040) | DB-Trigger (`BEFORE UPDATE`, Spalten-Vergleich) |
 | BR-138 | instrument.korrelations_cluster | Konzentration je Korrelations-Cluster wird unabhängig vom (nominellen) Sektorlimit geprüft — ein Titel eines bereits stark vertretenen Clusters kann gedeckelt/blockiert werden, auch wenn `gics_sector` noch Spielraum hätte (`docs/specs/risikomanagement.md` AC9, S-045) | App (`app.domain.risikomanagement.gate.pruefe_kauf_gate`) |
 | BR-139 | order.status / trade_fill | Bei Reject/Timeout wird KEIN Bestand (Position) verändert — nur ein bestätigter Fill (`filled`/`teilfill`) darf einen `trade_fill`-Eintrag und eine nachgelagerte Positions-Fortschreibung auslösen; `rejected`/`timeout` erzeugen ausschliesslich den `order`-Statuseintrag + Protokollierung (`docs/specs/ausfuehrung-paper.md` AC8, S-048) | App (`app.domain.execution.order_ausfuehrung.verarbeite_fill`) |
+| BR-140 | warteliste_eintrag | Reines Cockpit-Read-Modell OHNE Backend-Schreib-/Re-Prüf-Pfad — ausschliesslich der Demo-Seed (`app.demo.warteliste`) befüllt diese Tabelle; kein Gate-Direktaufruf, kein Import aus `app.domain.risikomanagement` in der UI-/Query-Schicht (`docs/specs/frontend-cockpit.md` AC26/AC28, Boundary AC2, S-079) | App (`app.demo.warteliste.seed_warteliste`) + `tests/architecture/test_ui_boundary.py` |
+| BR-141 | hybrid_entscheid.mode | Strukturell exklusiv `simuliert` — **kein** `echt`-Wert im Schema möglich (MVP-Live-Sperre, → BR-019, `docs/specs/frontend-cockpit.md` AC30, S-080): eine Bestätigung kann nie einen Live-Modus-Entscheid betreffen | DB-CHECK |
 
 ---
 
@@ -850,7 +896,8 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 3. **Instrument:** `instrument` (FK asset_class).
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
 5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`. `analysis_result` referenziert bei Einführung zusätzlich `category_weight_version.id` und `analysis_method_version.id` (AC10 — welche Konfigurationsversion der Analyse zugrunde lag), sobald diese Story `analysis_result` anlegt.
-6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`.
+6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`, `warteliste_eintrag` (FK nur auf `instrument`/`asset_class`, kein Order-Pfad-Bezug — Cockpit-Read-Modell, S-079).
+6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`, `hybrid_entscheid` (FK nur auf `instrument`, S-080).
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.

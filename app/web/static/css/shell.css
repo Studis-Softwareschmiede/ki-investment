@@ -1,0 +1,177 @@
+/* Cockpit-Shell-Layout (docs/design.md §5 Layout, §9 A11y) — Story S-064.
+   3-Zonen-Struktur: Statusleiste (sticky, oben) / Nav (Seitenspalte) /
+   Hauptbereich. Keine Magic-Farbwerte/-Abstände ausserhalb der Tokens
+   (css/R01), keine Inline-Styles in den Templates (html/R02). */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+
+/* §9 Fokus: sichtbarer Ring auf jedem interaktiven Element, nie
+   outline:none ohne gleichwertigen Ersatz. */
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Skip-Link (WCAG 2.4.1) — unsichtbar bis Tastaturfokus. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 1000;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-1);
+  color: var(--text-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 0 0 var(--radius-sm) 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* Zone A — Statusleiste: persistent, sticky, voll breit (D2). */
+.statusleiste {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-2) var(--space-4);
+}
+
+.status-indicators {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+}
+
+.status-item .status-icon {
+  color: var(--text-2);
+}
+
+.status-item .status-label {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.status-item .status-value {
+  font-family: var(--font-mono);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Definierter Leer-/Platzhalterzustand (design.md §7.1 "leer" — nie ein
+   Nullwert/Farbzustand vortäuschen, solange kein Read-Modell angebunden
+   ist, siehe partials/statusleiste.html-Kommentar). */
+.status-item--placeholder .status-icon,
+.status-item--placeholder .status-value {
+  color: var(--text-3);
+}
+
+/* Zone B/C — Nav + Hauptbereich nebeneinander (Desktop), gestapelt
+   (schmale Breiten). */
+.shell-body {
+  display: grid;
+  grid-template-columns: minmax(160px, 200px) 1fr;
+}
+
+.nav-main {
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  padding: var(--space-4) var(--space-2);
+}
+
+.nav-main ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav-link {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--text-1);
+  text-decoration: none;
+  border-left: 3px solid transparent;
+}
+
+.nav-link:hover {
+  background: var(--surface-3);
+}
+
+/* Aktiver Nav-Eintrag: Balken + Fettung + Farbe (D3 — nicht nur Farbe). */
+.nav-link--active {
+  background: var(--surface-3);
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+main {
+  padding: var(--space-5);
+  /* 2.4.11 Focus Not Obscured: die sticky Statusleiste darf einen
+     fokussierten Bereich am oberen Rand von <main> nicht verdecken. */
+  scroll-margin-top: var(--space-6);
+}
+
+main h1 {
+  font-size: var(--fs-lg);
+  margin-top: 0;
+}
+
+.view-placeholder {
+  color: var(--text-2);
+}
+
+@media (max-width: 899px) {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
+
+  .nav-main {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .nav-main ul {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+/* §9 Bewegung: nicht-essenzielle Animation/Transition abschalten. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

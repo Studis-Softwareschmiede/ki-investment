@@ -2,7 +2,7 @@ id: S-064
 parent: F-017
 title: Cockpit-Shell + Query-Schicht-Fundament (Jinja2-base, persistente Statusleiste,
   Nav, vendored Assets, StaticFiles-Mount, jinja2+python-multipart)
-status: In Progress
+status: Done
 priority: P1
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -25,8 +25,8 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
 confidence: low
 tok_est: null
 branch: feat/S-064-cockpit-shell
-pr: null
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/43
 blocked_reason: null
 created_at: '2026-07-18T04:24:15Z'
-updated_at: '2026-07-18T21:20:04Z'
-done_at: null
+updated_at: '2026-07-18T21:52:45Z'
+done_at: '2026-07-18T21:52:39Z'

@@ -1,9 +1,20 @@
 """Tests für `SqlAlchemyPositionRepository` (Story S-015 + S-016 + S-016
-DBA-Zweit-Review + S-045).
+DBA-Zweit-Review + S-045 + S-065 + S-071).
 
 Covers (depot): AC10, AC2, AC3, AC5, AC4, AC7, AC8, AC9, AC6
 Covers (strategie-exit-regeln): AC1, AC10, AC11
 Covers (risikomanagement): AC9
+Covers (frontend-cockpit): AC6, AC7, AC3, AC16, AC14
+
+S-071 (`docs/specs/frontend-cockpit.md` AC14, Review-Finding
+Iteration 1) ergänzt: `alle_offenen_positionen` liefert zusätzlich
+`symbol`/`name` (`Instrument.symbol`/`.name`) je Lot — lesbarer
+Titel-Bezeichner für die Depot-Tabelle statt der rohen `titel_id`-UUID.
+
+S-065 (`docs/specs/frontend-cockpit.md` AC3) ergänzt
+`realisierter_gv_gesamt`: depotweite Summe von `Position.realisierter_gv`
+über ALLE Positionen (offen UND geschlossen) eines `mode` — Grundlage des
+depotweiten realisierten G/V im `/api/depot`-Read-Modell.
 
 S-045 (AC9) ergänzt: `alle_offenen_positionen` liefert zusätzlich
 `korrelations_cluster` je Lot (`Instrument.korrelations_cluster`,
@@ -63,6 +74,16 @@ persistieren `Position.einstand_fx_rate`, `offene_positionen` liefert ihn
 zurück, und `schreibe_transaktion` persistiert bei gesetztem `fx_split`
 zusätzlich `Transaction.fx_rate`/`kapital_gv_chf`/`waehrungs_gv_chf`
 (→ BR-129).
+
+S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
+`historie_depotweit`: das depotweite (nicht titel-spezifische) Gegenstück
+zu `historie_je_titel` — schliesst das AC7-Read-Modell-Gap für die
+Cockpit-Trade-Historie-View, optional gefiltert nach Titel und Zeitraum.
+
+S-073 Review-Fix (Iteration 2, AC16, Critical) ergänzt `historie_depotweit`
+zusätzlich um einen `Instrument`-Join (analog `alle_offenen_positionen`):
+die Trade-Historie-View zeigte bislang die rohe `titel_id`-UUID statt des
+Titels — `historie_je_titel` bleibt bewusst unverändert.
 """
 
 from __future__ import annotations
@@ -765,6 +786,163 @@ def test_historie_je_titel_filtert_nach_modus() -> None:
         assert simuliert_historie[0].zeitstempel == _naiv(simuliert_fill.zeitstempel)
 
 
+# --- S-067: depotweite Trade-Historie (AC6/AC7) -----------------------------
+
+
+def test_historie_depotweit_ist_leer_ohne_gebuchte_fills() -> None:
+    """@trace frontend-cockpit#AC6,AC7 — kein gebuchter Fill im Modus ergibt
+    eine leere depotweite Historie, keinen Fehler."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.historie_depotweit(mode="simuliert") == []
+
+
+def test_historie_depotweit_liefert_fills_ueber_mehrere_titel() -> None:
+    """@trace frontend-cockpit#AC6,AC7 — anders als `historie_je_titel`
+    liefert `historie_depotweit` ohne `titel_id`-Filter Fills MEHRERER
+    Titel (das AC7-Gap: bislang nur je Titel abfragbar), aufsteigend nach
+    Zeitstempel sortiert."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_a, _strategy_id = _seed_stammdaten(session)
+        instrument_b = _seed_instrument(
+            session, asset_class_id=1, gics_sector="Technology", symbol="ZWEI"
+        )
+        repository = SqlAlchemyPositionRepository(session)
+        fill_a = _kauf_fill(
+            instrument_a,
+            client_order_id="order-a",
+            zeitstempel=datetime(2026, 7, 12, 9, 0, tzinfo=UTC),
+        )
+        fill_b = _kauf_fill(
+            instrument_b,
+            client_order_id="order-b",
+            zeitstempel=datetime(2026, 7, 12, 15, 0, tzinfo=UTC),
+        )
+        repository.schreibe_transaktion(fill_b, position_id=None)
+        repository.schreibe_transaktion(fill_a, position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(mode="simuliert")
+
+        assert [e.titel_id for e in historie] == [str(instrument_a), str(instrument_b)]
+
+
+def test_historie_depotweit_filtert_nach_modus() -> None:
+    """@trace frontend-cockpit#AC6,AC7 — Mode-Isolation (BR-130), analog
+    `historie_je_titel`."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        echt_fill = _kauf_fill(instrument_id, client_order_id="order-echt", mode="echt")
+        simuliert_fill = _kauf_fill(
+            instrument_id, client_order_id="order-simuliert", mode="simuliert"
+        )
+        repository.schreibe_transaktion(echt_fill, position_id=None)
+        repository.schreibe_transaktion(simuliert_fill, position_id=None)
+        session.commit()
+
+        echt_historie = repository.historie_depotweit(mode="echt")
+        simuliert_historie = repository.historie_depotweit(mode="simuliert")
+
+        assert len(echt_historie) == 1
+        assert len(simuliert_historie) == 1
+
+
+def test_historie_depotweit_filtert_nach_titel_id() -> None:
+    """@trace frontend-cockpit#AC6 — optionaler `titel_id`-Filter grenzt
+    die depotweite Sicht auf genau einen Titel ein (Verträge:
+    `GET /api/trades?titel=`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_a, _strategy_id = _seed_stammdaten(session)
+        instrument_b = _seed_instrument(
+            session, asset_class_id=1, gics_sector="Technology", symbol="ZWEI"
+        )
+        repository = SqlAlchemyPositionRepository(session)
+        fill_a = _kauf_fill(instrument_a, client_order_id="order-a")
+        fill_b = _kauf_fill(instrument_b, client_order_id="order-b")
+        repository.schreibe_transaktion(fill_a, position_id=None)
+        repository.schreibe_transaktion(fill_b, position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(mode="simuliert", titel_id=str(instrument_a))
+
+        assert [e.titel_id for e in historie] == [str(instrument_a)]
+
+
+def test_historie_depotweit_mit_ungueltiger_titel_id_ist_leer() -> None:
+    """@trace frontend-cockpit#AC6 — ein syntaktisch ungültiger
+    `titel_id`-Filter (keine UUID) liefert eine leere Liste statt eines
+    Fehlers (analog `historie_je_titel`/`aktuelle_menge`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        repository.schreibe_transaktion(_kauf_fill(instrument_id), position_id=None)
+        session.commit()
+
+        assert repository.historie_depotweit(mode="simuliert", titel_id="keine-uuid") == []
+
+
+def test_historie_depotweit_liefert_aufgeloeste_titel_bezeichnung() -> None:
+    """@trace frontend-cockpit#AC16 — Review-Fix Iteration 2 (Critical):
+    `historie_depotweit` liefert zusätzlich `titel`/`name`
+    (`Instrument.symbol`/`Instrument.name` über einen Join) statt nur die
+    rohe `titel_id` (analog `alle_offenen_positionen`)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        repository.schreibe_transaktion(_kauf_fill(instrument_id), position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(mode="simuliert")
+
+        assert len(historie) == 1
+        assert historie[0].titel == "ACME"
+        assert historie[0].name == "Acme Corp"
+
+
+def test_historie_depotweit_filtert_nach_zeitraum() -> None:
+    """@trace frontend-cockpit#AC6 — der `[von, bis]`-Zeitraum-Filter
+    (Verträge: `GET /api/trades?von=&bis=`) ist beidseitig inklusiv und
+    grenzt auf `booked_at` ein."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        frueh = _kauf_fill(
+            instrument_id,
+            client_order_id="order-frueh",
+            zeitstempel=datetime(2026, 7, 1, 9, 0, tzinfo=UTC),
+        )
+        mitte = _kauf_fill(
+            instrument_id,
+            client_order_id="order-mitte",
+            zeitstempel=datetime(2026, 7, 12, 9, 0, tzinfo=UTC),
+        )
+        spaet = _kauf_fill(
+            instrument_id,
+            client_order_id="order-spaet",
+            zeitstempel=datetime(2026, 7, 20, 9, 0, tzinfo=UTC),
+        )
+        for fill in (frueh, mitte, spaet):
+            repository.schreibe_transaktion(fill, position_id=None)
+        session.commit()
+
+        historie = repository.historie_depotweit(
+            mode="simuliert",
+            von=datetime(2026, 7, 5, 0, 0, tzinfo=UTC),
+            bis=datetime(2026, 7, 15, 0, 0, tzinfo=UTC),
+        )
+
+        assert [e.zeitstempel for e in historie] == [_naiv(mitte.zeitstempel)]
+
+
 # --- S-036: depotweite Positions-Sicht (AC8/AC9) ---------------------------
 
 
@@ -809,7 +987,11 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
     `zeithorizont_id` je Lot (S-040).
 
     @trace risikomanagement#AC9 — zusätzlich `korrelations_cluster` je Lot
-    (S-045, → BR-138)."""
+    (S-045, → BR-138).
+
+    @trace frontend-cockpit#AC14 — zusätzlich `symbol`/`name`
+    (`Instrument.symbol`/`.name`) je Lot (S-071, Review-Finding
+    Iteration 1: lesbarer Titel-Bezeichner statt roher `titel_id`-UUID)."""
     engine = _make_engine()
     with Session(engine) as session:
         _seed_stammdaten(session)
@@ -842,9 +1024,13 @@ def test_alle_offenen_positionen_liefert_attribute_ueber_alle_titel() -> None:
         assert eintrag_a.these == "These."
         assert eintrag_a.zeithorizont_id == 8
         assert eintrag_a.korrelations_cluster == "growth_tech"
+        assert eintrag_a.symbol == "TECH"
+        assert eintrag_a.name == "TECH Inc"
         eintrag_b = next(p for p in bestand if p.titel_id == str(instrument_b))
         assert eintrag_b.gics_branche == "Healthcare"
         assert eintrag_b.korrelations_cluster is None
+        assert eintrag_b.symbol == "PHARMA"
+        assert eintrag_b.name == "PHARMA Inc"
 
 
 def test_alle_offenen_positionen_ignoriert_geschlossene_positionen() -> None:
@@ -1100,3 +1286,58 @@ def test_schreibe_transaktion_chf_hat_keinen_fx_rate() -> None:
         assert eintrag.fx_rate is None
         assert eintrag.kapital_gv_chf is None
         assert eintrag.waehrungs_gv_chf is None
+
+
+def test_realisierter_gv_gesamt_ist_null_ohne_bestand() -> None:
+    """@trace frontend-cockpit#AC3 — ohne jede Position ist der depotweite
+    realisierte G/V 0, kein Fehler."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        _instrument_id, _strategy_id = _seed_stammdaten(session)
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.realisierter_gv_gesamt(mode="simuliert") == Decimal("0")
+
+
+def test_realisierter_gv_gesamt_summiert_offene_und_geschlossene_positionen() -> None:
+    """@trace frontend-cockpit#AC3 — ein Vollverkauf schliesst den Lot
+    (`status=geschlossen`), sein bereits realisierter G/V darf im
+    depotweiten Read-Modell trotzdem nicht verschwinden — die Summe zählt
+    bewusst OHNE `status`-Filter."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        offen = _make_position(instrument_id, strategy_id, menge=Decimal("5"), status="offen")
+        offen.realisierter_gv = Decimal("30")
+        geschlossen = _make_position(
+            instrument_id, strategy_id, menge=Decimal("0"), status="geschlossen"
+        )
+        geschlossen.realisierter_gv = Decimal("70")
+        session.add(offen)
+        session.add(geschlossen)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.realisierter_gv_gesamt(mode="simuliert") == Decimal("100")
+
+
+def test_realisierter_gv_gesamt_zaehlt_nur_den_eigenen_modus() -> None:
+    """@trace frontend-cockpit#AC3 — Mode-Isolation (BR-130): ein
+    "echt"-Lot darf den "simuliert"-Wert nicht mitzählen (und umgekehrt)."""
+    engine = _make_engine()
+    with Session(engine) as session:
+        instrument_id, strategy_id = _seed_stammdaten(session)
+        echt = _make_position(
+            instrument_id, strategy_id, menge=Decimal("5"), status="offen", mode="echt"
+        )
+        echt.realisierter_gv = Decimal("10")
+        simuliert = _make_position(
+            instrument_id, strategy_id, menge=Decimal("5"), status="offen", mode="simuliert"
+        )
+        simuliert.realisierter_gv = Decimal("999")
+        session.add(echt)
+        session.add(simuliert)
+        session.commit()
+
+        repository = SqlAlchemyPositionRepository(session)
+        assert repository.realisierter_gv_gesamt(mode="echt") == Decimal("10")
+        assert repository.realisierter_gv_gesamt(mode="simuliert") == Decimal("999")

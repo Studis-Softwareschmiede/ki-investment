@@ -1,0 +1,271 @@
+/* Kandidaten-View (design.md §7.6/§7.7/§8.1/§10, `docs/specs/
+   frontend-cockpit.md` AC15) — Story S-072. Eigene, view-scoped Datei
+   (Hot-Spot-Konvention: `shell.css` bleibt unangetastet). Nur Token-
+   Referenzen (css/R01), keine Magic-Werte. */
+
+/* Desktop (>= 1280px, design.md §6 --bp-xl): Liste links, Spinnennetz-
+   Detail rechts nebeneinander. */
+.kandidaten-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+@media (min-width: 1280px) {
+  .kandidaten-layout {
+    grid-template-columns: minmax(360px, 1fr) minmax(320px, 1fr);
+  }
+}
+
+/* §6: breite Tabellen -> horizontal scrollbarer Wrapper mit sticky erster
+   Spalte, statt Information abzuschneiden. */
+.tabellen-wrapper {
+  overflow-x: auto;
+}
+
+.table-kandidaten {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.table-kandidaten caption {
+  text-align: left;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  padding-bottom: var(--space-2);
+}
+
+.table-kandidaten th,
+.table-kandidaten td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.table-kandidaten thead th {
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: var(--fs-xs);
+}
+
+.table-kandidaten tbody tr:nth-child(even) {
+  background: var(--surface-3);
+}
+
+.table-kandidaten tbody th:first-child,
+.table-kandidaten tbody td:first-child {
+  position: sticky;
+  left: 0;
+  background: inherit;
+}
+
+.wert-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Primäre Zeilenaktion (design.md §9: Cockpit-Default-Touch-Target 44px —
+   diese Aktion ist kein dichtes Tabellen-inline-Icon, sondern die primäre
+   Öffnen-Aktion je Zeile). */
+.kandidat-open {
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Gesamtscore-Mini-Meter (design.md §7.7: horizontaler 0–10-Meter neben
+   dem Zahlenwert; A11y: der Zahlenwert bleibt der zugängliche Text,
+   `role="presentation"` nimmt den Meter selbst aus dem A11y-Baum). */
+.score-meter {
+  width: 100%;
+  height: 4px;
+  margin-top: var(--space-1);
+  background: var(--surface-3);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.score-meter-fuellung {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+/* Sanity-Cap-Marker im Signal-Badge (design.md §7.7, → BR-008): Wortlaut
+   bleibt führend, der Marker ergänzt nur. */
+.signal-badge-cap {
+  margin-left: var(--space-1);
+  color: var(--warn-fg);
+  font-weight: 600;
+}
+
+.kandidaten-leer,
+.kandidat-detail-leer {
+  color: var(--text-2);
+}
+
+/* Klassen-Chip (design.md §2.4): Kürzel-Text + Farb-Rand als
+   Verstärkung — die Farbe ersetzt das Label nie (D3). */
+.klassen-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-left: 3px solid var(--border-strong);
+}
+
+.klassen-chip--1 { border-left-color: var(--ac-1); }
+.klassen-chip--2 { border-left-color: var(--ac-2); }
+.klassen-chip--3 { border-left-color: var(--ac-3); }
+.klassen-chip--4 { border-left-color: var(--ac-4); }
+.klassen-chip--5 { border-left-color: var(--ac-5); }
+.klassen-chip--6 { border-left-color: var(--ac-6); }
+.klassen-chip--7 { border-left-color: var(--ac-7); }
+.klassen-chip--8 { border-left-color: var(--ac-8); }
+.klassen-chip--9 { border-left-color: var(--ac-9); }
+.klassen-chip--10 { border-left-color: var(--ac-10); }
+.klassen-chip--11 { border-left-color: var(--ac-11); }
+
+/* Signal-Badge (design.md §7.7): Wortlaut führend, Farbe Verstärkung. */
+.signal-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.signal-badge--kauf { color: var(--ok-fg); }
+.signal-badge--beobachten { color: var(--info-fg); }
+.signal-badge--halten { color: var(--text-2); }
+.signal-badge--reduzieren { color: var(--warn-fg); }
+.signal-badge--verkauf { color: var(--danger-fg); }
+
+/* Detail-Panel (design.md §8.1/§10). */
+.kandidat-detail {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  min-height: 200px;
+}
+
+.kandidat-detail-titel {
+  font-size: var(--fs-md);
+  margin-top: 0;
+}
+
+.kandidat-detail-name {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+/* Spinnennetz-SVG (design.md §8.1). */
+.spinnennetz {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+}
+
+.spinnennetz-gitterring {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.spinnennetz-achsenlinie {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.spinnennetz-label {
+  fill: var(--text-2);
+  font-size: var(--fs-xs);
+  text-anchor: middle;
+}
+
+.spinnennetz-punkt {
+  fill: var(--accent);
+}
+
+.spinnennetz-flaeche {
+  fill: color-mix(in oklab, var(--accent) 25%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+/* BR-008 Sanity-Cap: Risiko-Achse zusätzlich mit --warn-Marker
+   hervorgehoben (design.md §8.1), nie nur über Farbe (D3 — der
+   begleitende Hinweistext bleibt die primäre Information). */
+.spinnennetz-achse--warn .spinnennetz-achsenlinie {
+  stroke: var(--warn-fg);
+  stroke-width: 2;
+}
+
+.spinnennetz-achse--warn .spinnennetz-punkt {
+  fill: var(--warn-fg);
+}
+
+.kategorie-werttabelle {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--space-4);
+  font-size: var(--fs-sm);
+}
+
+.kategorie-werttabelle caption,
+.kategorie-fakten-sektion table caption {
+  text-align: left;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  padding-bottom: var(--space-1);
+}
+
+.kategorie-werttabelle th,
+.kategorie-werttabelle td,
+.kategorie-fakten-sektion th,
+.kategorie-fakten-sektion td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.sanity-cap-hinweis {
+  margin-top: var(--space-3);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.sanity-cap-hinweis--aktiv {
+  color: var(--warn-fg);
+  font-weight: 600;
+}
+
+.kategorie-fakten-sektion {
+  margin-top: var(--space-4);
+}
+
+.kategorie-fakten-sektion h3 {
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  margin-bottom: var(--space-2);
+}
+
+.kategorie-fakten-sektion table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+}

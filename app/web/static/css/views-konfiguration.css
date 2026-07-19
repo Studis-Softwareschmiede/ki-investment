@@ -1,0 +1,214 @@
+/* Konfigurations-View (docs/design.md §7.9 Anlageklassen-Toggle, §2.4
+   Klassen-Chip, §7.1 Tile) — Story S-076, `docs/specs/frontend-cockpit.md`
+   AC18. Eigene Datei statt shell.css/views-depot.css/kandidaten.css
+   (Hot-Spot-Konvention: jede View bekommt ihre eigene CSS-Datei, siehe
+   `views-depot.css`-Kommentarblock). Nur Token-Referenzen (css/R01), keine
+   Inline-Styles in den Templates (html/R02). */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* §2.4 Anlageklassen-Chip (Farbe = Rand/Punkt, Text immer --text-1). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+.chip--ac {
+  border-left: 3px solid var(--text-3);
+}
+
+.chip--ac-1 { border-left-color: var(--ac-1); }
+.chip--ac-2 { border-left-color: var(--ac-2); }
+.chip--ac-3 { border-left-color: var(--ac-3); }
+.chip--ac-4 { border-left-color: var(--ac-4); }
+.chip--ac-5 { border-left-color: var(--ac-5); }
+.chip--ac-6 { border-left-color: var(--ac-6); }
+.chip--ac-7 { border-left-color: var(--ac-7); }
+.chip--ac-8 { border-left-color: var(--ac-8); }
+.chip--ac-9 { border-left-color: var(--ac-9); }
+.chip--ac-10 { border-left-color: var(--ac-10); }
+.chip--ac-11 { border-left-color: var(--ac-11); }
+
+/* §7.9 Anlageklassen-Toggle-Liste */
+.toggle-liste {
+  list-style: none;
+  margin: 0 0 var(--space-6) 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.toggle-zeile {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.toggle-name {
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.toggle-prio {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* §7.9 Zustand zusätzlich als Text "aktiv/inaktiv" (nie nur Farbe, D3). */
+.toggle-status {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-2);
+  min-width: 4.5em;
+}
+
+/* §7.9 A11y: native Checkbox, Trefferfläche >= 44px — die sichtbare
+   Schalter-Spur (::before Track + ::after Thumb) ist kleiner, aber die
+   klickbare `<input>`-Box selbst ist 44x44px. */
+.toggle-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  position: relative;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.toggle-switch::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--text-3);
+  border: 1px solid var(--border-strong);
+  transition: background var(--motion-base), border-color var(--motion-base);
+}
+
+.toggle-switch::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 13px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface-1);
+  transform: translateY(-50%);
+  transition: transform var(--motion-base);
+}
+
+.toggle-switch:checked::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.toggle-switch:checked::after {
+  transform: translate(18px, -50%);
+}
+
+.toggle-switch:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* §7.9 BR-018-Warn-Band: "inaktiv - Positionen bleiben überwacht". */
+.warnband {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--warn-fg);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.toggle-fehler {
+  flex-basis: 100%;
+  color: var(--danger-fg);
+  font-size: var(--fs-sm);
+}
+
+/* §7.1-artige Tile für die Depotstrategie-Anzeige. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.tile-label {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.tile-value {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+.empty-state {
+  color: var(--text-2);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.klassen-limit-liste {
+  margin: var(--space-2) 0 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}

@@ -1,6 +1,8 @@
-"""Tests für die portfolioweite Drawdown-Überwachung (Story S-025).
+"""Tests für die portfolioweite Drawdown-Überwachung (Story S-025, S-068).
 
 Covers (betriebssicherung): AC2, AC5
+Covers (frontend-cockpit): AC8 — `status()` (S-068), die seiteneffektfreie
+Zustandsabfrage für den System-Status-Endpunkt.
 
 `app.core.drawdown_monitor` implementiert AC5 (laufende Überwachung,
 unabhängig konfigurierbare Alert-/Kill-Schwellen) und AC2 (automatischer
@@ -150,3 +152,76 @@ def test_hoechststand_bleibt_ueber_nachfolgend_niedrigere_werte_erhalten() -> No
     assert status.hoechststand == Decimal("100000")
     assert status.aktueller_stand == Decimal("95000")
     assert status.drawdown_pct == Decimal("0.05")
+
+
+def test_status_ohne_equity_stand_ist_ueberwachungsluecke_ohne_alert() -> None:
+    """@trace frontend-cockpit#AC8 — `status()` meldet den Cold-Start-Fall
+    genauso wie `pruefe_drawdown()` (`ueberwachungsluecke=True`), löst aber
+    KEINEN Alert aus (reiner Read, keine Nebenwirkung)."""
+    status = drawdown_monitor.status()
+
+    assert status.ueberwachungsluecke is True
+    assert status.aktueller_stand is None
+    assert status.drawdown_pct is None
+    assert status.kill_ausgeloest is False
+    assert alerts.alle_alerts() == ()
+
+
+def test_status_ueber_kill_schwelle_loest_weder_alert_noch_kill_switch_aus() -> None:
+    """@trace frontend-cockpit#AC8 — `status()` berechnet denselben
+    Drawdown-Prozentsatz wie `pruefe_drawdown()`, auch weit über der
+    Kill-Schwelle, löst aber NIE einen Alert oder den Kill-Switch aus
+    (ein Status-Read darf den Betriebszustand nicht verändern)."""
+    drawdown_monitor.aktualisiere_equity_stand(Decimal("100000"), _T0)
+    drawdown_monitor.aktualisiere_equity_stand(Decimal("75000"), _T0)  # -25 %
+
+    status = drawdown_monitor.status()
+
+    assert status.drawdown_pct == Decimal("0.25")
+    assert status.kill_ausgeloest is False
+    assert kill_switch.status().zustand == "normal"
+    assert alerts.alle_alerts() == ()
+
+
+def test_status_liest_denselben_hoechststand_wie_pruefe_drawdown() -> None:
+    """@trace frontend-cockpit#AC8 — `status()` spiegelt denselben
+    internen Zustand wie `pruefe_drawdown()` (High-Water-Mark bleibt über
+    einen nachfolgenden Rückgang erhalten)."""
+    drawdown_monitor.aktualisiere_equity_stand(Decimal("100000"), _T0)
+    drawdown_monitor.aktualisiere_equity_stand(Decimal("90000"), _T0)
+
+    status = drawdown_monitor.status()
+
+    assert status.hoechststand == Decimal("100000")
+    assert status.aktueller_stand == Decimal("90000")
+    assert status.drawdown_pct == Decimal("0.1")
+
+
+@pytest.mark.parametrize(
+    "equity_staende",
+    [
+        (),  # Cold-Start: nie ein Equity-Stand gemeldet
+        (Decimal("100000"),),  # am Höchststand, Drawdown 0 %
+        (Decimal("100000"), Decimal("75000")),  # weit über der Kill-Schwelle
+    ],
+)
+def test_status_und_pruefe_drawdown_liefern_deckungsgleiche_kernwerte(
+    equity_staende: tuple[Decimal, ...],
+) -> None:
+    """@trace frontend-cockpit#AC8 — `status()` und `pruefe_drawdown()`
+    teilen sich denselben Kern (`_lese_drawdown_status_unlocked`, Review-
+    Finding Iteration 1): für JEDEN Zustand (Cold-Start, am Höchststand,
+    weit über der Kill-Schwelle) müssen `aktueller_stand`/`hoechststand`/
+    `drawdown_pct`/`ueberwachungsluecke` zwischen beiden Funktionen
+    übereinstimmen — nur `kill_ausgeloest` und die Alert-/Kill-Switch-
+    Nebenwirkung dürfen sich unterscheiden."""
+    for stand in equity_staende:
+        drawdown_monitor.aktualisiere_equity_stand(stand, _T0)
+
+    pruef_status = drawdown_monitor.pruefe_drawdown(jetzt=_T0)
+    lese_status = drawdown_monitor.status()
+
+    assert lese_status.aktueller_stand == pruef_status.aktueller_stand
+    assert lese_status.hoechststand == pruef_status.hoechststand
+    assert lese_status.drawdown_pct == pruef_status.drawdown_pct
+    assert lese_status.ueberwachungsluecke == pruef_status.ueberwachungsluecke

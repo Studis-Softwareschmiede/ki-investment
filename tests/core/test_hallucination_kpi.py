@@ -3,6 +3,8 @@ S-026).
 
 Covers (llm-grounding): AC8, AC9
 Covers (betriebssicherung): AC8
+Covers (frontend-cockpit): AC8 — `aktueller_kpi()` (S-068), die
+seiteneffektfreie Zustandsabfrage für den System-Status-Endpunkt.
 
 `app.core.hallucination_kpi` berechnet laufend die Quote „Analysen mit
 Faktenabweichung" (verworfene / geprüfte Analysen) aus registrierten
@@ -240,3 +242,68 @@ def test_latch_meldet_bei_wiederholtem_aufruf_keinen_zweiten_alert() -> None:
     hallucination_kpi.berechne_kpi()
 
     assert len(alerts.alle_alerts()) == 1
+
+
+def test_aktueller_kpi_berechnet_dieselbe_quote_wie_berechne_kpi() -> None:
+    """@trace frontend-cockpit#AC8 — `aktueller_kpi()` liefert dieselbe
+    Quote/Zählung wie `berechne_kpi()`, ohne selbst einen Alarm-Übergang
+    auszulösen (unterhalb des Schwellwerts, kein Latch-Wechsel zu prüfen)."""
+    _registriere(geerdet=198, verworfen=2)
+
+    ergebnis = hallucination_kpi.aktueller_kpi()
+
+    assert ergebnis.geprueft == 200
+    assert ergebnis.verworfen == 2
+    assert ergebnis.quote == pytest.approx(0.01)
+    assert ergebnis.alarm is False
+    assert ergebnis.llm_status == "aktiv"
+
+
+def test_aktueller_kpi_ueber_schwellwert_meldet_keinen_alarm_uebergang() -> None:
+    """@trace frontend-cockpit#AC8 — auch wenn die Quote den Schwellwert
+    STRIKT überschreitet, löst `aktueller_kpi()` NIE selbst einen
+    Alarm-Übergang aus: `alarm=True` ist rein informativ, `llm_status`
+    bleibt `"aktiv"`, kein Audit-Eintrag, kein `Alert` (ein Status-Read
+    darf den Kill-Latch nicht als Nebenwirkung verändern)."""
+    _registriere(geerdet=97, verworfen=3)
+
+    ergebnis = hallucination_kpi.aktueller_kpi()
+
+    assert ergebnis.quote == pytest.approx(0.03)
+    assert ergebnis.alarm is True
+    assert ergebnis.llm_status == "aktiv"
+    assert hallucination_kpi.ist_llm_aktiv() is True
+    assert alle_eintraege() == ()
+    assert alerts.alle_alerts() == ()
+
+
+def test_aktueller_kpi_spiegelt_bereits_ausgeloesten_latch() -> None:
+    """@trace frontend-cockpit#AC8 — ist die LLM-Kette bereits über
+    `berechne_kpi()` deaktiviert worden, liest `aktueller_kpi()` den
+    bestehenden Latch-Zustand korrekt mit (`llm_status="deaktiviert"`),
+    ohne selbst einen zweiten Alarm-Übergang auszulösen."""
+    _registriere(geerdet=97, verworfen=3)
+    hallucination_kpi.berechne_kpi()
+    assert len(alle_eintraege()) == 1
+
+    ergebnis = hallucination_kpi.aktueller_kpi()
+
+    assert ergebnis.llm_status == "deaktiviert"
+    assert len(alle_eintraege()) == 1
+
+
+def test_aktueller_kpi_seit_parameter_filtert_aeltere_registrierungen() -> None:
+    """@trace frontend-cockpit#AC8 — der optionale `seit`-Parameter
+    verhält sich wie bei `berechne_kpi()`."""
+    alt = datetime(2026, 1, 1, tzinfo=UTC)
+    hallucination_kpi.registriere_ergebnis(_ergebnis("verworfen"), zeitpunkt=alt)
+
+    fenster_start = datetime(2026, 6, 1, tzinfo=UTC)
+    hallucination_kpi.registriere_ergebnis(
+        _ergebnis("geerdet"), zeitpunkt=fenster_start + timedelta(days=1)
+    )
+
+    ergebnis_mit_fenster = hallucination_kpi.aktueller_kpi(seit=fenster_start)
+
+    assert ergebnis_mit_fenster.geprueft == 1
+    assert ergebnis_mit_fenster.verworfen == 0

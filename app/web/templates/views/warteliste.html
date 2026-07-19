@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Warteliste — Betriebs-Cockpit{% endblock %}
+{% block view_title %}Warteliste{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/warteliste.css') }}">
+{% endblock %}
+{% block content %}
+{# Warteliste-Datentabelle (design.md §7.6 dichte Datentabelle) — Story
+   S-079, AC26/AC27: vom Risikomanagement-Gate blockierte Kauf-Kandidaten
+   (Titel, Klasse, geplante Grösse, Blockade-Grund, Zeitpunkt), rein
+   lesend (kein Control-Element, AC27 wörtlich). Kein Eintrag in
+   `KERN_VIEWS` (design.md §5 schliesst die Hauptnavigation bewusst auf
+   fünf Kern-Views ab; AC26/AC27 verlangen keine Nav-Integration) — die
+   View bleibt über die direkte URL (`/ui/warteliste`) erreichbar. #}
+<div data-testid="warteliste-container" aria-live="polite">
+  {% if warteliste.eintraege %}
+  <div class="table-scroll">
+    <table class="table-dense" data-testid="table-warteliste">
+      <caption class="sr-only">Warteliste im Modus {{ warteliste.mode|upper }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Titel</th>
+          <th scope="col">Klasse</th>
+          <th scope="col" class="num">Geplante Grösse</th>
+          <th scope="col">Blockade-Grund</th>
+          <th scope="col">Zeitpunkt</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for eintrag in warteliste.eintraege %}
+        <tr data-row-id="{{ eintrag.id }}">
+          <td class="col-titel">{{ eintrag.titel }}</td>
+          <td>
+            <span
+              class="klassen-chip klassen-chip--{{ eintrag.asset_class_id }}"
+              data-testid="klassen-chip"
+              data-anlageklasse="{{ anlageklasse_kuerzel(eintrag.asset_class_id)|lower }}"
+            >{{ anlageklasse_kuerzel(eintrag.asset_class_id) }}</span>
+          </td>
+          <td class="num">{{ "%.2f"|format(eintrag.geplante_groesse) }}</td>
+          <td>
+            <span
+              class="blockade-grund-badge"
+              data-testid="blockade-grund-badge"
+              data-blockade-grund="{{ eintrag.blockade_grund }}"
+            >{{ blockade_grund_label(eintrag.blockade_grund) }}</span>
+          </td>
+          <td class="col-zeit">{{ eintrag.blockiert_am.isoformat() }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="table-empty-state" data-testid="warteliste-empty">
+    Keine blockierten Kandidaten im Modus {{ warteliste.mode|upper }}
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

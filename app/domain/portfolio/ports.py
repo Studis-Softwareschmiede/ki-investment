@@ -76,6 +76,24 @@ zu `ExitRegelnBestand` (S-036, oben: liefert `None`-Felder, solange keine
 (`app.adapters.marketdata.live_price.NoOpLivePriceProvider`) für jeden
 Titel `None`; das Dashboard behandelt das gemäss `depot.md` Edge-Cases als
 "nicht bewertbar" statt eines veralteten Werts.
+
+Story S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
+`historie_depotweit`: das depotweite (nicht titel-spezifische) Gegenstück
+zu `historie_je_titel` (S-035) — schliesst das in AC7 benannte Read-Modell-
+Gap (die Trade-Historie lag bislang nur je Titel abfragbar vor), optional
+gefiltert nach Titel und Zeitraum. Rein lesend über dieselbe
+`transaction`-Tabelle, kein neues Order-Pfad-Verhalten (AC7, Nicht-Ziele).
+
+Story S-065 (`docs/specs/frontend-cockpit.md` AC3) ergänzt
+`realisierter_gv_gesamt`: den depotweiten realisierten G/V **über alle
+Positionen (offen UND geschlossen) eines `mode`** — `Position
+.realisierter_gv` (S-016, AC2/AC3) akkumuliert bereits je Lot bei jedem
+Teil-/Vollverkauf; diese Methode summiert nur über die bereits
+akkumulierten Werte (keine neue Formel, reine Aggregation, P1). Anders als
+`alle_offenen_positionen` (nur `status == "offen"`) zählt diese Summe
+bewusst auch geschlossene Lots mit — ein Vollverkauf schliesst den Lot,
+sein bereits realisierter G/V darf im Depot-Read-Modell aber nicht
+verschwinden.
 """
 
 from __future__ import annotations
@@ -117,6 +135,15 @@ class TransaktionsEintrag:
     #: AC6 (S-053): realisierter Währungsgewinn-Anteil in CHF — nur bei
     #: einem Fremdwährungs-Verkauf gesetzt, sonst `None`.
     waehrungs_gv_chf: Decimal | None = None
+    #: AC16 (S-073, Review-Fix Iteration 2): aufgelöste Titel-Bezeichnung
+    #: (`Instrument.symbol`) — additiv, `None` bei `historie_je_titel`
+    #: (kein `Instrument`-Join dort, siehe `SqlAlchemyPositionRepository
+    #: .historie_je_titel`), stets gesetzt bei `historie_depotweit`
+    #: (`Instrument`-Join, analog `alle_offenen_positionen`).
+    titel: str | None = None
+    #: AC16 (S-073, Review-Fix Iteration 2): `Instrument.name` — additiv,
+    #: `None`-Verhalten wie `titel`.
+    name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,7 +212,17 @@ class PositionsBestand:
     Cluster-Konzentrationsprüfung im Risikomanagement-Gate. `None` mit
     Default (analog `gics_branche` NULLable), da keine Story die
     Erst-Anlage der Korrelations-Cluster-Zuordnung besitzt (siehe
-    `app.db.models.Instrument`-Docstring)."""
+    `app.db.models.Instrument`-Docstring).
+
+    `symbol`/`name` (S-071, `docs/specs/frontend-cockpit.md` AC14,
+    Review-Finding Iteration 1): lesbarer Titel-Bezeichner
+    (`Instrument.symbol`/`.name`, beide NOT NULL am Instrument) für die
+    Depot-Tabellen-Spalte "Titel" (statt der rohen `titel_id`-UUID).
+    `None` mit Default (analog `these`/`zeithorizont_id`), um bestehende
+    Aufrufer/Test-Fakes, die diese Felder nicht setzen, nicht zu brechen —
+    bei einer real über `SqlAlchemyPositionRepository
+    .alle_offenen_positionen` gelesenen Position sind beide stets
+    gesetzt."""
 
     position_id: str
     titel_id: str
@@ -198,6 +235,8 @@ class PositionsBestand:
     these: str | None = None
     zeithorizont_id: int | None = None
     korrelations_cluster: str | None = None
+    symbol: str | None = None
+    name: str | None = None
 
 
 class PositionRepository(Protocol):
@@ -333,7 +372,41 @@ class PositionRepository(Protocol):
         existiert.
 
         **S-040 (AC10/AC11):** liefert zusätzlich `these`/`zeithorizont_id`
-        je Lot — vervollständigt das beim Kauf fixierte Attribut-Bündel."""
+        je Lot — vervollständigt das beim Kauf fixierte Attribut-Bündel.
+
+        **S-071 (AC14):** liefert zusätzlich `symbol`/`name`
+        (`Instrument.symbol`/`.name`) je Lot — lesbarer Titel-Bezeichner
+        für die Depot-Tabelle (statt der rohen `titel_id`-UUID)."""
+        ...
+
+    def historie_depotweit(
+        self,
+        *,
+        mode: Modus,
+        titel_id: str | None = None,
+        von: datetime | None = None,
+        bis: datetime | None = None,
+    ) -> list[TransaktionsEintrag]:
+        """AC6/AC7 (S-067, `docs/specs/frontend-cockpit.md`): liefert die
+        depotweite (nicht titel-spezifische) Fill-/Transaktionshistorie
+        **im angegebenen `mode`** (Mode-Isolation, BR-130) — schliesst das
+        in AC7 benannte Read-Modell-Gap (die Trade-Historie lag bislang nur
+        als `historie_je_titel`, S-035, je Titel abfragbar vor). Optional
+        zusätzlich gefiltert auf `titel_id` (exakte Titel-UUID; ist sie
+        keine gültige UUID, liefert dies eine leere Liste statt eines
+        Fehlers, analog `historie_je_titel`) und/oder den beidseitig
+        inklusiven Zeitraum `[von, bis]` (Vergleich gegen `booked_at`) —
+        `None` heisst je "kein Filter". Aufsteigend nach `booked_at`
+        sortiert (wie `historie_je_titel`). Leere Liste, falls im Modus
+        (bzw. im gefilterten Ausschnitt) kein Fill gebucht wurde."""
+        ...
+
+    def realisierter_gv_gesamt(self, *, mode: Modus) -> Decimal:
+        """AC3 (S-065): depotweite Summe von `Position.realisierter_gv`
+        **über alle Positionen (offen UND geschlossen) im angegebenen
+        `mode`** (Mode-Isolation, BR-130) — `Decimal("0")`, falls kein
+        Fill je verkauft wurde. Reine Aggregation über bereits akkumulierte
+        Werte (siehe Moduldocstring), keine neue G/V-Formel."""
         ...
 
 

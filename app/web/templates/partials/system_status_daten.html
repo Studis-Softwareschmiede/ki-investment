@@ -1,0 +1,138 @@
+{# System-Status-Voll-View-Daten (Story S-075, `docs/specs/frontend-
+   cockpit.md` AC17/AC19; `design.md` §7.2-§7.5/§7.10) — eigenständiges
+   Partial, damit `views/system-status.html` (Erstladung) UND
+   `GET /ui/system-status/partial` (AC19-Live-Polling) exakt dasselbe
+   Markup rendern (kein Layout-Sprung beim Swap, `design.md` §8.3).
+   Update S-078 (AC24/AC25): die Gate-Ampel-Karte zeigt zusätzlich die
+   MinTRL-Restlaufzeit (`status.mintrl_restlaufzeit`, E2-Empty-State "—").
+   Erwarteter Kontext (`app.web.system_status_view
+   .system_status_view_kontext`): `status` (`SystemStatusResponse`),
+   `status_context` (kompaktes Icon/Label-Dict, dieselbe Formatierung wie
+   die Shell-Statusleiste, P4/DRY), `heartbeat_zeilen` (je Heartbeat-
+   Modul), `live_kritisch` (bool, A1 — Kill-Switch HALTED).
+
+   Die Kill-Switch-Bestätigungs-Dialoge selbst liegen bewusst AUSSERHALB
+   dieses Partials (in `views/system-status.html`) — ein offener,
+   fokussierter Dialog darf beim periodischen Poll-Swap nicht zerstört
+   werden (AC19 "kein Fokusverlust"). Hier stehen nur die live
+   aktualisierten ÖFFNEN-Buttons; die `commandfor`-Referenz (html/R08)
+   bleibt über die Swap-Grenze hinweg gültig (ID-basiert, dokumentweit). #}
+
+{% if live_kritisch %}
+<div class="banner banner--danger" role="alert" aria-live="assertive"
+     data-testid="banner" data-severity="danger">
+  <strong>⛔ KILL-SWITCH HALTED</strong> — Handel gestoppt: offene Orders storniert, Positionen glattgestellt, keine neuen Käufe.
+</div>
+{% endif %}
+
+<section class="status-full-grid" aria-label="System-Status im Detail">
+
+  {% set ampel = status_context.ampel if status_context.ampel is defined else None %}
+  <article class="status-full-card" data-testid="gate-ampel"
+           data-ampel-state="{{ ampel.state if ampel else 'unbekannt' }}">
+    <h2 class="status-full-titel">Gate-Ampel</h2>
+    <p class="status-full-wert{{ '' if ampel else ' text-unbekannt' }}" data-value>
+      <span aria-hidden="true">{{ ampel.icon if ampel else '○' }}</span>
+      {{ ampel.label if ampel else 'unbekannt' }}
+    </p>
+    <p class="status-full-meta" data-testid="gate-ampel-zeitstempel">
+      {%- if status.gate_ampel_ermittelt_am -%}
+      ermittelt am {{ status.gate_ampel_ermittelt_am.strftime('%d.%m.%Y %H:%M') }} UTC
+      {%- else -%}
+      —
+      {%- endif -%}
+    </p>
+    {# AC24/AC25 — MinTRL-Restlaufzeit neben der Gate-Ampel: Klartext mit
+       Einheit (E2-Empty-State "—" statt 0/Farbzustand) samt erklärendem
+       Kurztext ("🟢 heisst noch nicht bewiesen", → C-012/IDEA-025). #}
+    <p class="status-full-meta" data-testid="gate-ampel-mintrl">
+      MinTRL-Restlaufzeit:
+      {%- if status.mintrl_restlaufzeit -%}
+      {{ status.mintrl_restlaufzeit.klartext }}
+      {%- else -%}
+      —
+      {%- endif -%}
+    </p>
+    <p class="status-full-meta" data-testid="gate-ampel-mintrl-hinweis">
+      🟢 heisst noch nicht statistisch bewiesen — MinTRL zeigt die verbleibende Bewährungszeit.
+    </p>
+  </article>
+
+  <article class="status-full-card" data-testid="status-killswitch"
+           data-betriebszustand="{{ status.kill_switch.zustand }}">
+    <h2 class="status-full-titel">Kill-Switch</h2>
+    <p class="status-full-wert" data-value>
+      {%- if status.kill_switch.zustand == "angehalten" -%}
+      <span aria-hidden="true">▲</span> HALTED
+      {%- else -%}
+      <span aria-hidden="true">●</span> NORMAL
+      {%- endif -%}
+    </p>
+    {% if status.kill_switch.zustand == "angehalten" %}
+    <p class="status-full-meta">
+      Grund: {{ status.kill_switch.grund or "—" }}
+      {%- if status.kill_switch.ausgeloest_am %} (seit {{ status.kill_switch.ausgeloest_am.strftime('%d.%m.%Y %H:%M') }} UTC){% endif -%}
+    </p>
+    <button type="button" class="btn btn--danger-solid" command="show-modal"
+            commandfor="dialog-kill-switch-freigeben"
+            data-testid="killswitch-freigeben-oeffnen">System zurücksetzen</button>
+    {% else %}
+    <button type="button" class="btn btn--danger-outline" command="show-modal"
+            commandfor="dialog-kill-switch-ausloesen"
+            data-testid="killswitch-ausloesen-oeffnen">Kill-Switch auslösen</button>
+    {% endif %}
+  </article>
+
+  <article class="status-full-card" data-testid="status-modus"
+           data-modus="{{ status.modus_global }}" data-live-locked="true">
+    <h2 class="status-full-titel">Modus</h2>
+    <p class="status-full-wert" data-value>
+      <span aria-hidden="true">🔒</span> {{ status.modus_global.upper() }}
+    </p>
+    <p class="status-full-meta" data-testid="modus-live-gesperrt">
+      🔒 „echt"/Live ist im MVP hart gesperrt (BR-019).
+    </p>
+  </article>
+
+  <article class="status-full-card" data-testid="status-drawdown"
+           data-state="{{ 'unbekannt' if (status.drawdown.ueberwachungsluecke or status.drawdown.drawdown_pct is none) else 'ok' }}">
+    <h2 class="status-full-titel">Drawdown</h2>
+    {% if status.drawdown.ueberwachungsluecke or status.drawdown.drawdown_pct is none %}
+    <p class="status-full-wert text-unbekannt" data-value>—</p>
+    {% else %}
+    <p class="status-full-wert" data-value>−{{ "%.1f"|format(status.drawdown.drawdown_pct * 100) }}%</p>
+    {% endif %}
+  </article>
+
+  <article class="status-full-card" data-testid="status-halluzination-kpi"
+           data-state="{{ 'alarm' if status.halluzinations_kpi.alarm else ('unbekannt' if status.halluzinations_kpi.geprueft == 0 else 'ok') }}">
+    <h2 class="status-full-titel">Halluzinations-KPI</h2>
+    {% if status.halluzinations_kpi.geprueft == 0 %}
+    <p class="status-full-wert text-unbekannt" data-value>—</p>
+    {% else %}
+    <p class="status-full-wert" data-value>{{ "%.2f"|format(status.halluzinations_kpi.quote * 100) }}%</p>
+    {% if status.halluzinations_kpi.alarm %}
+    <p class="status-full-meta status-full-meta--danger">LLM DEAKTIVIERT</p>
+    {% endif %}
+    {% endif %}
+  </article>
+
+</section>
+
+<section aria-label="Heartbeat je Modul">
+  <h2 class="status-full-titel">Heartbeat je Modul</h2>
+  {% if heartbeat_zeilen|length == 0 %}
+  <p class="text-unbekannt" data-testid="heartbeat-leer">Keine registrierten Module.</p>
+  {% else %}
+  <ul class="heartbeat-liste" data-testid="heartbeat-liste">
+    {% for zeile in heartbeat_zeilen %}
+    <li class="heartbeat-modul" data-testid="heartbeat-modul" data-modul-id="{{ zeile.modul_id }}" data-state="{{ zeile.state }}">
+      <span aria-hidden="true">{{ '▲' if zeile.state == 'ausgefallen' else '●' }}</span>
+      <span class="heartbeat-modul-id">{{ zeile.modul_id }}</span>
+      <span class="heartbeat-modul-status">{{ 'AUSGEFALLEN' if zeile.state == 'ausgefallen' else 'OK' }}</span>
+      <span class="heartbeat-modul-alter">(vor {{ zeile.alter_sekunden }}s)</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

@@ -1,0 +1,113 @@
+{# Offene-Entscheide-Liste (design.md §7.6-analog Karten/Tabelle, §7.11
+   Control-Bestätigungs-Dialog) — Story S-080, AC30/AC31.
+
+   Eigenständiges HTMX-Swap-Ziel: wird sowohl beim initialen Seitenaufruf
+   (views/entscheide.html, per {% include %}) als auch nach jedem
+   Bestätigen-/Ablehnen-POST (`app/api/control.py`, hx-target="#entscheide-
+   liste" hx-swap="outerHTML") komplett neu gerendert — die Wurzel-`<div>`
+   trägt deshalb die stabile `data-testid`/`id` (analog `partials/
+   trades-tabelle.html`).
+
+   AC31 (Feature-Gate): `entscheide.feature_aktiv=false` zeigt IMMER den
+   definierten "autonom — keine offenen Entscheide"-Zustand, unabhängig
+   vom (in diesem Fall stets leeren) `entscheide.entscheide`-Inhalt — die
+   Control-Aktionen fehlen in diesem Zustand komplett (kein Button, kein
+   Dialog), "Control-POSTs sind inaktiv/gesperrt" gilt also bereits auf
+   Markup-Ebene.
+
+   AC30: Bestätigen/Ablehnen sind über native modale `<dialog>` (html/R08
+   `command`/`commandfor`, design.md §7.11) bestätigungspflichtig — der
+   eigentliche HTMX-POST liegt auf dem Bestätigen-Button IM Dialog, nicht
+   auf dem öffnenden Button. #}
+<div id="entscheide-liste" data-testid="entscheide-liste" aria-live="polite">
+  {% if not entscheide.feature_aktiv %}
+  <p class="view-placeholder" data-testid="entscheide-autonom" role="status">
+    Autonom — keine offenen Entscheide. Der Hybrid-Bestätigungs-Flow ist
+    deaktiviert; der Paper-Modus entscheidet eigenständig ohne
+    Bestätigungspflicht.
+  </p>
+  {% elif entscheide.entscheide|length == 0 %}
+  <p class="table-empty-state" data-testid="entscheide-empty">
+    Keine offenen Entscheide im Modus SIMULIERT
+  </p>
+  {% else %}
+  <ul class="entscheide-karten" data-testid="entscheide-karten">
+    {% for e in entscheide.entscheide %}
+    <li
+      class="entscheid-karte"
+      data-testid="entscheid-karte"
+      data-entscheid-id="{{ e.entscheid_id }}"
+      data-richtung="{{ e.richtung }}"
+    >
+      <h2 class="entscheid-titel">{{ e.titel if e.titel else e.titel_id }}{% if e.name %} — {{ e.name }}{% endif %}</h2>
+      <span
+        class="badge-richtung badge-richtung--{{ e.richtung }}"
+        data-testid="entscheid-richtung"
+        data-richtung="{{ e.richtung }}"
+      >{{ "Kauf" if e.richtung == "kauf" else "Verkauf" }}</span>
+
+      <dl class="entscheid-details">
+        <dt>Grösse</dt>
+        <dd class="num" data-testid="entscheid-groesse">{{ "%.4f"|format(e.groesse) }}</dd>
+        <dt>Vorgeschlagene Order</dt>
+        <dd data-testid="entscheid-order">{{ e.vorgeschlagene_order }}</dd>
+        <dt>Frist</dt>
+        <dd data-testid="entscheid-frist"><time datetime="{{ e.frist.isoformat() }}">{{ e.frist.isoformat() }}</time></dd>
+        <dt>Begründung</dt>
+        <dd data-testid="entscheid-begruendung">{{ e.begruendung }}</dd>
+      </dl>
+
+      <div class="entscheid-aktionen">
+        <button
+          type="button"
+          class="btn-bestaetigen"
+          command="show-modal"
+          commandfor="dialog-bestaetigen-{{ e.entscheid_id }}"
+          data-testid="entscheid-bestaetigen-oeffnen"
+        >Bestätigen</button>
+
+        <dialog id="dialog-bestaetigen-{{ e.entscheid_id }}" data-testid="dialog-entscheid-bestaetigen">
+          <p>
+            {{ "Kauf" if e.richtung == "kauf" else "Verkauf" }} von
+            {{ "%.4f"|format(e.groesse) }} {{ e.titel if e.titel else e.titel_id }} bestätigen?
+            Dies löst im MVP ausschliesslich eine simulierte Order aus
+            (Modus SIMULIERT, Live im MVP gesperrt).
+          </p>
+          <button type="button" command="close" commandfor="dialog-bestaetigen-{{ e.entscheid_id }}">Abbrechen</button>
+          <button
+            type="button"
+            hx-post="/api/control/entscheide/{{ e.entscheid_id }}/bestaetigen"
+            hx-target="#entscheide-liste"
+            hx-swap="outerHTML"
+            data-testid="entscheid-bestaetigen-confirm"
+          >Bestätigen</button>
+        </dialog>
+
+        <button
+          type="button"
+          class="btn-ablehnen"
+          command="show-modal"
+          commandfor="dialog-ablehnen-{{ e.entscheid_id }}"
+          data-testid="entscheid-ablehnen-oeffnen"
+        >Ablehnen</button>
+
+        <dialog id="dialog-ablehnen-{{ e.entscheid_id }}" data-testid="dialog-entscheid-ablehnen">
+          <p>
+            Diesen Entscheid ablehnen? Der Vorschlag entfällt, es wird
+            keine Order ausgelöst.
+          </p>
+          <button type="button" command="close" commandfor="dialog-ablehnen-{{ e.entscheid_id }}">Abbrechen</button>
+          <button
+            type="button"
+            hx-post="/api/control/entscheide/{{ e.entscheid_id }}/ablehnen"
+            hx-target="#entscheide-liste"
+            hx-swap="outerHTML"
+            data-testid="entscheid-ablehnen-confirm"
+          >Ablehnen</button>
+        </dialog>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

@@ -163,6 +163,24 @@ ORDER_EXIT_URGENCY_VALUES = ("hard", "soft", "none")
 # (Nicht-Ziel dieser Story, kein Erzeuger-Pfad hier).
 ORDER_STATUS_VALUES = ("offen", "teilfill", "filled", "rejected", "timeout", "cancelled")
 
+# data-model.md §3 `analysis_result`: CHECK analyse_typ ∈ {...} (zwei
+# getrennte Pfade, C-011; Story S-066, Read-Modell-Gap AC4/AC5/AC7)
+ANALYSIS_RESULT_ANALYSE_TYP_VALUES = ("neue_titel", "bestehende_titel")
+
+# data-model.md §3 `analysis_result`: CHECK signal_enum ∈ {...} (→ BR-105) —
+# identisch zum `Signal`-Literal in `app.contracts.analyse_framework`; hier
+# bewusst als eigenständige DB-Wertemenge geführt (P1/P3: `app/db/**` darf
+# nicht von `app/contracts/**` abhängen).
+ANALYSIS_RESULT_SIGNAL_VALUES = ("KAUF", "BEOBACHTEN", "HALTEN", "REDUZIEREN", "VERKAUF")
+
+# data-model.md §3 `analysis_result`: CHECK exit_urgency ∈ {...} (nur
+# Sell-Pfad, C-011)
+ANALYSIS_RESULT_EXIT_URGENCY_VALUES = ("hard_exit", "soft_exit", "none")
+
+# data-model.md §3 `analysis_fact`: CHECK cross_check_status ∈ {...} (C-008
+# Sicherung 3)
+ANALYSIS_FACT_CROSS_CHECK_STATUS_VALUES = ("ok", "abweichung", "nicht_pruefbar")
+
 
 class AssetClass(Base):
     """Anlageklasse — Stammdaten + Feature-Toggle (data-model.md `asset_class`, BR-100).
@@ -1044,6 +1062,182 @@ class Instrument(Base):
         return f"Instrument(symbol={self.symbol!r}, asset_class_id={self.asset_class_id!r})"
 
 
+class AnalysisResult(Base):
+    """Analyse-Ergebnis — Buy- oder Sell-Pfad (data-model.md §3
+    `analysis_result`, C-007, C-011; Story S-066, Read-Modell-Gap
+    `docs/specs/frontend-cockpit.md` AC4/AC5/AC7).
+
+    Schliesst den in `architecture.md` §13.3-Fussnote benannten
+    Read-Modell-Gap: Kandidaten-Analysen lagen bislang nur als reine
+    Domänen-Rechnung vor (`app.domain.scoring.score_engine
+    .fuehre_analyse_durch`, `app.domain.analysis_new.buy_pfad
+    .bewerte_kandidat`) — diese Tabelle ist die erste persistente,
+    HTTP-abfragbare Ablage eines Analyse-Ergebnisses. Kein Order-Pfad-
+    Verhalten: diese Story legt ausschliesslich das Read-Modell + die
+    lesenden Endpunkte an (AC7, "ohne neues Order-Pfad-Verhalten").
+
+    `gesamtscore`/`signal_enum` bleiben `NULL`, wenn die Analyse wegen
+    fehlender Evidenz einer ganzen Kategorie übersprungen wurde
+    (No-Evidence-No-Trade, → BR-108, S-011 `AnalyseErgebnis.uebersprungen`)
+    — `app.api.queries.kandidaten` listet unter `/api/kandidaten` nur
+    Zeilen mit gesetztem `gesamtscore`/`signal_enum` ("Liste bewerteter
+    Kandidaten", AC4); `/api/kandidaten/{id}` liefert auch eine
+    übersprungene Analyse (AC5, deckt E3).
+
+    `category_weight_version_id`/`analysis_method_version_id` (data-model.md
+    §11-Vorgabe): welche Konfigurationsversion der Analyse zugrunde lag —
+    beide NOT NULL, kein Erzeuger-Pfad legt derzeit eine Zeile ohne diese
+    Referenzen an (analog zur `instrument`-Tabelle: leeres Schema, kein
+    Seed, siehe `Instrument`-Docstring — auch hier hat noch keine Story die
+    Erst-Anlage einer `analysis_result`-Zeile; diese Story liefert nur
+    Schema + Lese-Pfad).
+
+    `begruendung` (S-066-Präzisierung, AC5 "die Begründung"): identisch zum
+    `AnalyseOutput.begruendung`-Vertrag (`app.contracts.llm_grounding`).
+    """
+
+    __tablename__ = "analysis_result"
+    __table_args__ = (
+        CheckConstraint(
+            f"analyse_typ IN ({', '.join(repr(v) for v in ANALYSIS_RESULT_ANALYSE_TYP_VALUES)})",
+            name="ck_analysis_result_analyse_typ",
+        ),
+        CheckConstraint(
+            "gesamtscore IS NULL OR (gesamtscore >= 0 AND gesamtscore <= 10)",
+            name="ck_analysis_result_gesamtscore_range",
+        ),
+        CheckConstraint(
+            f"signal_enum IN ({', '.join(repr(v) for v in ANALYSIS_RESULT_SIGNAL_VALUES)})",
+            name="ck_analysis_result_signal_enum",
+        ),
+        CheckConstraint(
+            f"exit_urgency IN ({', '.join(repr(v) for v in ANALYSIS_RESULT_EXIT_URGENCY_VALUES)})",
+            name="ck_analysis_result_exit_urgency",
+        ),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_analysis_result_mode"),
+        Index("ix_analysis_result_instrument_id_created_at", "instrument_id", "created_at"),
+        Index("ix_analysis_result_analyse_typ", "analyse_typ"),
+        Index("ix_analysis_result_mode", "mode"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    analyse_typ: Mapped[str | None] = mapped_column(String, nullable=True)
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    category_weight_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("category_weight_version.id"), nullable=False
+    )
+    analysis_method_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis_method_version.id"), nullable=False
+    )
+    gesamtscore: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    signal_enum: Mapped[str | None] = mapped_column(String, nullable=True)
+    exit_urgency: Mapped[str | None] = mapped_column(String, nullable=True)
+    sanity_cap_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sa.false()
+    )
+    schema_valid: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    llm_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    mode: Mapped[str | None] = mapped_column(String, nullable=True)
+    begruendung: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(tz=UTC),
+        server_default=sa.text("now()"),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisResult(id={self.id!r}, instrument_id={self.instrument_id!r}, "
+            f"signal_enum={self.signal_enum!r})"
+        )
+
+
+class AnalysisCategoryScore(Base):
+    """Score je Analysekategorie einer Analyse (data-model.md §3
+    `analysis_category_score`, C-007; Story S-066).
+
+    `score IS NULL` markiert eine Kategorie ohne verwertbare Evidenz
+    (`evidence_present = false`, → BR-108, No-Evidence-No-Trade) — identisch
+    zur `None`-Semantik von `app.contracts.analyse_framework.KategorieScores`
+    (S-009/S-010 Score-Engine)."""
+
+    __tablename__ = "analysis_category_score"
+    __table_args__ = (
+        CheckConstraint(
+            "score IS NULL OR (score >= 0 AND score <= 10)",
+            name="ck_analysis_category_score_range",
+        ),
+        Index("ix_analysis_category_score_analysis_result_id", "analysis_result_id"),
+    )
+
+    analysis_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_result.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    category_code: Mapped[str] = mapped_column(
+        String, ForeignKey("analysis_category.code"), primary_key=True
+    )
+    score: Mapped[Decimal | None] = mapped_column(Numeric(6, 3), nullable=True)
+    evidence_present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisCategoryScore(analysis_result_id={self.analysis_result_id!r}, "
+            f"category_code={self.category_code!r}, score={self.score!r})"
+        )
+
+
+class AnalysisFact(Base):
+    """Geerdete Fakten einer Analyse (data-model.md §3 `analysis_fact`,
+    LLM-Grounding-Vertrag, C-008 Sicherung 1+3; Story S-066).
+
+    `source_id`/`source_timestamp` sind NOT NULL (→ BR-107,
+    Grounding-Pflicht → BR-002): jede Zahl trägt ihre Quelle — identisch zur
+    Pflichtfeld-Struktur von `app.contracts.llm_grounding.AnalyseFakt`
+    (`quellen_id`, `timestamp`)."""
+
+    __tablename__ = "analysis_fact"
+    __table_args__ = (
+        CheckConstraint(
+            f"cross_check_status IN "
+            f"({', '.join(repr(v) for v in ANALYSIS_FACT_CROSS_CHECK_STATUS_VALUES)})",
+            name="ck_analysis_fact_cross_check_status",
+        ),
+        Index("ix_analysis_fact_analysis_result_id", "analysis_result_id"),
+        Index("ix_analysis_fact_source_id", "source_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    analysis_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("analysis_result.id", ondelete="CASCADE"), nullable=False
+    )
+    kennzahl: Mapped[str] = mapped_column(String, nullable=False)
+    wert: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("data_source.id"), nullable=False
+    )
+    source_timestamp: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
+    cross_check_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    abweichung_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"AnalysisFact(id={self.id!r}, analysis_result_id={self.analysis_result_id!r}, "
+            f"kennzahl={self.kennzahl!r})"
+        )
+
+
 class Position(Base):
     """Gehaltene Position — Positions-Grundgerüst (data-model.md §4
     `position`, C-014, C-017; Spec `docs/specs/depot.md`, Story S-015,
@@ -1823,3 +2017,146 @@ class GateResult(Base):
 
     def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
         return f"GateResult(trial_id={self.trial_id!r}, stufe={self.stufe!r}, ampel={self.ampel!r})"
+
+
+# data-model.md §4 `warteliste_eintrag`: CHECK blockade_grund ∈ {...}
+# (frontend-cockpit AC26 wörtlich: "Klumpen-/Korrelations-/Drawdown-/
+# Kelly-Cap-Limit", → BR-140)
+WARTELISTE_BLOCKADE_GRUND_VALUES = ("klumpenrisiko", "korrelation", "drawdown", "kelly_cap")
+
+
+class WartelisteEintrag(Base):
+    """Warteliste blockierter Kauf-Kandidaten — reines Cockpit-Read-Modell
+    (data-model.md §4 `warteliste_eintrag`, Spec `docs/specs/
+    frontend-cockpit.md` AC26/AC27/AC28, Story S-079, → BR-140).
+
+    **Kein Backend-Schreib-/Re-Prüf-Pfad** (Spec-Nicht-Ziel: "Keine
+    Warteliste-Schreib-/Re-Prüf-Mechanik ... Im MVP speist ausschliesslich
+    der Demo-Seed das Read-Modell"). `app.domain.risikomanagement.gate
+    .pruefe_kauf_gate` liefert bei einer A2-Blockade lediglich das
+    strukturelle Signal `GateEntscheid.warteliste: bool` (AC7, S-056) —
+    OHNE Persistenz; diese Tabelle ist bewusst eine eigenständige, von der
+    Gate-Domäne komplett entkoppelte Ablage (Boundary AC2: `app/api/ui.py`
+    + `app/api/queries/**` dürfen `app.domain.risikomanagement` nicht
+    importieren, `tests/architecture/test_ui_boundary.py`), analog zu
+    `analysis_result` (S-066): erste persistente, HTTP-abfragbare Ablage
+    ohne (bzw. hier dauerhaft ohne) Domänen-Schreibpfad. Anders als
+    `risk_check_log` (FK auf `position.id`) betrifft diese Tabelle gerade
+    Kandidaten, die NIE zu einer Position werden."""
+
+    __tablename__ = "warteliste_eintrag"
+    __table_args__ = (
+        CheckConstraint(
+            f"blockade_grund IN ({', '.join(repr(v) for v in WARTELISTE_BLOCKADE_GRUND_VALUES)})",
+            name="ck_warteliste_eintrag_blockade_grund",
+        ),
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_warteliste_eintrag_mode"),
+        CheckConstraint(
+            "geplante_groesse > 0", name="ck_warteliste_eintrag_geplante_groesse_positiv"
+        ),
+        Index("ix_warteliste_eintrag_mode", "mode"),
+        Index("ix_warteliste_eintrag_instrument_id", "instrument_id"),
+        Index("ix_warteliste_eintrag_asset_class_id", "asset_class_id"),
+        Index("ix_warteliste_eintrag_blockiert_am", "blockiert_am"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    asset_class_id: Mapped[int] = mapped_column(
+        SmallInteger, ForeignKey("asset_class.id"), nullable=False
+    )
+    geplante_groesse: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    blockade_grund: Mapped[str] = mapped_column(String, nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+    blockiert_am: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"WartelisteEintrag(id={self.id!r}, instrument_id={self.instrument_id!r}, "
+            f"blockade_grund={self.blockade_grund!r})"
+        )
+
+
+class HybridEntscheid(Base):
+    """Offener, bestätigungspflichtiger Hybrid-Entscheid (data-model.md §4
+    `hybrid_entscheid`, C-016; Spec `docs/specs/frontend-cockpit.md`
+    AC29/AC30/AC31, Story S-080).
+
+    Kein bestehendes Modul legt heute eine "wartet auf Bestätigung"-Zeile
+    an (der Buy-/Sell-Pfad, S-028/S-034, gibt ein reines In-Prozess-Signal
+    weiter, keine Entscheidungs-Queue; die S-056-Warteliste ist ein reiner
+    Struktur-Flag ohne eigene Persistenz) — diese Tabelle ist die
+    schlanke, HTTP-abfragbare Persistenz für AC29 (Read-Modell) UND das
+    Ziel der Control-Plane-Schreibpfade `app.db.hybrid_entscheide
+    .entscheide` (AC30). Ausschliesslich vom Demo-Seed (`app.demo
+    .entscheide`, feature-gated AC31) order-frei befüllt — kein
+    Order-/Sizing-/Risiko-/Execution-Aufruf irgendwo in diesem Pfad
+    (Nicht-Ziel "Keine Order-Anhalte-Mechanik").
+
+    `vorgeschlagene_order` ist bewusst ein Klartext-Feld (kein FK auf
+    `order`/`position`) — AC29 verlangt nur "vorgeschlagene Order" als
+    Anzeige-Text, kein reales Order-Objekt (Order-Anhalte-Mechanik ist
+    laut Spec-Nicht-Ziel post-MVP-Backend-Scope).
+
+    `mode CHECK IN ('simuliert')` — **AC30/BR-019-Härtung**: anders als
+    die übrigen `mode`-Spalten (`echt`/`simuliert`, BR-130) lässt diese
+    Tabelle strukturell GAR KEINEN `'echt'`-Wert zu (→ BR-141). Die
+    MVP-Live-Sperre ("eine Bestätigung löst im MVP ausschliesslich
+    simulierte Orders aus", AC30) gilt damit bereits auf Schema-Ebene,
+    nicht erst als Laufzeit-Prüfung."""
+
+    __tablename__ = "hybrid_entscheid"
+    __table_args__ = (
+        # (status, mode, frist) statt nur (status, mode) — deckt AC29-Query
+        # (`SqlAlchemyHybridEntscheidungRepository.offene_entscheide`:
+        # `WHERE status='offen' AND mode='simuliert' ORDER BY frist ASC`)
+        # als vollständigen Covering-Index ab, DBA-Review Iteration 2
+        # (Suggestion, vor Migrations-Landung kostenlos nachgezogen).
+        Index("ix_hybrid_entscheid_status_mode_frist", "status", "mode", "frist"),
+        Index("ix_hybrid_entscheid_instrument_id", "instrument_id"),
+        CheckConstraint("richtung IN ('kauf', 'verkauf')", name="ck_hybrid_entscheid_richtung"),
+        CheckConstraint(
+            "status IN ('offen', 'bestaetigt', 'abgelehnt')", name="ck_hybrid_entscheid_status"
+        ),
+        CheckConstraint("mode IN ('simuliert')", name="ck_hybrid_entscheid_mode"),
+        # analog position.menge (ck_position_menge_non_negative-Konvention,
+        # hier strikt positiv statt >= 0 — DBA-Review Iteration 2, Suggestion).
+        CheckConstraint("groesse > 0", name="ck_hybrid_entscheid_groesse_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    richtung: Mapped[str] = mapped_column(String, nullable=False)
+    groesse: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    vorgeschlagene_order: Mapped[str] = mapped_column(String, nullable=False)
+    frist: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    begruendung: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="offen", server_default=sa.text("'offen'")
+    )
+    mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="simuliert", server_default=sa.text("'simuliert'")
+    )
+    erstellt_am: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    entschieden_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"HybridEntscheid(instrument_id={self.instrument_id!r}, "
+            f"richtung={self.richtung!r}, status={self.status!r})"
+        )

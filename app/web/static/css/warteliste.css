@@ -1,0 +1,113 @@
+/* Warteliste-View (docs/design.md §7.6 dichte Datentabelle, §2.4
+   Klassen-Chip) — Story S-079, AC27. Scoped auf `views/warteliste.html`;
+   keine Magic-Farbwerte/-Abstände ausserhalb der Tokens (css/R01), keine
+   Inline-Styles in den Templates (html/R02). Tabellen-Grundmuster
+   (table-scroll/table-dense/table-empty-state/sr-only) dupliziert analog
+   `trades.css`/`kandidaten.css` (bestehende Konvention: jede View-CSS ist
+   selbständig scoped, kein gemeinsames Table-Partial-CSS). */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.table-dense {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.table-dense thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+}
+
+.table-dense th,
+.table-dense td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table-dense th {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.table-dense th.num,
+.table-dense td.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.table-dense tbody tr:nth-child(even) {
+  background: var(--surface-3);
+}
+
+.table-dense .col-titel {
+  position: sticky;
+  left: 0;
+  background: inherit;
+}
+
+.table-empty-state {
+  padding: var(--space-5);
+  color: var(--text-2);
+  text-align: center;
+}
+
+/* Klassen-Chip (design.md §2.4): Kürzel-Text + Farb-Rand als
+   Verstärkung — die Farbe ersetzt das Label nie (D3). */
+.klassen-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-1);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  border-left: 3px solid var(--border-strong);
+}
+
+.klassen-chip--1 { border-left-color: var(--ac-1); }
+.klassen-chip--2 { border-left-color: var(--ac-2); }
+.klassen-chip--3 { border-left-color: var(--ac-3); }
+.klassen-chip--4 { border-left-color: var(--ac-4); }
+.klassen-chip--5 { border-left-color: var(--ac-5); }
+.klassen-chip--6 { border-left-color: var(--ac-6); }
+.klassen-chip--7 { border-left-color: var(--ac-7); }
+.klassen-chip--8 { border-left-color: var(--ac-8); }
+.klassen-chip--9 { border-left-color: var(--ac-9); }
+.klassen-chip--10 { border-left-color: var(--ac-10); }
+.klassen-chip--11 { border-left-color: var(--ac-11); }
+
+/* Blockade-Grund-Badge (AC27 "als Text/Badge"): Wortlaut führend, keine
+   reine Farbcodierung (D3) — neutraler Text-Pill, da die vier
+   Prüfmatrix-Dimensionen keine Status-Semantik (§2.2) tragen. */
+.blockade-grund-badge {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  color: var(--text-1);
+}

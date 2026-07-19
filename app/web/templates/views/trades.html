@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Trades — Betriebs-Cockpit{% endblock %}
+{% block view_title %}Trades{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/trades.css') }}">
+{% endblock %}
+{% block content %}
+{# Filter-Form (AC16 "Filter Modus/Titel/Zeitraum als HTMX-Form →
+   Tabellen-Partial-Swap"): der Formular-Bereich selbst bleibt beim Swap
+   unangetastet (nur #trades-tabelle-container wird ersetzt), Werte bleiben
+   dadurch nativ im Browser erhalten. #}
+<form
+  class="trades-filter"
+  data-testid="trades-filter-form"
+  hx-get="{{ url_for('ui_trades_tabelle') }}"
+  hx-target="#trades-tabelle-container"
+  hx-swap="outerHTML"
+>
+  <div class="filter-field">
+    <label for="filter-mode">Modus</label>
+    <select id="filter-mode" name="mode" data-testid="filter-mode">
+      <option value="echt" {% if mode == "echt" %}selected{% endif %}>echt</option>
+      <option value="simuliert" {% if mode == "simuliert" %}selected{% endif %}>simuliert</option>
+    </select>
+  </div>
+
+  <div class="filter-field">
+    <label for="filter-titel">Titel</label>
+    <input
+      type="text"
+      id="filter-titel"
+      name="titel"
+      data-testid="filter-titel"
+      value="{{ filter.titel }}"
+      placeholder="Titel-ID"
+    >
+  </div>
+
+  <div class="filter-field">
+    <label for="filter-von">Von</label>
+    <input
+      type="datetime-local"
+      id="filter-von"
+      name="von"
+      data-testid="filter-von"
+      value="{{ filter.von.isoformat(timespec='minutes') if filter.von else '' }}"
+    >
+  </div>
+
+  <div class="filter-field">
+    <label for="filter-bis">Bis</label>
+    <input
+      type="datetime-local"
+      id="filter-bis"
+      name="bis"
+      data-testid="filter-bis"
+      value="{{ filter.bis.isoformat(timespec='minutes') if filter.bis else '' }}"
+    >
+  </div>
+
+  <button type="submit" data-testid="filter-submit">Filtern</button>
+</form>
+
+{% include "partials/trades-tabelle.html" %}
+{% endblock %}

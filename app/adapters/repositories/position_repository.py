@@ -72,6 +72,14 @@ den Zeithorizont je Lot mit — Grundlage für die spätere «Analyse
 bestehende Titel» (These gegen die aktuelle Lage prüfen, AC10) sowie für
 die vollständige, an das Risikomanagement weitergereichte Bündel-Sicht
 (AC11).
+
+Story S-067 (`docs/specs/frontend-cockpit.md` AC6/AC7) ergänzt
+`historie_depotweit`: liest dieselbe `transaction`-Tabelle wie
+`historie_je_titel`, aber ohne `instrument_id`-Filter (depotweit statt
+titel-spezifisch) und mit optionalen Titel-/Zeitraum-Filtern — schliesst
+das Cockpit-Read-Modell-Gap für die Trade-Historie-View (AC7), rein
+lesend, kein neues Order-Pfad-Verhalten. Beide Methoden teilen sich jetzt
+das Zeilen-Mapping (`_transaktionseintrag_aus_zeile`).
 """
 
 from __future__ import annotations
@@ -338,23 +346,48 @@ class SqlAlchemyPositionRepository:
             .order_by(Transaction.booked_at.asc())
         )
         zeilen = self._session.scalars(stmt).all()
+        return [_transaktionseintrag_aus_zeile(z) for z in zeilen]
+
+    def historie_depotweit(
+        self,
+        *,
+        mode: Modus,
+        titel_id: str | None = None,
+        von: datetime | None = None,
+        bis: datetime | None = None,
+    ) -> list[TransaktionsEintrag]:
+        """AC6/AC7 (S-067): depotweite Transaktionshistorie — Gegenstück zu
+        `historie_je_titel` ohne `instrument_id`-Filter, optional zusätzlich
+        gefiltert nach Titel und/oder Zeitraum (siehe Port-Docstring). Ist
+        `titel_id` gesetzt, aber keine gültige UUID, liefert dies eine leere
+        Liste statt eines Fehlers (analog `historie_je_titel`/
+        `aktuelle_menge`).
+
+        **Review-Fix Iteration 2 (AC16, Critical):** liefert zusätzlich die
+        aufgelöste Titel-Bezeichnung (`Instrument.symbol`/`Instrument.name`)
+        über einen `Instrument`-Join — dieselbe Technik wie
+        `alle_offenen_positionen`. `historie_je_titel` bleibt bewusst
+        unverändert (kein Join dort, `titel`/`name` bleiben `None`)."""
+        bedingungen = [Transaction.mode == mode]
+        if titel_id is not None:
+            instrument_id = _als_uuid(titel_id)
+            if instrument_id is None:
+                return []
+            bedingungen.append(Transaction.instrument_id == instrument_id)
+        if von is not None:
+            bedingungen.append(Transaction.booked_at >= von)
+        if bis is not None:
+            bedingungen.append(Transaction.booked_at <= bis)
+
+        stmt = (
+            select(Transaction, Instrument.symbol, Instrument.name)
+            .join(Instrument, Instrument.id == Transaction.instrument_id)
+            .where(*bedingungen)
+            .order_by(Transaction.booked_at.asc())
+        )
+        zeilen = self._session.execute(stmt).all()
         return [
-            TransaktionsEintrag(
-                trade_id=str(z.id),
-                titel_id=str(z.instrument_id),
-                richtung="kauf" if z.typ == "buy" else "verkauf",
-                menge=z.menge,
-                fill_preis=z.preis,
-                arrival_price=z.arrival_price,
-                slippage=z.slippage_abs,
-                kosten=z.kosten_chf,
-                waehrung=z.waehrung,
-                zeitstempel=z.booked_at,
-                fx_rate=z.fx_rate,
-                kapital_gv_chf=z.kapital_gv_chf,
-                waehrungs_gv_chf=z.waehrungs_gv_chf,
-            )
-            for z in zeilen
+            _transaktionseintrag_aus_zeile(z, titel=symbol, name=name) for z, symbol, name in zeilen
         ]
 
     def alle_offenen_positionen(self, *, mode: Modus) -> list[PositionsBestand]:
@@ -379,12 +412,18 @@ class SqlAlchemyPositionRepository:
 
         **S-045 (AC9):** liefert zusätzlich `korrelations_cluster`
         (`Instrument.korrelations_cluster`, → BR-138) — Grundlage der
-        Cluster-Konzentrationsprüfung des Risikomanagement-Gates."""
+        Cluster-Konzentrationsprüfung des Risikomanagement-Gates.
+
+        **S-071 (AC14, Review-Finding Iteration 1):** liefert zusätzlich
+        `Instrument.symbol`/`.name` (lesbarer Titel-Bezeichner, `Instrument`
+        ist ohnehin per Inner-Join angebunden — kein zusätzlicher Join)."""
         stmt = (
             select(
                 Position,
                 Instrument.gics_sector,
                 Instrument.korrelations_cluster,
+                Instrument.symbol,
+                Instrument.name,
                 Strategy.name,
                 ExitRule,
             )
@@ -408,11 +447,30 @@ class SqlAlchemyPositionRepository:
                 these=position.these,
                 zeithorizont_id=position.time_horizon_id,
                 korrelations_cluster=korrelations_cluster,
+                symbol=instrument_symbol,
+                name=instrument_name,
             )
-            for position, gics_sector, korrelations_cluster, strategie_name, exit_rule_zeile in (
-                zeilen
-            )
+            for (
+                position,
+                gics_sector,
+                korrelations_cluster,
+                instrument_symbol,
+                instrument_name,
+                strategie_name,
+                exit_rule_zeile,
+            ) in zeilen
         ]
+
+    def realisierter_gv_gesamt(self, *, mode: Modus) -> Decimal:
+        """AC3 (S-065): depotweite Summe von `Position.realisierter_gv`
+        über ALLE Positionen (offen UND geschlossen) **im angegebenen
+        `mode`** (Mode-Isolation, BR-130) — bewusst OHNE
+        `Position.status`-Filter (anders als `alle_offenen_positionen`),
+        da ein Vollverkauf den Lot schliesst, sein bereits realisierter
+        G/V aber im Depot-Read-Modell erhalten bleiben muss."""
+        stmt = select(Position.realisierter_gv).where(Position.mode == mode)
+        werte = self._session.scalars(stmt).all()
+        return sum(werte, Decimal("0"))
 
 
 def _als_decimal(wert: float | None) -> Decimal | None:
@@ -480,6 +538,34 @@ def _exit_regeln_aus_zeile(zeile: ExitRule | None) -> ExitRegelnBestand:
         atr_multiplikator=zeile.atr_multiplikator,
         thesis_invalidation=zeile.thesis_invalidation,
         time_box=zeile.time_box,
+    )
+
+
+def _transaktionseintrag_aus_zeile(
+    z: Transaction, *, titel: str | None = None, name: str | None = None
+) -> TransaktionsEintrag:
+    """Bildet eine `transaction`-Zeile auf `TransaktionsEintrag` ab (S-035,
+    ergänzt S-053/S-067/S-073) — gemeinsames Mapping für `historie_je_titel`
+    und `historie_depotweit`, damit beide Lesepfade garantiert dieselben
+    Felder liefern. `titel`/`name` sind additiv (Default `None`) — nur
+    `historie_depotweit` löst sie über einen `Instrument`-Join auf und
+    reicht sie hier durch."""
+    return TransaktionsEintrag(
+        trade_id=str(z.id),
+        titel_id=str(z.instrument_id),
+        richtung="kauf" if z.typ == "buy" else "verkauf",
+        menge=z.menge,
+        fill_preis=z.preis,
+        arrival_price=z.arrival_price,
+        slippage=z.slippage_abs,
+        kosten=z.kosten_chf,
+        waehrung=z.waehrung,
+        zeitstempel=z.booked_at,
+        fx_rate=z.fx_rate,
+        kapital_gv_chf=z.kapital_gv_chf,
+        waehrungs_gv_chf=z.waehrungs_gv_chf,
+        titel=titel,
+        name=name,
     )
 
 

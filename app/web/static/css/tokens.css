@@ -1,0 +1,89 @@
+/* Design-Tokens (docs/design.md §2-§4) — Story S-064 (Cockpit-Shell-
+   Fundament, AC11/AC13) legt hier NUR die von der Shell (Statusleiste,
+   Nav, Hauptbereich, Skip-Link, Fokus) tatsächlich konsumierten Tokens an.
+   Story S-071 (Depot-View, AC14) ergänzt die G/V-Kodierung (§2.3) und die
+   Anlageklassen-Chip-Palette (§2.4) — die ersten Content-View-Tokens.
+   Chart-Tokens (§8) bleiben offen (kein Chart in dieser Story, siehe
+   `app/api/ui.py`-Moduldocstring). */
+
+:root {
+  color-scheme: light dark;
+
+  /* §2.1 Neutrale Flächen & Text */
+  --bg: light-dark(#F6F8FA, #0E1116);
+  --surface-1: light-dark(#FFFFFF, #161B22);
+  --surface-2: light-dark(#FFFFFF, #1C2129);
+  --surface-3: light-dark(#EFF2F5, #262C36);
+  --border: light-dark(#D0D7DE, #2D333B);
+  --border-strong: light-dark(#AFB8C1, #3D444D);
+  --text-1: light-dark(#1F2328, #E6EDF3);
+  --text-2: light-dark(#656D76, #9DA7B3);
+  --text-3: light-dark(#8C959F, #6E7681);
+
+  /* §2.2 Semantische Status-/Ampel-Farben (Statusleiste, §7.2-§7.5) */
+  --ok-fg: light-dark(#1A7F37, #3FB950);
+  --warn-fg: light-dark(#9A6700, #D29922);
+  --danger-fg: light-dark(#CF222E, #F85149);
+  --info-fg: light-dark(#0969DA, #58A6FF);
+  --on-solid: #FFFFFF;
+
+  /* Story S-075 (System-Status-Voll-View, AC17): erster Konsument einer
+     `-solid`-Füllung (§7.10 Vollbreite-Banner, §7.3 HALTED-Aktionsbutton) —
+     kein Vorratsanlegen der übrigen `-solid`-Varianten, bis eine Story sie
+     tatsächlich braucht. */
+  --danger-solid: light-dark(#CF222E, #DA3633);
+
+  /* §2.3 Gewinn/Verlust (G/V) — Story S-073 (Trades-View, AC16
+     Slippage/TCA-Vorzeichen-Kodierung) ist die erste Content-View-Story,
+     die diese Tokens braucht (tokens.css-Konvention: kein Vorratsanlegen). */
+  --gain: light-dark(#1A7F37, #3FB950);
+  --loss: light-dark(#CF222E, #F85149);
+
+  /* §2.5 Interaktion & Fokus */
+  --accent: light-dark(#0969DA, #58A6FF);
+  --accent-hover: light-dark(#0550AE, #79C0FF);
+  --focus-ring: light-dark(#0969DA, #58A6FF);
+
+  /* §3 Typografie */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Consolas,
+    "Liberation Mono", monospace;
+  --fs-lg: 1.25rem;
+  --fs-md: 1rem;
+  --fs-base: 0.875rem;
+  --fs-sm: 0.8125rem;
+  --fs-xs: 0.75rem;
+
+  /* §4 Spacing (4px-Basis) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* §4 Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-full: 999px;
+
+  /* §4 Motion */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+
+  /* §2.4 Anlageklassen-Kodierung (11 Klassen, C-006) — Story S-072
+     (Kandidaten-View, erster Konsument des Klassen-Chips). Light-Theme:
+     dieselben Hues, ~1 Stufe abgedunkelt via color-mix (css/R08),
+     design.md §2.4. */
+  --ac-1: light-dark(color-mix(in oklab, #4C9AFF 70%, black), #4C9AFF);
+  --ac-2: light-dark(color-mix(in oklab, #6EE7B7 70%, black), #6EE7B7);
+  --ac-3: light-dark(color-mix(in oklab, #94A3B8 70%, black), #94A3B8);
+  --ac-4: light-dark(color-mix(in oklab, #38BDF8 70%, black), #38BDF8);
+  --ac-5: light-dark(color-mix(in oklab, #A78BFA 70%, black), #A78BFA);
+  --ac-6: light-dark(color-mix(in oklab, #F0883E 70%, black), #F0883E);
+  --ac-7: light-dark(color-mix(in oklab, #F472B6 70%, black), #F472B6);
+  --ac-8: light-dark(color-mix(in oklab, #E3B341 70%, black), #E3B341);
+  --ac-9: light-dark(color-mix(in oklab, #818CF8 70%, black), #818CF8);
+  --ac-10: light-dark(color-mix(in oklab, #2DD4BF 70%, black), #2DD4BF);
+  --ac-11: light-dark(color-mix(in oklab, #C084FC 70%, black), #C084FC);
+}

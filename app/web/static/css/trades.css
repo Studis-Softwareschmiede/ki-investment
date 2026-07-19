@@ -1,0 +1,169 @@
+/* Trade-Historie-View (docs/design.md §7.6 dichte Datentabelle, §2.3 G/V-
+   Dreifach-Kodierung) — Story S-073, AC16. Scoped auf `views/trades.html` +
+   `partials/trades-tabelle.html`; keine Magic-Farbwerte/-Abstände ausserhalb
+   der Tokens (css/R01), keine Inline-Styles in den Templates (html/R02). */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Filter-Formular (HTMX-Form → Tabellen-Partial-Swap). */
+.trades-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.filter-field label {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.filter-field input,
+.filter-field select {
+  font: inherit;
+  font-size: var(--fs-base);
+  color: var(--text-1);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  min-height: 36px;
+}
+
+.trades-filter button[type="submit"] {
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--on-solid);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.trades-filter button[type="submit"]:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Responsiver Scroll-Wrapper mit sticky erster Spalte (design.md §6). */
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.table-dense {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.table-dense thead {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+}
+
+.table-dense th,
+.table-dense td {
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table-dense th {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.table-dense th.num,
+.table-dense td.num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.table-dense tbody tr:nth-child(even) {
+  background: var(--surface-3);
+}
+
+.table-dense .col-titel {
+  position: sticky;
+  left: 0;
+  background: inherit;
+}
+
+/* §7.7-artiger Text-Pill: Farbe ist reine Verstärkung, der Wortlaut
+   ("Kauf"/"Verkauf") ist der primäre Träger (D3). */
+.badge-richtung {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+}
+
+.badge-richtung--kauf {
+  color: var(--info-fg);
+  border-color: var(--info-fg);
+}
+
+.badge-richtung--verkauf {
+  color: var(--text-2);
+  border-color: var(--border-strong);
+}
+
+/* §2.3 G/V-Dreifach-Kodierung: Vorzeichen + Richtungs-Glyph (▲/▼/▬) +
+   Farbe — Farbe ist nie der einzige Träger. */
+.slippage-wert {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.num-gain {
+  color: var(--gain);
+}
+
+.num-loss {
+  color: var(--loss);
+  font-weight: 600;
+}
+
+.num-neutral {
+  color: var(--text-2);
+}
+
+.text-3 {
+  color: var(--text-3);
+}
+
+.table-empty-state {
+  padding: var(--space-5);
+  color: var(--text-2);
+  text-align: center;
+}

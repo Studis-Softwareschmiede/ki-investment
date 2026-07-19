@@ -2,7 +2,7 @@ id: S-068
 parent: F-017
 title: Read-Endpoint System-Status (/api/system/status) — Kill-Switch/Modus/Heartbeat/Drawdown/Halluz-KPI/Gate-Ampel
   konsolidiert
-status: In Progress
+status: Done
 priority: P1
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -22,8 +22,8 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
 confidence: low
 tok_est: null
 branch: feat/S-068-api-system-status
-pr: null
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/48
 blocked_reason: null
 created_at: '2026-07-18T04:24:18Z'
-updated_at: '2026-07-18T21:55:23Z'
-done_at: null
+updated_at: '2026-07-18T22:35:49Z'
+done_at: '2026-07-18T22:35:44Z'

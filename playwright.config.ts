@@ -37,10 +37,12 @@ export default defineConfig({
   use: {
     /*
      * Base URL to use in actions like `await page.goto('/')`.
-     * Set at runtime by scripts/run-regression.sh (regression-runner AC2/AC3/AC5):
-     * resolved target ("local" -> http://localhost:<preview_port>, "url" -> the
-     * declared suite URL). Undefined when run directly via `npx playwright test`
-     * without the runner (falls back to Playwright's default: no base URL).
+     * Set at runtime by scripts/run-regression.sh (Story S-077,
+     * docs/specs/frontend-cockpit.md AC23): the script provisions an
+     * ephemeral local Postgres container + demo-seeded app instance and
+     * exports REGRESSION_BASE_URL=http://127.0.0.1:<app-port>. Undefined
+     * when run directly via `npx playwright test` without the runner
+     * (falls back to Playwright's default: no base URL).
      */
     baseURL: process.env.REGRESSION_BASE_URL,
 

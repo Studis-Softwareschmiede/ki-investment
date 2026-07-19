@@ -2,7 +2,7 @@ id: S-075
 parent: F-017
 title: HTML-View System-Status + Live-Polling — Ampel/Kill-Switch/Modus/Heartbeat/Drawdown/KPI/Gate-Ampel,
   Banner bei kritisch
-status: In Progress
+status: Done
 priority: P2
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -24,8 +24,8 @@ estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine B
 confidence: low
 tok_est: null
 branch: feat/S-075-view-system-status
-pr: null
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/57
 blocked_reason: null
 created_at: '2026-07-18T04:24:22Z'
-updated_at: '2026-07-18T23:53:11Z'
-done_at: null
+updated_at: '2026-07-19T00:42:43Z'
+done_at: '2026-07-19T00:42:39Z'
