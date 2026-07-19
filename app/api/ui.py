@@ -69,14 +69,17 @@ from app.api.queries.config import (
 )
 from app.api.queries.depot import hole_depot_uebersicht
 from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
+from app.api.queries.system_status import system_status_uebersicht
 from app.api.queries.trades import hole_trade_historie
 from app.api.queries.warteliste import hole_warteliste
+from app.api.system_status import get_gate_ergebnis_repository
 from app.api.trades import get_position_repository
 from app.api.warteliste import get_warteliste_repository
 from app.contracts.analyse_framework import KATEGORIE_NAMEN
 from app.contracts.anlageklassen_config import AnlageklasseEintrag
 from app.contracts.depot import Modus
 from app.contracts.risikomanagement import DepotstrategieKonfiguration
+from app.domain.lernschleife.ports import GateErgebnisRepository
 from app.domain.portfolio.ports import LivePriceProvider, PositionRepository
 from app.domain.scoring.ports import KandidatenRepository
 from app.domain.warteliste.ports import WartelisteRepository
@@ -86,6 +89,7 @@ from app.web.kandidaten.spinnennetz import (
     berechne_spinnennetz_geometrie,
     spinnennetz_aria_label,
 )
+from app.web.system_status_view import system_status_view_kontext
 from app.web.templates_setup import templates
 from app.web.warteliste.blockade_grund import blockade_grund_label
 
@@ -281,8 +285,39 @@ def warteliste_view(
 
 
 @router.get("/system-status", name="ui_system_status")
-def system_status_view(request: Request) -> object:
-    return _render(request, active_view="system-status")
+def system_status_view(
+    request: Request,
+    gate_ergebnis_repository: GateErgebnisRepository = Depends(get_gate_ergebnis_repository),
+) -> object:
+    """AC17: System-Status-Voll-View — dieselbe Query-Funktion wie
+    `GET /api/system/status` (AC1/AC10, P4/DRY). Der Voll-View-Kontext
+    (`app.web.system_status_view.system_status_view_kontext`) liefert u.a.
+    `status_context`, den `_render()` unverändert an die persistente
+    Shell-Statusleiste (`partials/statusleiste.html`) durchreicht — auf
+    DIESER Seite zeigt sie damit erstmals echte Werte statt des
+    Cold-Start-Platzhalters (S-064/S-074). Die Statusleisten-Verdrahtung
+    der übrigen vier Views bleibt bewusst offen (Hot-Spot-Konvention
+    S-075: hier wird NUR die system-status-Route geändert) — jede
+    View-Story kann das bei Bedarf selbst per `_render(...,
+    status_context=...)` ergänzen."""
+    status = system_status_uebersicht(gate_ergebnis_repository=gate_ergebnis_repository)
+    kontext = system_status_view_kontext(status)
+    return _render(request, active_view="system-status", **kontext)
+
+
+@router.get("/system-status/partial", name="ui_system_status_partial")
+def system_status_partial(
+    request: Request,
+    gate_ergebnis_repository: GateErgebnisRepository = Depends(get_gate_ergebnis_repository),
+) -> object:
+    """AC19: kleiner HTMX-Partial-Endpunkt fürs Live-Polling der
+    System-Status-Voll-View (Ampel/Kill-Switch/Modus/Heartbeat je
+    Modul/Drawdown/Halluzinations-KPI/Banner) — rendert dasselbe Partial
+    (`partials/system_status_daten.html`) neu, über denselben Kontextaufbau
+    wie `system_status_view` (kein zweiter Datenzusammenbau)."""
+    status = system_status_uebersicht(gate_ergebnis_repository=gate_ergebnis_repository)
+    kontext = system_status_view_kontext(status)
+    return templates.TemplateResponse(request, "partials/system_status_daten.html", kontext)
 
 
 @router.get("/konfiguration", name="ui_konfiguration")

@@ -54,8 +54,20 @@ from app.api.config import get_anlageklassen_reader, get_depotstrategie_reader
 from app.api.depot import get_live_price_provider
 from app.api.depot import get_position_repository as get_depot_position_repository
 from app.api.kandidaten import get_kandidaten_repository
+from app.api.system_status import get_gate_ergebnis_repository
 from app.api.trades import get_position_repository
 from app.main import app
+
+
+class _LeeresGateErgebnisRepository:
+    """Story S-075 macht `/ui/system-status` zu einer echten, DB-gespeisten
+    Route (AC17: dieselbe Query-Funktion wie `GET /api/system/status`) —
+    dieser Fake hält die Shell-Tests hier weiterhin DB-frei (analog
+    `tests/api/test_system_status.py`), ohne den Struktur-/A11y-Scope
+    dieser Datei (AC11/AC13) zu erweitern."""
+
+    def letztes_ergebnis(self) -> None:
+        return None
 
 
 class _LeeresFakePositionRepository:
@@ -86,6 +98,7 @@ def _db_freie_view_overrides():
     app.dependency_overrides[get_kandidaten_repository] = _LeereKandidatenRepository
     app.dependency_overrides[get_anlageklassen_reader] = lambda: lambda: []
     app.dependency_overrides[get_depotstrategie_reader] = lambda: lambda: None
+    app.dependency_overrides[get_gate_ergebnis_repository] = _LeeresGateErgebnisRepository
     yield
     app.dependency_overrides.clear()
 
