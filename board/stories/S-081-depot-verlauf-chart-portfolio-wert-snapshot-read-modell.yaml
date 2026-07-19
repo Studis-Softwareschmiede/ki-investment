@@ -2,7 +2,7 @@ id: S-081
 parent: F-017
 title: Depot-Verlauf-Chart + Portfolio-Wert-Snapshot-Read-Modell (Snapshot-Job, server-SVG-Chart,
   Depot-View-Anbindung; ausgelagert aus AC14)
-status: In Progress
+status: Done
 priority: P3
 spec: docs/specs/frontend-cockpit.md
 implements:
@@ -17,7 +17,7 @@ labels:
 - ui
 size_est: L
 dispo_est: null
-dispo_act: null
+dispo_act: '10'
 dispo_forecast: null
 estimate_note: 'Heuristik-Score 10 (n_ac=2, n_comp~6: Snapshot-Tabelle+Migration,
   Snapshot-Job, Read-Query, JSON-Route/DTO, server-SVG-Chart, Depot-View/Demo-Seed;
@@ -30,8 +30,8 @@ estimate_note: 'Heuristik-Score 10 (n_ac=2, n_comp~6: Snapshot-Tabelle+Migration
 confidence: low
 tok_est: null
 branch: feat/S-081-depot-verlauf-chart
-pr: null
+pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/61
 blocked_reason: null
 created_at: '2026-07-19T00:00:00Z'
-updated_at: '2026-07-19T06:47:25Z'
-done_at: null
+updated_at: '2026-07-19T07:45:47Z'
+done_at: '2026-07-19T07:44:28Z'
