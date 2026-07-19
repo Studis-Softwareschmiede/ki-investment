@@ -669,20 +669,43 @@ Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 > NICHT aus den beiden folgenden Tabellen — konsistent mit der NFR
 > „Aggregate sind aus Positionen + Historie reproduzierbar (kein stiller
 > Zustand ohne Herleitung)". `portfolio_snapshot`/`portfolio_weight`
-> bleiben als Schema für eine spätere **Persistenz-/Historien-Story**
-> (Zeitreihen-Trend fürs Dashboard) reserviert und sind von S-036 nicht
+> waren als Schema für eine spätere **Persistenz-/Historien-Story**
+> (Zeitreihen-Trend fürs Dashboard) reserviert und von S-036 nicht
 > migriert worden.
+>
+> **S-081-Präzisierung (`docs/specs/frontend-cockpit.md` AC32/AC33,
+> Depot-Verlauf-Chart):** `portfolio_snapshot` wird jetzt migriert — als
+> das AC32-Portfolio-Wert-Snapshot-Read-Modell (periodischer Scheduler-Job,
+> `app.scheduler.portfolio_snapshot_job`, KEIN Write-on-Read, Boundary AC2
+> bleibt unverändert für Query/UI). `portfolio_weight` (Klassen-/
+> Branchen-Split je Snapshot) bleibt weiterhin **unmigriert reserviert** —
+> AC32 nennt Cash-Quote/Klassen-Split ausdrücklich als **optional**, und der
+> Depot-Verlauf-Chart (AC33) braucht nur die Wert-Zeitreihe selbst; die
+> Split-Persistenz ist damit bewusst nicht Teil dieser Story (kein
+> Gold-Plating). `total_value_chf`/`cash_quote_pct` werden von
+> `app.scheduler.portfolio_snapshot_job.nimm_portfolio_snapshot_auf`
+> ausschliesslich über die bestehenden Lese-Ports `PositionRepository`/
+> `LivePriceProvider` berechnet: je Position gilt der aktuelle Live-Kurs
+> (`LivePriceProvider.aktueller_preis`), sonst Ø-Einstandspreis als
+> Fallback (`app.domain.portfolio.portfolio_aggregate.positionswert`-
+> Bewertungsgrundlage) — damit liefert der Job auch ohne echten
+> Live-Kurs-Adapter (aktuell `NoOpLivePriceProvider`, S-054) immer einen
+> konkreten Wert (nie `None`), der Chart bekommt also nie eine Lücke wegen
+> fehlender Live-Kurse (anders als `unrealisierter_gv_gesamt`, AC3/AC14,
+> das bei fehlendem Live-Kurs bewusst `None`/"nicht bewertbar" liefert).
 
-### `portfolio_snapshot` — Depot-Aggregat je Zeitpunkt
+### `portfolio_snapshot` — Portfolio-Wert-Snapshot je Zeitpunkt (S-081, `docs/specs/frontend-cockpit.md` AC32)
 | Feld | Typ | Constraint |
 |---|---|---|
 | id | UUID | PK |
 | snapshot_at | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| snapshot_datum | DATE | NOT NULL (S-081-Ergänzung: aus `snapshot_at` abgeleiteter Kalendertag, UTC — Grundlage der Tages-Idempotenz unten; das ursprüngliche Schema hatte keine eigene Idempotenz-Spalte, siehe BR-142) |
 | total_value_chf | NUMERIC(20,8) | NOT NULL |
 | cash_quote_pct | NUMERIC(6,3) | NOT NULL |
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (getrennte Aggregate, → BR-130) |
+| — | — | UNIQUE (mode, snapshot_datum) — genau ein Snapshot je Kalendertag/Modus (Idempotenz des periodischen Jobs, → BR-142, S-081) |
 
-### `portfolio_weight` — Gewichtung je Dimension (Branche/Klasse)
+### `portfolio_weight` — Gewichtung je Dimension (Branche/Klasse) — **weiterhin unmigriert reserviert**, s. o.
 | Feld | Typ | Constraint |
 |---|---|---|
 | snapshot_id | UUID | FK → portfolio_snapshot.id (ON DELETE CASCADE) |
@@ -809,6 +832,7 @@ Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 | warteliste_eintrag | (mode), (instrument_id), (asset_class_id), (blockiert_am) | Cockpit-Warteliste-View mode-Filter (→ BR-130), Titel-Join, FK-Index (sql/R05), Sortierung |
 | hybrid_entscheid | (status, mode, frist), (instrument_id) | offene Entscheide je Modus, nach Frist sortiert (AC29-Query, Covering-Index), Titel-Join |
 | depot_fill_dedup | PK (client_order_id), (instrument_id) | Idempotenz-Lookup (ADR-011/BR-134) + Fills je Titel |
+| portfolio_snapshot | (mode, snapshot_at), UNIQUE (mode, snapshot_datum) | AC32-Verlauf-Query (`mode=&von=&bis=` als Range auf `snapshot_at`, Covering-Index) + Job-Idempotenz (→ BR-142, S-081) |
 | portfolio_weight | (snapshot_id) | Gewichtungen je Snapshot |
 | rule_hypothesis | (asset_class_id) | Hypothesen je Anlageklasse |
 | trial_registry | (hypothesis_id), UNIQUE (hypothesis_id, variant_hash) | DSR-Zählung |
@@ -884,6 +908,7 @@ Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 | BR-139 | order.status / trade_fill | Bei Reject/Timeout wird KEIN Bestand (Position) verändert — nur ein bestätigter Fill (`filled`/`teilfill`) darf einen `trade_fill`-Eintrag und eine nachgelagerte Positions-Fortschreibung auslösen; `rejected`/`timeout` erzeugen ausschliesslich den `order`-Statuseintrag + Protokollierung (`docs/specs/ausfuehrung-paper.md` AC8, S-048) | App (`app.domain.execution.order_ausfuehrung.verarbeite_fill`) |
 | BR-140 | warteliste_eintrag | Reines Cockpit-Read-Modell OHNE Backend-Schreib-/Re-Prüf-Pfad — ausschliesslich der Demo-Seed (`app.demo.warteliste`) befüllt diese Tabelle; kein Gate-Direktaufruf, kein Import aus `app.domain.risikomanagement` in der UI-/Query-Schicht (`docs/specs/frontend-cockpit.md` AC26/AC28, Boundary AC2, S-079) | App (`app.demo.warteliste.seed_warteliste`) + `tests/architecture/test_ui_boundary.py` |
 | BR-141 | hybrid_entscheid.mode | Strukturell exklusiv `simuliert` — **kein** `echt`-Wert im Schema möglich (MVP-Live-Sperre, → BR-019, `docs/specs/frontend-cockpit.md` AC30, S-080): eine Bestätigung kann nie einen Live-Modus-Entscheid betreffen | DB-CHECK |
+| BR-142 | portfolio_snapshot | Idempotenz des periodischen Snapshot-Jobs: genau ein Snapshot je (mode, Kalendertag) — ein erneuter Lauf am selben Tag erzeugt keine Duplikat-Zeile (`docs/specs/frontend-cockpit.md` AC32, S-081) | DB-UNIQUE (mode, snapshot_datum) + App (`app.scheduler.portfolio_snapshot_job`, `IntegrityError`-Fang statt Read-then-Write-Dedupe) |
 
 ---
 
@@ -898,7 +923,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`. `analysis_result` referenziert bei Einführung zusätzlich `category_weight_version.id` und `analysis_method_version.id` (AC10 — welche Konfigurationsversion der Analyse zugrunde lag), sobald diese Story `analysis_result` anlegt.
 6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`, `warteliste_eintrag` (FK nur auf `instrument`/`asset_class`, kein Order-Pfad-Bezug — Cockpit-Read-Modell, S-079).
 6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`, `hybrid_entscheid` (FK nur auf `instrument`, S-080).
-7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
+7. **Aggregate:** `portfolio_snapshot` (S-081, AC32 — `portfolio_weight` bleibt unmigriert reserviert, s. §5).
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.
 10. **Seed-Daten (separate Migration):** Anlageklassen 1–11, 5 Kategorien, Kategoriegewichte + Methodentabellen je Klasse (aus Anlageklassen-Notiz), Datenquellen-Registry (12 Quellen), 3 Risikoprofile, 9 Zeithorizonte, 18 Strategien, 5 Default-Exit-Set-Kategorien (S-038), 2 ATR-Multiplikator-Volatilitätsklassen (S-038). Idempotent seedbar (`ON CONFLICT DO NOTHING`).

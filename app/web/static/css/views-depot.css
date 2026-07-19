@@ -180,3 +180,44 @@
   font-size: var(--fs-sm);
   margin-top: var(--space-2);
 }
+
+/* Depot-Verlauf-Chart (Story S-081, `docs/specs/frontend-cockpit.md`
+   AC32/AC33, design.md §8.2/§8.3 "Chart-Container hat --min-height (kein
+   Layout-Sprung)"). Reduced-Motion braucht hier keine eigene @media-Regel
+   (design.md css/R03) — TradingView Lightweight Charts zeichnet Daten per
+   `setData()` sofort, ohne Einzeichen-Animation, sodass es nichts
+   abzuschalten gibt (`app/web/static/js/depot-verlauf.js`-Kommentar). */
+.depot-verlauf {
+  margin-top: var(--space-5);
+}
+
+.depot-verlauf-chart {
+  --min-height: 240px;
+  min-height: var(--min-height);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.depot-verlauf-werttabelle {
+  margin-top: var(--space-3);
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.depot-verlauf-werttabelle th,
+.depot-verlauf-werttabelle td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  text-align: left;
+}
+
+.depot-verlauf-werttabelle th {
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.depot-verlauf-werttabelle td {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 /**
- * Covers (frontend-cockpit): AC23
+ * Covers (frontend-cockpit): AC23, AC33
  * @file Depot-View — Playwright-Regression gegen den Demo-Seed-Zustand
- * (Story S-077).
+ * (Story S-077, ergänzt S-081 AC33 Depot-Verlauf-Chart).
  *
  * Verankert an den stabilen `data-testid`-Anchors aus `design.md` §7
  * (Statusleiste §7.2-§7.5, Nav, KPI-Tile §7.1, Datentabelle §7.6,
@@ -13,6 +13,11 @@ import { test, expect } from '@playwright/test';
  * im per `?mode=`-Query-Parameter gewählten Modus (Default „echt“,
  * `app/api/ui.py::depot_view`) — alle Tests hier navigieren deshalb
  * explizit mit `?mode=simuliert`.
+ *
+ * AC33-Test (Review-Fund Iteration 1, Important): der Demo-Seed
+ * (`app.demo.depot_verlauf.seed_depot_verlauf`, mode=simuliert) füllt 60
+ * Tage Verlaufshistorie — `?mode=simuliert` zeigt damit garantiert den
+ * gefüllten Chart-Container statt des Empty-States (< 2 Snapshots).
  */
 
 test.describe('Cockpit — Depot-View (AC14/AC19, Demo-Seed)', () => {
@@ -51,5 +56,30 @@ test.describe('Cockpit — Depot-View (AC14/AC19, Demo-Seed)', () => {
 
     await expect(page.getByTestId('depot-empty')).toBeVisible();
     await expect(page.getByTestId('table-depot')).toHaveCount(0);
+  });
+
+  test('zeichnet den Depot-Verlauf-Chart tatsächlich (Canvas gefüllt) + zeigt die Werte-Zusammenfassung (AC33)', async ({
+    page,
+  }) => {
+    await page.goto('/ui/depot?mode=simuliert');
+
+    const chart = page.getByTestId('depot-verlauf-chart');
+    await expect(chart).toBeVisible();
+
+    // TradingView Lightweight Charts rendert seine Serien auf <canvas>
+    // Elementen innerhalb des Containers — dieser Assert fängt genau die
+    // v4/v5-API-Fehlerklasse (z. B. `addSeries`-Signaturwechsel), die rein
+    // statisch/im Unit-Test nicht auffällt: bricht `depot-verlauf.js` beim
+    // Chart-Aufbau, bleibt der Container leer (0 Canvas-Elemente).
+    await expect(chart.locator('canvas').first()).toBeVisible();
+    const canvasCount = await chart.locator('canvas').count();
+    expect(canvasCount).toBeGreaterThan(0);
+
+    const werttabelle = page.getByTestId('depot-verlauf-werttabelle');
+    await expect(werttabelle).toBeVisible();
+    await expect(page.getByTestId('depot-verlauf-anfangswert')).toBeVisible();
+    await expect(page.getByTestId('depot-verlauf-endwert')).toBeVisible();
+
+    await expect(page.getByTestId('depot-verlauf-empty')).toHaveCount(0);
   });
 });

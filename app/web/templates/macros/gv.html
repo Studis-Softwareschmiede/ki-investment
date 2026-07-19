@@ -1,0 +1,21 @@
+{# Gemeinsame G/V-Kodierungs-Macro (design.md §2.3 "Dreifach-Kodierung":
+   Vorzeichen + Glyph + Farbe, nie Farbe allein → D3). Extrahiert aus
+   `partials/depot_daten.html` (Story S-071, AC14) nach `macros/gv.html`
+   (Story S-081, AC33), damit `views/depot.html` (Verlauf-Delta-Zelle,
+   AC33) dieselbe Macro importieren kann, OHNE `partials/depot_daten.html`
+   als Ganzes zu importieren (dessen Top-Level-Markup erwartet den
+   `depot`/`mode`-Kontext und würde bei einem reinen `{% from %}`-Import
+   ohne `with context` auf undefinierte Variablen treffen). Nur diese
+   Datei enthält reine Macro-Definitionen, kein kontextabhängiges
+   Top-Level-Markup — sicher importierbar ohne `with context`. #}
+{% macro gv(value, testid) %}
+{%- if value is none -%}
+<span class="gv gv--unbekannt" data-testid="{{ testid }}" data-gv="unbekannt">—</span>
+{%- elif value > 0 -%}
+<span class="gv gv--positiv" data-testid="{{ testid }}" data-gv="positiv">▲ +{{ "%.2f"|format(value) }}</span>
+{%- elif value < 0 -%}
+<span class="gv gv--negativ" data-testid="{{ testid }}" data-gv="negativ">▼ −{{ "%.2f"|format(-value) }}</span>
+{%- else -%}
+<span class="gv gv--neutral" data-testid="{{ testid }}" data-gv="neutral">▬ ±{{ "%.2f"|format(value) }}</span>
+{%- endif -%}
+{% endmacro %}
