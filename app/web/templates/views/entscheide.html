@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Offene Entscheide — Betriebs-Cockpit{% endblock %}
+{% block view_title %}Offene Entscheide{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/entscheide.css') }}">
+{% endblock %}
+{% block content %}
+{% include "partials/entscheide-liste.html" %}
+{% endblock %}

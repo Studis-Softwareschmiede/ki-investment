@@ -13,6 +13,7 @@ from app.api.config import router as config_router
 from app.api.control import router as control_router
 from app.api.dashboard import router as dashboard_router
 from app.api.depot import router as depot_router
+from app.api.entscheide import router as entscheide_router
 from app.api.kandidaten import router as kandidaten_router
 from app.api.system_status import router as system_status_router
 from app.api.trades import router as trades_router
@@ -33,6 +34,7 @@ app.include_router(system_status_router)
 app.include_router(kandidaten_router)
 app.include_router(control_router)
 app.include_router(warteliste_router)
+app.include_router(entscheide_router)
 # --- end cockpit routers ---
 
 

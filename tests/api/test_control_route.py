@@ -1,17 +1,19 @@
 """Tests für die Control-Plane-Endpunkte `app/api/control.py` (Story S-074,
 `docs/specs/frontend-cockpit.md` AC20/AC21; Story S-076 ergänzt das
-`hat_offene_positionen`-Feld im Toggle-Response-Body, AC18).
+`hat_offene_positionen`-Feld im Toggle-Response-Body, AC18; Story S-080
+ergänzt die Entscheid-POSTs, AC30/AC31).
 
-Covers (frontend-cockpit): AC20, AC21, AC18 (nur das Response-Feld
-`hat_offene_positionen` am bestehenden Toggle-Endpunkt)
+Covers (frontend-cockpit): AC20, AC21, AC18 (Response-Feld
+`hat_offene_positionen`), AC30, AC31
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Response-Body für `POST /api/control/anlageklassen/
-{id}/toggle`, `POST /api/control/modus` und `POST /api/control/
-kill-switch/ausloesen`/`freigeben` ab (Status-Code + Body-Shape). ALLE
-Routen brauchen seit dem Review-Fix (Iteration 2, AC20-HTMX-Partial) eine
-DB-Session (`GateErgebnisRepository` für das Statusleisten-Rendering) —
-jeder Test nutzt deshalb eine echte In-Memory-SQLite-Session (via
+{id}/toggle`, `POST /api/control/modus`, `POST /api/control/
+kill-switch/ausloesen`/`freigeben` und (S-080) `POST /api/control/
+entscheide/{id}/bestaetigen`/`.../ablehnen` ab (Status-Code + Body-Shape).
+ALLE Routen brauchen seit dem Review-Fix (Iteration 2, AC20-HTMX-Partial)
+eine DB-Session (`GateErgebnisRepository` für das Statusleisten-Rendering)
+— jeder Test nutzt deshalb eine echte In-Memory-SQLite-Session (via
 `app.dependency_overrides[get_session]`, analog `tests/db/
 test_asset_classes.py`), auch die zuvor DB-freien Modus-/Kill-Switch-
 Routen.
@@ -23,9 +25,17 @@ Freigeben (→ BR-021) inkl. 422 bei leerem Grund; **Review-Fix Iteration 2
 (AC20):** JEDE der drei Aktionen liefert bei `HX-Request: true` UND
 Erfolg das gerenderte Status-Partial (HTML, `data-testid`-Anker aus
 `partials/statusleiste.html`) statt JSON — ohne den Header bzw. bei
-einem Fehlerfall (404) bleibt es JSON."""
+einem Fehlerfall (404) bleibt es JSON. **S-080 (AC30/AC31):** Bestätigen/
+Ablehnen-Happy-Path (inkl. `entschieden_am` gesetzt) + 409 (bereits
+entschieden) + 404 (unbekannte ID, ungültige UUID) + 404 bei inaktivem
+Feature-Flag (AC31, auch für eine sonst gültige ID) + HTMX-Partial-
+Rückgabe (`partials/entscheide-liste.html`-Anker) vs. JSON ohne Header."""
 
 from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,11 +43,22 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.config import Settings, get_settings
 from app.core import kill_switch, modus_override
 from app.db.base import Base
-from app.db.models import AssetClass
+from app.db.models import AssetClass, HybridEntscheid, Instrument
 from app.db.session import get_session
 from app.main import app
+
+#: SQLite-Falle: eine rein numerische Hex-Zeichenkette (z.B.
+#: "11111111-1111-...") bekommt unter SQLite NUMERIC-Spalten-Affinität
+#: zugewiesen und wird beim Lesen stillschweigend zu einem Float
+#: konvertiert (`AttributeError: 'float' object has no attribute
+#: 'replace'`) — deshalb hier `uuid.uuid4()` statt eines lesbaren
+#: Literals (Konvention von `tests/adapters/repositories/
+#: test_position_repository.py`).
+_TITEL_ID = str(uuid.uuid4())
+_ENTSCHEID_ID = str(uuid.uuid4())
 
 
 def _session_mit_anlageklassen(*eintraege: AssetClass) -> Session:
@@ -59,10 +80,52 @@ def _session_mit_anlageklassen(*eintraege: AssetClass) -> Session:
     return session
 
 
-def _client(session: Session | None = None) -> TestClient:
+def _client(
+    session: Session | None = None, *, hybrid_bestaetigung_aktiv: bool = True
+) -> TestClient:
     if session is not None:
         app.dependency_overrides[get_session] = lambda: session
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        hybrid_bestaetigung_aktiv=hybrid_bestaetigung_aktiv
+    )
     return TestClient(app)
+
+
+def _session_mit_offenem_entscheid() -> Session:
+    """S-080 (AC30): eine offene Hybrid-Entscheid-Zeile + zugehöriges
+    `Instrument` — dasselbe In-Memory-SQLite-Muster wie
+    `_session_mit_anlageklassen`."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add(
+        Instrument(
+            id=uuid.UUID(_TITEL_ID),
+            symbol="ROG",
+            name="Roche Holding AG",
+            asset_class_id=1,
+            currency="CHF",
+        )
+    )
+    session.add(
+        HybridEntscheid(
+            id=uuid.UUID(_ENTSCHEID_ID),
+            instrument_id=uuid.UUID(_TITEL_ID),
+            richtung="kauf",
+            groesse=Decimal("5"),
+            vorgeschlagene_order="Market-Buy 5 Stk. Roche Holding AG",
+            frist=datetime(2026, 7, 22, 16, 0, tzinfo=UTC),
+            begruendung="Gesamtscore 8.5 (KAUF-Schwelle).",
+            status="offen",
+            mode="simuliert",
+        )
+    )
+    session.commit()
+    return session
 
 
 @pytest.fixture(autouse=True)
@@ -325,3 +388,105 @@ def test_kill_switch_freigeben_htmx_liefert_partial_mit_normal_zustand() -> None
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     assert 'data-betriebszustand="normal"' in resp.text
+
+
+def test_entscheid_bestaetigen_setzt_status_und_liefert_json() -> None:
+    """@trace frontend-cockpit#AC30 — Happy-Path: `offen` → `bestaetigt`,
+    `entschieden_am` gesetzt, JSON ohne `HX-Request`-Header."""
+    client = _client(_session_mit_offenem_entscheid())
+
+    resp = client.post(f"/api/control/entscheide/{_ENTSCHEID_ID}/bestaetigen")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["entscheid_id"] == _ENTSCHEID_ID
+    assert body["status"] == "bestaetigt"
+    assert body["entschieden_am"] is not None
+
+
+def test_entscheid_ablehnen_setzt_status_abgelehnt() -> None:
+    """@trace frontend-cockpit#AC30 — Happy-Path Ablehnen."""
+    client = _client(_session_mit_offenem_entscheid())
+
+    resp = client.post(f"/api/control/entscheide/{_ENTSCHEID_ID}/ablehnen")
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "abgelehnt"
+
+
+def test_entscheid_bereits_entschieden_liefert_409() -> None:
+    """@trace frontend-cockpit#AC30 — ein zweiter Bestätigen-/Ablehnen-
+    Versuch auf derselben, bereits entschiedenen Zeile liefert 409
+    (Zustandsmaschinen-Verstoss, analog der Modus-409-Konvention)."""
+    client = _client(_session_mit_offenem_entscheid())
+    client.post(f"/api/control/entscheide/{_ENTSCHEID_ID}/bestaetigen")
+
+    resp = client.post(f"/api/control/entscheide/{_ENTSCHEID_ID}/ablehnen")
+
+    assert resp.status_code == 409
+
+
+def test_entscheid_unbekannte_id_liefert_404() -> None:
+    """@trace frontend-cockpit#AC30 — eine nicht existierende (aber
+    gültige) UUID liefert 404, keinen 500."""
+    client = _client(_session_mit_offenem_entscheid())
+
+    resp = client.post("/api/control/entscheide/99999999-9999-9999-9999-999999999999/bestaetigen")
+
+    assert resp.status_code == 404
+
+
+def test_entscheid_ungueltige_uuid_liefert_404() -> None:
+    """@trace frontend-cockpit#AC30 — eine syntaktisch ungültige
+    `entscheid_id` liefert 404, keinen 500/422-Crash."""
+    client = _client(_session_mit_offenem_entscheid())
+
+    resp = client.post("/api/control/entscheide/nicht-eine-uuid/bestaetigen")
+
+    assert resp.status_code == 404
+
+
+def test_entscheid_bestaetigen_bei_inaktivem_feature_flag_liefert_404() -> None:
+    """@trace frontend-cockpit#AC31 — ist der Hybrid-Bestätigungs-Flow
+    deaktiviert (Default), liefert der POST 404 — auch für eine sonst
+    gültige, offene `entscheid_id` ("Control-POSTs sind inaktiv/
+    gesperrt")."""
+    client = _client(_session_mit_offenem_entscheid(), hybrid_bestaetigung_aktiv=False)
+
+    resp = client.post(f"/api/control/entscheide/{_ENTSCHEID_ID}/bestaetigen")
+
+    assert resp.status_code == 404
+
+
+def test_entscheid_bestaetigen_htmx_liefert_gerendertes_entscheide_partial() -> None:
+    """@trace frontend-cockpit#AC30 — bei `HX-Request: true` UND Erfolg
+    liefert der POST das aktualisierte Offene-Entscheide-Partial (HTML,
+    `entscheide-liste`-Anker) statt JSON; der bestätigte Entscheid
+    verschwindet aus der (nur `status="offen"` zeigenden) Liste."""
+    client = _client(_session_mit_offenem_entscheid())
+
+    resp = client.post(
+        f"/api/control/entscheide/{_ENTSCHEID_ID}/bestaetigen",
+        headers={"HX-Request": "true"},
+    )
+
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert 'data-testid="entscheide-liste"' in resp.text
+    assert 'data-testid="entscheide-empty"' in resp.text
+    assert _ENTSCHEID_ID not in resp.text
+
+
+def test_entscheid_409_bleibt_json_auch_mit_hx_header() -> None:
+    """@trace frontend-cockpit#AC30 — die 409-Fehlerantwort (bereits
+    entschieden) bleibt auch bei `HX-Request: true` JSON, analog der
+    bestehenden 404/409-Konvention der übrigen Control-Routen."""
+    client = _client(_session_mit_offenem_entscheid())
+    client.post(f"/api/control/entscheide/{_ENTSCHEID_ID}/bestaetigen")
+
+    resp = client.post(
+        f"/api/control/entscheide/{_ENTSCHEID_ID}/ablehnen", headers={"HX-Request": "true"}
+    )
+
+    assert resp.status_code == 409
+    assert "application/json" in resp.headers["content-type"]

@@ -62,12 +62,14 @@ from fastapi import APIRouter, Depends, Request
 from app.api.config import get_anlageklassen_reader, get_depotstrategie_reader
 from app.api.depot import get_live_price_provider
 from app.api.depot import get_position_repository as get_depot_position_repository
+from app.api.entscheide import get_hybrid_entscheidung_repository
 from app.api.kandidaten import get_kandidaten_repository
 from app.api.queries.config import (
     lade_anlageklassen_konfiguration,
     lade_depotstrategie_konfiguration,
 )
 from app.api.queries.depot import hole_depot_uebersicht
+from app.api.queries.entscheide import offene_entscheide_uebersicht
 from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
 from app.api.queries.system_status import system_status_uebersicht
 from app.api.queries.trades import hole_trade_historie
@@ -75,10 +77,12 @@ from app.api.queries.warteliste import hole_warteliste
 from app.api.system_status import get_gate_ergebnis_repository
 from app.api.trades import get_position_repository
 from app.api.warteliste import get_warteliste_repository
+from app.config import Settings, get_settings
 from app.contracts.analyse_framework import KATEGORIE_NAMEN
 from app.contracts.anlageklassen_config import AnlageklasseEintrag
 from app.contracts.depot import Modus
 from app.contracts.risikomanagement import DepotstrategieKonfiguration
+from app.domain.hybrid_entscheidung.ports import HybridEntscheidungRepository
 from app.domain.lernschleife.ports import GateErgebnisRepository
 from app.domain.portfolio.ports import LivePriceProvider, PositionRepository
 from app.domain.scoring.ports import KandidatenRepository
@@ -342,3 +346,24 @@ def konfiguration_view(
         depotstrategie=depotstrategie,
         anlageklasse_kuerzel=anlageklasse_kuerzel,
     )
+
+
+@router.get("/entscheide", name="ui_entscheide")
+def entscheide_view(
+    request: Request,
+    repository: HybridEntscheidungRepository = Depends(get_hybrid_entscheidung_repository),
+    settings: Settings = Depends(get_settings),
+) -> object:
+    """AC30: Offene-Entscheide-View — Karten/Tabelle der offenen
+    Hybrid-Entscheide über dieselbe Query-Funktion wie `GET /api/entscheide
+    /offen` (AC1, kein zweiter Datenzusammenbau). AC31: `feature_aktiv`
+    steuert den definierten "autonom — keine offenen Entscheide"-Zustand
+    im Template; die DI-Factory stammt bewusst aus `app.api.entscheide`
+    statt hier ein eigenes `sqlalchemy`/`app.db.session`-Import anzulegen
+    (Boundary AC2, `tests/architecture/test_ui_boundary.py`). Nicht Teil
+    der fünf Kern-Views (AC11, design.md §5) — eigenständig unter `/ui/
+    entscheide` erreichbar, kein Eintrag in `KERN_VIEWS`."""
+    entscheide = offene_entscheide_uebersicht(
+        repository, feature_aktiv=settings.hybrid_bestaetigung_aktiv
+    )
+    return _render(request, active_view="entscheide", entscheide=entscheide)
