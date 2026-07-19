@@ -17,7 +17,7 @@ labels:
 - betrieb
 size_est: M
 dispo_est: null
-dispo_act: null
+dispo_act: '6.5'
 dispo_forecast: null
 estimate_note: 'Cold-Start: baseline.json fehlt (dispo_est/tok_est=null, keine Baseline-Tokens);
   estimator (L/XL) in dieser Umgebung nicht dispatchbar -> Heuristik-Groesse.'
@@ -27,5 +27,6 @@ branch: feat/S-074-control-endpoints
 pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/54
 blocked_reason: null
 created_at: '2026-07-18T04:24:21Z'
-updated_at: '2026-07-18T23:51:47Z'
+updated_at: '2026-07-19T01:37:58Z'
 done_at: '2026-07-18T23:51:42Z'
+tok: '164955466'

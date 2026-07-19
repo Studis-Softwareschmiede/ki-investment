@@ -18,7 +18,7 @@ labels:
 - betrieb
 size_est: L
 dispo_est: null
-dispo_act: null
+dispo_act: '6.5'
 dispo_forecast: null
 estimate_note: 'Heuristik-Groesse L (3 AC + ~5 Komponenten inkl. Read-Modell-Persistenz
   + ui/db-Label). Cold-Start: baseline.json fehlt (dispo_est/tok_est=null); estimator
@@ -31,5 +31,6 @@ branch: feat/S-079-warteliste
 pr: https://github.com/Studis-Softwareschmiede/ki-investment/pull/56
 blocked_reason: null
 created_at: '2026-07-18T06:20:00Z'
-updated_at: '2026-07-19T00:33:57Z'
+updated_at: '2026-07-19T01:38:16Z'
 done_at: '2026-07-19T00:33:55Z'
+tok: '75726545'
