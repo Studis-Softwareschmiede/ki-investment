@@ -2081,3 +2081,82 @@ class WartelisteEintrag(Base):
             f"WartelisteEintrag(id={self.id!r}, instrument_id={self.instrument_id!r}, "
             f"blockade_grund={self.blockade_grund!r})"
         )
+
+
+class HybridEntscheid(Base):
+    """Offener, bestätigungspflichtiger Hybrid-Entscheid (data-model.md §4
+    `hybrid_entscheid`, C-016; Spec `docs/specs/frontend-cockpit.md`
+    AC29/AC30/AC31, Story S-080).
+
+    Kein bestehendes Modul legt heute eine "wartet auf Bestätigung"-Zeile
+    an (der Buy-/Sell-Pfad, S-028/S-034, gibt ein reines In-Prozess-Signal
+    weiter, keine Entscheidungs-Queue; die S-056-Warteliste ist ein reiner
+    Struktur-Flag ohne eigene Persistenz) — diese Tabelle ist die
+    schlanke, HTTP-abfragbare Persistenz für AC29 (Read-Modell) UND das
+    Ziel der Control-Plane-Schreibpfade `app.db.hybrid_entscheide
+    .entscheide` (AC30). Ausschliesslich vom Demo-Seed (`app.demo
+    .entscheide`, feature-gated AC31) order-frei befüllt — kein
+    Order-/Sizing-/Risiko-/Execution-Aufruf irgendwo in diesem Pfad
+    (Nicht-Ziel "Keine Order-Anhalte-Mechanik").
+
+    `vorgeschlagene_order` ist bewusst ein Klartext-Feld (kein FK auf
+    `order`/`position`) — AC29 verlangt nur "vorgeschlagene Order" als
+    Anzeige-Text, kein reales Order-Objekt (Order-Anhalte-Mechanik ist
+    laut Spec-Nicht-Ziel post-MVP-Backend-Scope).
+
+    `mode CHECK IN ('simuliert')` — **AC30/BR-019-Härtung**: anders als
+    die übrigen `mode`-Spalten (`echt`/`simuliert`, BR-130) lässt diese
+    Tabelle strukturell GAR KEINEN `'echt'`-Wert zu (→ BR-141). Die
+    MVP-Live-Sperre ("eine Bestätigung löst im MVP ausschliesslich
+    simulierte Orders aus", AC30) gilt damit bereits auf Schema-Ebene,
+    nicht erst als Laufzeit-Prüfung."""
+
+    __tablename__ = "hybrid_entscheid"
+    __table_args__ = (
+        # (status, mode, frist) statt nur (status, mode) — deckt AC29-Query
+        # (`SqlAlchemyHybridEntscheidungRepository.offene_entscheide`:
+        # `WHERE status='offen' AND mode='simuliert' ORDER BY frist ASC`)
+        # als vollständigen Covering-Index ab, DBA-Review Iteration 2
+        # (Suggestion, vor Migrations-Landung kostenlos nachgezogen).
+        Index("ix_hybrid_entscheid_status_mode_frist", "status", "mode", "frist"),
+        Index("ix_hybrid_entscheid_instrument_id", "instrument_id"),
+        CheckConstraint("richtung IN ('kauf', 'verkauf')", name="ck_hybrid_entscheid_richtung"),
+        CheckConstraint(
+            "status IN ('offen', 'bestaetigt', 'abgelehnt')", name="ck_hybrid_entscheid_status"
+        ),
+        CheckConstraint("mode IN ('simuliert')", name="ck_hybrid_entscheid_mode"),
+        # analog position.menge (ck_position_menge_non_negative-Konvention,
+        # hier strikt positiv statt >= 0 — DBA-Review Iteration 2, Suggestion).
+        CheckConstraint("groesse > 0", name="ck_hybrid_entscheid_groesse_positive"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    instrument_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("instrument.id"), nullable=False
+    )
+    richtung: Mapped[str] = mapped_column(String, nullable=False)
+    groesse: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    vorgeschlagene_order: Mapped[str] = mapped_column(String, nullable=False)
+    frist: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    begruendung: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="offen", server_default=sa.text("'offen'")
+    )
+    mode: Mapped[str] = mapped_column(
+        String, nullable=False, default="simuliert", server_default=sa.text("'simuliert'")
+    )
+    erstellt_am: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    entschieden_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"HybridEntscheid(instrument_id={self.instrument_id!r}, "
+            f"richtung={self.richtung!r}, status={self.status!r})"
+        )

@@ -45,7 +45,26 @@ Zustandsmaschinen-Verstoss); unbekannte `asset_class_id` beim Toggle
 → 404.
 
 **Keine Auth (MVP, §13.7):** local-only — aber ausschliesslich POSTs
-(keine GET-mit-Nebenwirkung, kein CSRF-anfälliger Lesepfad)."""
+(keine GET-mit-Nebenwirkung, kein CSRF-anfälliger Lesepfad).
+
+**S-080 (AC30/AC31, additiv):** `POST /api/control/entscheide/{id}/
+bestaetigen`/`.../ablehnen` — Hybrid-Entscheid bestätigen/ablehnen, das
+zweite Control-Boundary-Aktionspaar dieses Moduls neben Toggle/Modus/
+Kill-Switch. Schreibt ausschliesslich über `app.db.hybrid_entscheide
+.entscheide` (Konfig-/Entscheid-Zustandspfad, analog `app.db
+.asset_classes.setze_toggle`) — **keine** Order/Sizing/Risiko/Execution-
+Auslösung (Nicht-Ziel "Keine Order-Anhalte-Mechanik", die MVP-Live-Sperre
+BR-019/AC21 bleibt unangetastet: `hybrid_entscheid.mode` lässt laut
+DB-CHECK strukturell nie `'echt'` zu, → BR-141). **AC31 Feature-Gate:**
+ist `Settings.hybrid_bestaetigung_aktiv` aus (Default), liefern beide
+Routen 404 — der Flow ist dann vollständig inaktiv/gesperrt, nicht nur
+die Anzeige. Ein bereits entschiedener Entscheid (`status != "offen"`)
+→ 409 (`EntscheidBereitsEntschiedenError`, Zustandsmaschinen-Verstoss,
+analog `LiveModusGesperrtError`). Bei Erfolg UND `HX-Request: true`
+liefert die Route das aktualisierte Offene-Entscheide-Partial (HTML,
+`partials/entscheide-liste.html`) zurück, sonst den JSON-`response_model`
+-Body (`EntscheidStatusResponse`) — identisches HTMX-Partial-Muster wie
+die Statusleisten-Routen oben."""
 
 from __future__ import annotations
 
@@ -56,7 +75,12 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from sqlalchemy.orm import Session
 
 from app.adapters.repositories.gate_result_repository import SqlAlchemyGateErgebnisRepository
+from app.adapters.repositories.hybrid_entscheid_repository import (
+    SqlAlchemyHybridEntscheidungRepository,
+)
+from app.api.queries.entscheide import offene_entscheide_uebersicht
 from app.api.queries.system_status import system_status_uebersicht
+from app.config import Settings, get_settings
 from app.contracts.anlageklassen_config import AnlageklasseEintrag
 from app.contracts.betriebssicherung import KillSwitchAusloeser, KillSwitchStatus
 from app.contracts.control import (
@@ -65,8 +89,10 @@ from app.contracts.control import (
     ModusKonfigurationResponse,
     ModusUeberschreibungAnfrage,
 )
+from app.contracts.entscheide import EntscheidStatusResponse
 from app.core import kill_switch, modus_override
 from app.db.asset_classes import setze_toggle
+from app.db.hybrid_entscheide import EntscheidBereitsEntschiedenError, entscheide
 from app.db.session import get_session
 from app.domain.execution.order_ausfuehrung import LiveModusGesperrtError
 from app.web.status_partial import status_partial_kontext
@@ -181,3 +207,80 @@ def kill_switch_freigeben(request: Request, session: Session = Depends(get_sessi
     if _ist_htmx_aufruf(request):
         return _statusleiste_partial(request, session)
     return ergebnis
+
+
+def _entscheide_partial(request: Request, session: Session, settings: Settings) -> Any:
+    """AC30: rendert `partials/entscheide-liste.html` mit frischen Daten
+    (P4/DRY, dieselbe Query-Funktion wie `GET /api/entscheide/offen`) —
+    analog `_statusleiste_partial` oben."""
+    repository = SqlAlchemyHybridEntscheidungRepository(session)
+    daten = offene_entscheide_uebersicht(
+        repository, feature_aktiv=settings.hybrid_bestaetigung_aktiv
+    )
+    return templates.TemplateResponse(
+        request, "partials/entscheide-liste.html", {"entscheide": daten}
+    )
+
+
+def _entscheid_status_aendern(
+    request: Request,
+    entscheid_id: str,
+    session: Session,
+    settings: Settings,
+    *,
+    neuer_status: str,
+) -> Any:
+    """AC30/AC31: gemeinsame Implementierung von "bestätigen"/"ablehnen" —
+    beide POSTs unterscheiden sich nur im Ziel-Status. AC31 Feature-Gate
+    (aus) → 404, bevor überhaupt ein `entscheid_id`-Lookup versucht wird
+    (der Flow ist dann vollständig inaktiv, nicht nur read-only leer)."""
+    if not settings.hybrid_bestaetigung_aktiv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Hybrid-Bestätigungs-Flow ist deaktiviert (AC31).",
+        )
+    try:
+        zeile = entscheide(session, entscheid_id, neuer_status=neuer_status)
+    except EntscheidBereitsEntschiedenError as fehler:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(fehler)) from fehler
+    if zeile is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Entscheid {entscheid_id} existiert nicht oder ist nicht offen.",
+        )
+    if _ist_htmx_aufruf(request):
+        return _entscheide_partial(request, session, settings)
+    return EntscheidStatusResponse(
+        entscheid_id=str(zeile.id), status=zeile.status, entschieden_am=zeile.entschieden_am
+    )
+
+
+@router.post("/entscheide/{entscheid_id}/bestaetigen", response_model=EntscheidStatusResponse)
+def entscheid_bestaetigen(
+    request: Request,
+    entscheid_id: str,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> Any:
+    """AC30: bestätigt einen offenen Hybrid-Entscheid (→ `status
+    ="bestaetigt"`) — löst KEINE Order aus (Nicht-Ziel "Keine
+    Order-Anhalte-Mechanik"); die Bestätigungspflicht selbst (natives
+    modales `<dialog>`) ist Client-seitig VOR diesem POST verortet
+    (§7.11 design.md, analog `kill_switch_ausloesen` oben)."""
+    return _entscheid_status_aendern(
+        request, entscheid_id, session, settings, neuer_status="bestaetigt"
+    )
+
+
+@router.post("/entscheide/{entscheid_id}/ablehnen", response_model=EntscheidStatusResponse)
+def entscheid_ablehnen(
+    request: Request,
+    entscheid_id: str,
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> Any:
+    """AC30: lehnt einen offenen Hybrid-Entscheid ab (→ `status
+    ="abgelehnt"`) — der Vorschlag entfällt, keine Order wird ausgelöst."""
+    return _entscheid_status_aendern(
+        request, entscheid_id, session, settings, neuer_status="abgelehnt"
+    )

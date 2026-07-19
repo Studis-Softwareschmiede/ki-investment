@@ -26,7 +26,13 @@ App-Start, nur im Demo-/Preview-Deployment).
 **Reihenfolge (Fremdschlüssel-Abhängigkeiten):** Instrumente zuerst
 (`app.demo.instrumente`, von Depot, Kandidaten UND Warteliste referenziert
 — S-079/AC28), danach Marktdaten/Depot/Kandidaten/Gate-Ampel/Warteliste
-unabhängig voneinander."""
+unabhängig voneinander.
+
+**S-080 (AC31, additiv):** `app.demo.entscheide.seed_entscheide` hängt
+sich unbedingt in diese Reihenfolge (nach Instrumente, unabhängig von den
+übrigen Schritten) — die Feature-Gate-Prüfung (`HYBRID_BESTAETIGUNG
+_AKTIV`) liegt bewusst INNERHALB des Moduls (No-Op, wenn aus), damit
+dieser Hook ein unbedingter Ein-Zeiler bleibt (Hot-Spot-Minimalität)."""
 
 from __future__ import annotations
 
@@ -37,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_engine
 from app.demo.depot import seed_depot
+from app.demo.entscheide import seed_entscheide
 from app.demo.instrumente import seed_instrumente
 from app.demo.kandidaten import seed_kandidaten
 from app.demo.lernschleife import seed_gate_ampel
@@ -66,6 +73,7 @@ def seed_demo_data(session: Session) -> None:
     seed_kandidaten(session)
     seed_gate_ampel(session)
     seed_warteliste(session)
+    seed_entscheide(session)
 
 
 def run() -> None:

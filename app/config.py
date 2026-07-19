@@ -154,7 +154,14 @@ Provisorisch gewählt: **40 Trades** (Mitte 30–50),
 `BEWAEHRUNGSREGEL_MINDEST_TRADES`/`BEWAEHRUNGSREGEL_MINDEST_TAGE`/
 `BEWAEHRUNGSREGEL_LIVE_START_KAPITALANTEIL` überschreibbar (Muster von
 `ERWARTETE_SLIPPAGE_PCT_DEFAULT` folgend).
-"""
+
+Aus S-080 (AC31, `docs/specs/frontend-cockpit.md`) kommt
+`hybrid_bestaetigung_aktiv` hinzu: der Feature-Gate-Schalter des
+Hybrid-Bestätigungs-Flows (AC29/AC30, offene-Entscheide-Read-Modell +
+Bestätigen/Ablehnen über die Control-Plane) — Default **aus** (AC31
+"post-MVP-Default aus", C-016 "Bestätigungspflicht-Modus ist späteres
+Feature des hybriden Betriebs"), ohne Codeänderung über
+`HYBRID_BESTAETIGUNG_AKTIV` aktivierbar."""
 
 from __future__ import annotations
 
@@ -373,6 +380,14 @@ class Settings(BaseSettings):
     #: Provisorischer Default 0.15 (15 %, Mitte), ohne Codeänderung über
     #: `BEWAEHRUNGSREGEL_LIVE_START_KAPITALANTEIL` überschreibbar.
     bewaehrungsregel_live_start_kapitalanteil: float = Field(default=0.15, gt=0, le=1)
+
+    #: Hybrid-Bestätigungs-Flow-Feature-Gate (AC31, S-080): Default AUS
+    #: (post-MVP-Default aus, C-016) — ohne Codeänderung über
+    #: `HYBRID_BESTAETIGUNG_AKTIV` aktivierbar. Inaktiv: `GET /api/
+    #: entscheide/offen` liefert immer eine leere Liste, die Control-POSTs
+    #: `POST /api/control/entscheide/{id}/bestaetigen`/`.../ablehnen`
+    #: liefern 404 (AC31 "Control-POSTs sind inaktiv/gesperrt").
+    hybrid_bestaetigung_aktiv: bool = Field(default=False)
 
 
 @lru_cache

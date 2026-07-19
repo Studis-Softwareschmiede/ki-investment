@@ -636,6 +636,8 @@ bewusst **nicht** Teil dieser Story (Spec-Nicht-Ziel `frontend-cockpit.md`:
 "Im MVP speist ausschliesslich der Demo-Seed das Read-Modell", AC28). Diese
 Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 (Fixture-Insert, analog `app.demo.kandidaten`) füllt sie.
+### `hybrid_entscheid` — offener, bestätigungspflichtiger Hybrid-Entscheid (C-016; `docs/specs/frontend-cockpit.md` AC29/AC30/AC31, S-080)
+> Kein bestehendes Modul legt heute eine "wartet auf Bestätigung"-Zeile an — der Buy-/Sell-Pfad (S-028/S-034) gibt ein reines In-Prozess-Signal weiter, keine Entscheidungs-Queue; die S-056-Warteliste (`risk_check_log`/`GateEntscheid.warteliste`) ist ein reiner Struktur-Flag ohne eigene Persistenz. Diese Tabelle ist die schlanke, HTTP-abfragbare Persistenz für das AC29-Read-Modell UND das Ziel des AC30-Control-Plane-Schreibpfads (`app.db.hybrid_entscheide.entscheide`, `offen` → `bestaetigt`/`abgelehnt`) — ausschliesslich vom feature-gateten Demo-Seed (AC31) order-frei befüllt. `vorgeschlagene_order` ist bewusst Klartext (kein FK auf `order`/`position` — die Order-Anhalte-Mechanik selbst ist laut Spec-Nicht-Ziel post-MVP-Backend-Scope).
 
 | Feld | Typ | Constraint |
 |---|---|---|
@@ -646,6 +648,15 @@ Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 | blockade_grund | TEXT | NOT NULL, CHECK ∈ {klumpenrisiko, korrelation, drawdown, kelly_cap} (Prüfmatrix-Dimension, AC26 wörtlich) |
 | mode | TEXT | NOT NULL, CHECK ∈ {echt, simuliert} (→ BR-130) |
 | blockiert_am | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| richtung | TEXT | CHECK ∈ {kauf, verkauf}, NOT NULL |
+| groesse | NUMERIC(20,8) | NOT NULL, CHECK > 0 |
+| vorgeschlagene_order | TEXT | NOT NULL (Klartext-Beschreibung, kein Order-Objekt) |
+| frist | TIMESTAMPTZ | NOT NULL (Ablauf) |
+| begruendung | TEXT | NOT NULL |
+| status | TEXT | CHECK ∈ {offen, bestaetigt, abgelehnt}, NOT NULL DEFAULT 'offen' |
+| mode | TEXT | CHECK ∈ {simuliert} — **kein** `echt`-Wert möglich (→ BR-141, AC30-MVP-Live-Sperre auf Schema-Ebene), NOT NULL DEFAULT 'simuliert' |
+| erstellt_am | TIMESTAMPTZ | NOT NULL DEFAULT now() |
+| entschieden_am | TIMESTAMPTZ | NULL, gesetzt bei Übergang `offen` → `bestaetigt`/`abgelehnt` |
 
 ---
 
@@ -796,6 +807,7 @@ Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 | transaction | (position_id), (instrument_id), (booked_at), (mode) | Steuer-/Dashboard-Historie |
 | risk_check_log | (position_id), (created_at) | Risiko-Audit |
 | warteliste_eintrag | (mode), (instrument_id), (asset_class_id), (blockiert_am) | Cockpit-Warteliste-View mode-Filter (→ BR-130), Titel-Join, FK-Index (sql/R05), Sortierung |
+| hybrid_entscheid | (status, mode, frist), (instrument_id) | offene Entscheide je Modus, nach Frist sortiert (AC29-Query, Covering-Index), Titel-Join |
 | depot_fill_dedup | PK (client_order_id), (instrument_id) | Idempotenz-Lookup (ADR-011/BR-134) + Fills je Titel |
 | portfolio_weight | (snapshot_id) | Gewichtungen je Snapshot |
 | rule_hypothesis | (asset_class_id) | Hypothesen je Anlageklasse |
@@ -871,6 +883,7 @@ Tabelle hat daher **keinen** Domänen-Schreibpfad — nur `app.demo.warteliste`
 | BR-138 | instrument.korrelations_cluster | Konzentration je Korrelations-Cluster wird unabhängig vom (nominellen) Sektorlimit geprüft — ein Titel eines bereits stark vertretenen Clusters kann gedeckelt/blockiert werden, auch wenn `gics_sector` noch Spielraum hätte (`docs/specs/risikomanagement.md` AC9, S-045) | App (`app.domain.risikomanagement.gate.pruefe_kauf_gate`) |
 | BR-139 | order.status / trade_fill | Bei Reject/Timeout wird KEIN Bestand (Position) verändert — nur ein bestätigter Fill (`filled`/`teilfill`) darf einen `trade_fill`-Eintrag und eine nachgelagerte Positions-Fortschreibung auslösen; `rejected`/`timeout` erzeugen ausschliesslich den `order`-Statuseintrag + Protokollierung (`docs/specs/ausfuehrung-paper.md` AC8, S-048) | App (`app.domain.execution.order_ausfuehrung.verarbeite_fill`) |
 | BR-140 | warteliste_eintrag | Reines Cockpit-Read-Modell OHNE Backend-Schreib-/Re-Prüf-Pfad — ausschliesslich der Demo-Seed (`app.demo.warteliste`) befüllt diese Tabelle; kein Gate-Direktaufruf, kein Import aus `app.domain.risikomanagement` in der UI-/Query-Schicht (`docs/specs/frontend-cockpit.md` AC26/AC28, Boundary AC2, S-079) | App (`app.demo.warteliste.seed_warteliste`) + `tests/architecture/test_ui_boundary.py` |
+| BR-141 | hybrid_entscheid.mode | Strukturell exklusiv `simuliert` — **kein** `echt`-Wert im Schema möglich (MVP-Live-Sperre, → BR-019, `docs/specs/frontend-cockpit.md` AC30, S-080): eine Bestätigung kann nie einen Live-Modus-Entscheid betreffen | DB-CHECK |
 
 ---
 
@@ -884,6 +897,7 @@ Der `coder` setzt in dieser Reihenfolge um (FK-Abhängigkeiten bestimmen sie):
 4. **Marktdaten (partitioniert):** `market_data_bronze` (+ Partitionen), `market_data_silver` (+ Partitionen), `market_data_gold` (+ Partitionen), `instrument_signal_bundle`.
 5. **Analyse:** `analysis_result` → `analysis_category_score`, `analysis_fact`, `hallucination_log`. `analysis_result` referenziert bei Einführung zusätzlich `category_weight_version.id` und `analysis_method_version.id` (AC10 — welche Konfigurationsversion der Analyse zugrunde lag), sobald diese Story `analysis_result` anlegt.
 6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`, `warteliste_eintrag` (FK nur auf `instrument`/`asset_class`, kein Order-Pfad-Bezug — Cockpit-Read-Modell, S-079).
+6. **Trading:** `position` → `exit_rule`, `order` → `trade_fill`, `transaction`, `risk_check_log`, `depot_fill_dedup`, `hybrid_entscheid` (FK nur auf `instrument`, S-080).
 7. **Aggregate:** `portfolio_snapshot` → `portfolio_weight`.
 8. **Lernschleife:** `rule_hypothesis` → `trial_registry` → `gate_result`.
 9. **Betrieb:** `kill_switch_status`, `heartbeat`, `alert_log`, `ingest_dead_letter`.
