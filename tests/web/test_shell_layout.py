@@ -34,6 +34,13 @@ generischen, über alle fünf Views parametrisierten Struktur-Tests ohne
 echte DB laufen. Die Depot-Inhalts-Tests (KPI-Tiles/Datentabelle/Live-
 Polling) liegen dediziert in `tests/web/test_ui_depot.py`.
 
+**Story S-081 (AC32/AC33):** `/ui/depot` lädt seit dieser Story zusätzlich
+`app.api.queries.depot_verlauf.hole_depot_verlauf` (`get_portfolio_
+snapshot_repository`-DI) — die `client`-Fixture überschreibt auch diese DI
+mit einer leeren Snapshot-Historie (Empty-State), damit die generischen
+Struktur-Tests weiterhin DB-frei laufen. Die Verlauf-Chart-Inhalts-Tests
+liegen dediziert in `tests/web/test_ui_depot.py`.
+
 **Story S-076 (AC18):** `/ui/konfiguration` liest seit dieser Story real
 über `lade_anlageklassen_konfiguration`/`lade_depotstrategie_konfiguration`
 (DI über `app.api.config`, DB-Session-gebunden) — die `_db_freie_view_
@@ -53,6 +60,7 @@ from fastapi.testclient import TestClient
 from app.api.config import get_anlageklassen_reader, get_depotstrategie_reader
 from app.api.depot import get_live_price_provider
 from app.api.depot import get_position_repository as get_depot_position_repository
+from app.api.depot_verlauf import get_portfolio_snapshot_repository
 from app.api.kandidaten import get_kandidaten_repository
 from app.api.system_status import get_gate_ergebnis_repository
 from app.api.trades import get_position_repository
@@ -140,10 +148,20 @@ class _KeinLivePriceProvider:
         return None
 
 
+class _LeereSnapshotRepository:
+    """S-081: `/ui/depot` liest zusätzlich den Depot-Verlauf — leere
+    Historie hält diese generischen Struktur-Tests DB-frei (Empty-State,
+    AC33)."""
+
+    def verlauf(self, *, mode, von=None, bis=None):
+        return []
+
+
 @pytest.fixture
 def client() -> TestClient:
     app.dependency_overrides[get_depot_position_repository] = lambda: _LeeresDepotRepository()
     app.dependency_overrides[get_live_price_provider] = lambda: _KeinLivePriceProvider()
+    app.dependency_overrides[get_portfolio_snapshot_repository] = lambda: _LeereSnapshotRepository()
     try:
         yield TestClient(app)
     finally:

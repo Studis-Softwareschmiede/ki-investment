@@ -13,6 +13,7 @@ from app.api.config import router as config_router
 from app.api.control import router as control_router
 from app.api.dashboard import router as dashboard_router
 from app.api.depot import router as depot_router
+from app.api.depot_verlauf import router as depot_verlauf_router
 from app.api.entscheide import router as entscheide_router
 from app.api.kandidaten import router as kandidaten_router
 from app.api.system_status import router as system_status_router
@@ -27,6 +28,7 @@ configure_web(app)
 # --- cockpit routers (append-only) ---
 app.include_router(dashboard_router)
 app.include_router(depot_router)
+app.include_router(depot_verlauf_router)
 app.include_router(ui_router)
 app.include_router(trades_router)
 app.include_router(config_router)

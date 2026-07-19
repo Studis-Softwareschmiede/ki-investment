@@ -32,7 +32,13 @@ unabhängig voneinander.
 sich unbedingt in diese Reihenfolge (nach Instrumente, unabhängig von den
 übrigen Schritten) — die Feature-Gate-Prüfung (`HYBRID_BESTAETIGUNG
 _AKTIV`) liegt bewusst INNERHALB des Moduls (No-Op, wenn aus), damit
-dieser Hook ein unbedingter Ein-Zeiler bleibt (Hot-Spot-Minimalität)."""
+dieser Hook ein unbedingter Ein-Zeiler bleibt (Hot-Spot-Minimalität).
+
+**S-081 (AC32/AC33, additiv):** `app.demo.depot_verlauf.seed_depot_verlauf`
+hängt sich nach `seed_depot` ein (unabhängig, keine FK-Abhängigkeit zu
+Positionen/Instrumenten — `portfolio_snapshot` referenziert nichts) und
+füllt 60 Tage deterministische Portfolio-Wert-Historie, damit der
+Depot-Verlauf-Chart (AC33) im Demo-Zustand gefüllt ist."""
 
 from __future__ import annotations
 
@@ -43,6 +49,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_engine
 from app.demo.depot import seed_depot
+from app.demo.depot_verlauf import seed_depot_verlauf
 from app.demo.entscheide import seed_entscheide
 from app.demo.instrumente import seed_instrumente
 from app.demo.kandidaten import seed_kandidaten
@@ -70,6 +77,7 @@ def seed_demo_data(session: Session) -> None:
     seed_instrumente(session)
     seed_marktdaten(session)
     seed_depot(session)
+    seed_depot_verlauf(session)
     seed_kandidaten(session)
     seed_gate_ampel(session)
     seed_warteliste(session)

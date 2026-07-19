@@ -1,7 +1,8 @@
 """Tests für die Depot-View (`app.api.ui.depot_view`/`depot_partial`,
-Story S-071, `docs/specs/frontend-cockpit.md` AC14/AC19).
+Story S-071, `docs/specs/frontend-cockpit.md` AC14/AC19; Story S-081
+ergänzt den Depot-Verlauf-Chart-Teil, AC32/AC33).
 
-Covers (frontend-cockpit): AC14, AC19
+Covers (frontend-cockpit): AC14, AC19, AC32, AC33
 
 HTTP-/Router-Ebenen-Test (coder/R06): deckt den vollen Pfad
 Request→Router→Jinja2-Rendering→Response-Body für `GET /ui/depot` UND den
@@ -13,19 +14,28 @@ HTML-Struktur), gegen dieselbe Query-Funktion (`hole_depot_uebersicht`) wie
 Deckt: KPI-Tiles (Portfolio-Wert/Cash-Quote/realisierter+unrealisierter
 G/V, §7.1/§2.3), Depot-Datentabelle (Klassen-Chip §2.4, G/V-Kodierung §2.3,
 "nicht bewertbar" = "—" E2), Empty-State je Modus (AC14), AC19-Live-
-Polling-Markup (`hx-trigger`, `aria-live`, Stale-Hinweis-Element E1) sowie
-den Partial-Endpunkt selbst (identisches Daten-Fragment, kein eigener
-Datenzusammenbau)."""
+Polling-Markup (`hx-trigger`, `aria-live`, Stale-Hinweis-Element E1), den
+Partial-Endpunkt selbst (identisches Daten-Fragment, kein eigener
+Datenzusammenbau) sowie (S-081) den Depot-Verlauf-Chart-Bereich: Empty-State
+bei < 2 Snapshots, Chart-Container + Werte-Zusammenfassung ab 2 Snapshots
+(AC32/AC33) — `depot_view` lädt seit S-081 zusätzlich
+`app.api.queries.depot_verlauf.hole_depot_verlauf`, jeder Test in dieser
+Datei überschreibt deshalb auch `get_portfolio_snapshot_repository`
+(Default: leere Historie -> Empty-State, konsistent mit dem bisherigen
+Verhalten dieser Datei vor S-081)."""
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.api.depot import get_live_price_provider, get_position_repository
+from app.api.depot_verlauf import get_portfolio_snapshot_repository
 from app.domain.portfolio.ports import ExitRegelnBestand, PositionsBestand
+from app.domain.portfolio_verlauf.ports import PortfolioSnapshotEintrag
 from app.main import app
 
 
@@ -84,9 +94,24 @@ class _FakeLivePriceProvider:
         return self._preise.get(titel_id)
 
 
-def _client(repository, live_price) -> TestClient:
+class _FakePortfolioSnapshotRepository:
+    """S-081 (AC32/AC33): Default leere Historie, damit die bestehenden
+    (vor S-081 geschriebenen) Tests dieser Datei unverändert den
+    Verlauf-Empty-State sehen, ohne jeden Aufruf einzeln anzupassen."""
+
+    def __init__(self, eintraege: list[PortfolioSnapshotEintrag] | None = None):
+        self._eintraege = eintraege or []
+
+    def verlauf(self, *, mode, von=None, bis=None):
+        return self._eintraege
+
+
+def _client(repository, live_price, snapshot_repository=None) -> TestClient:
     app.dependency_overrides[get_position_repository] = lambda: repository
     app.dependency_overrides[get_live_price_provider] = lambda: live_price
+    app.dependency_overrides[get_portfolio_snapshot_repository] = lambda: (
+        snapshot_repository or _FakePortfolioSnapshotRepository()
+    )
     return TestClient(app)
 
 
@@ -280,3 +305,92 @@ def test_ungueltiger_mode_liefert_validierungsfehler_kein_crash() -> None:
     resp = client.get("/ui/depot", params={"mode": "unbekannt"})
 
     assert resp.status_code == 422
+
+
+def test_depot_verlauf_ohne_snapshots_zeigt_definierten_empty_state() -> None:
+    """@trace frontend-cockpit#AC33 — < 2 Snapshots -> definierter
+    Empty-State, kein Chart-Container, kein Fake-Wert."""
+    client = _client(
+        _FakePositionRepository(positionen=[]),
+        _FakeLivePriceProvider({}),
+        _FakePortfolioSnapshotRepository([]),
+    )
+
+    html = client.get("/ui/depot").text
+
+    assert 'data-testid="depot-verlauf-empty"' in html
+    assert "Noch keine Verlaufsdaten — Aufzeichnung läuft." in html
+    assert 'data-testid="depot-verlauf-chart"' not in html
+
+
+def test_depot_verlauf_mit_einem_snapshot_zeigt_ebenfalls_empty_state() -> None:
+    """@trace frontend-cockpit#AC33 — genau 1 Snapshot ist noch KEIN
+    Verlauf (< 2 Punkte lassen sich nicht sinnvoll als Zeitreihe zeichnen)."""
+    eintraege = [
+        PortfolioSnapshotEintrag(
+            zeitpunkt=datetime(2026, 6, 1, 22, 0, tzinfo=UTC),
+            portfolio_wert=Decimal("5000.00"),
+            cash_quote=Decimal("9.500"),
+        )
+    ]
+    client = _client(
+        _FakePositionRepository(positionen=[]),
+        _FakeLivePriceProvider({}),
+        _FakePortfolioSnapshotRepository(eintraege),
+    )
+
+    html = client.get("/ui/depot").text
+
+    assert 'data-testid="depot-verlauf-empty"' in html
+    assert 'data-testid="depot-verlauf-chart"' not in html
+
+
+def test_depot_verlauf_mit_zwei_snapshots_zeigt_chart_container_und_werttabelle() -> None:
+    """@trace frontend-cockpit#AC32,AC33 — ab 2 Snapshots: Chart-Container
+    (`data-mode`/`data-verlauf-url` für das client-seitige JS) + begleitende
+    A11y-Werte-Zusammenfassung (Zeitraum, Anfangs-/Endwert, Veränderung,
+    §2.3-G/V-Kodierung fürs End-Delta, nie nur Farbe -> D3)."""
+    eintraege = [
+        PortfolioSnapshotEintrag(
+            zeitpunkt=datetime(2026, 6, 1, 22, 0, tzinfo=UTC),
+            portfolio_wert=Decimal("5000.00"),
+            cash_quote=Decimal("9.500"),
+        ),
+        PortfolioSnapshotEintrag(
+            zeitpunkt=datetime(2026, 6, 2, 22, 0, tzinfo=UTC),
+            portfolio_wert=Decimal("5200.00"),
+            cash_quote=Decimal("9.000"),
+        ),
+    ]
+    client = _client(
+        _FakePositionRepository(positionen=[]),
+        _FakeLivePriceProvider({}),
+        _FakePortfolioSnapshotRepository(eintraege),
+    )
+
+    html = client.get("/ui/depot", params={"mode": "simuliert"}).text
+
+    assert 'data-testid="depot-verlauf-empty"' not in html
+    assert 'data-testid="depot-verlauf-chart"' in html
+    assert 'data-mode="simuliert"' in html
+    assert "/api/depot/verlauf" in html
+    assert 'data-testid="depot-verlauf-werttabelle"' in html
+    assert 'data-testid="depot-verlauf-anfangswert"' in html
+    assert "CHF 5000.00" in html
+    assert "CHF 5200.00" in html
+    # Endwert - Anfangswert = 200 -> positiv, Vorzeichen + Glyph + Farbe (D3).
+    assert 'data-testid="depot-verlauf-delta"' in html
+    assert 'data-gv="positiv"' in html
+    assert "▲ +200.00" in html
+
+
+def test_depot_verlauf_lightweight_charts_script_wird_eingebunden() -> None:
+    """@trace frontend-cockpit#AC33 — vendored Chart-Lib (Owner-Entscheidung
+    2026-07-19), kein CDN (AC12)."""
+    client = _client(_FakePositionRepository(positionen=[]), _FakeLivePriceProvider({}))
+
+    html = client.get("/ui/depot").text
+
+    assert "vendor/lightweight-charts.standalone.production.js" in html
+    assert "js/depot-verlauf.js" in html
+    assert "//cdn" not in html

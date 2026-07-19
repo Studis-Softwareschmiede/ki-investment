@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/gv.html" import gv %}
 {% block title %}Depot — Betriebs-Cockpit{% endblock %}
 {% block head %}
 <link rel="stylesheet" href="{{ url_for('static', path='css/views-depot.css') }}">
@@ -31,4 +32,55 @@
 <p id="depot-stale" class="stale-hinweis" hidden data-testid="depot-stale-hinweis" role="status">
   ⚠ veraltet (seit <span id="depot-stale-zeit"></span>)
 </p>
+
+{# Depot-Verlauf-Chart (Story S-081, `docs/specs/frontend-cockpit.md`
+   AC32/AC33) — bewusst AUSSERHALB des obigen `depot-live`-Poll-Bereichs
+   (kein Chart-Neuaufbau je 12s-Poll): eigener Container, eigenes
+   Nachladen per `depot-verlauf.js` (client-seitig, ein einmaliger
+   `fetch()` gegen `GET /api/depot/verlauf`). Der Empty-State-Entscheid
+   (< 2 Snapshots) + die A11y-Werte-Zusammenfassung laufen server-seitig
+   über dieselbe Query-Funktion wie die JSON-Route (AC1). #}
+<section class="depot-verlauf" aria-label="Depot-Verlauf" data-testid="depot-verlauf">
+  <h2>Verlauf</h2>
+  {% if verlauf.eintraege|length < 2 %}
+  <p class="empty-state" data-testid="depot-verlauf-empty">
+    Noch keine Verlaufsdaten — Aufzeichnung läuft.
+  </p>
+  {% else %}
+  <div
+    id="depot-verlauf-chart"
+    class="depot-verlauf-chart"
+    data-testid="depot-verlauf-chart"
+    data-mode="{{ mode }}"
+    data-verlauf-url="{{ url_for('depot_verlauf') }}"
+    role="img"
+    aria-label="Depot-Verlauf {{ mode }}: Portfolio-Wert über die Zeit, siehe begleitende Werttabelle"
+  ></div>
+  <table class="depot-verlauf-werttabelle" data-testid="depot-verlauf-werttabelle">
+    <caption class="sr-only">Depot-Verlauf — Werte-Zusammenfassung</caption>
+    <tbody>
+      <tr>
+        <th scope="row">Zeitraum</th>
+        <td>{{ verlauf.eintraege[0].zeitpunkt.strftime("%d.%m.%Y") }} – {{ verlauf.eintraege[-1].zeitpunkt.strftime("%d.%m.%Y") }}</td>
+      </tr>
+      <tr>
+        <th scope="row">Anfangswert</th>
+        <td data-testid="depot-verlauf-anfangswert">CHF {{ "%.2f"|format(verlauf.eintraege[0].portfolio_wert) }}</td>
+      </tr>
+      <tr>
+        <th scope="row">Endwert</th>
+        <td data-testid="depot-verlauf-endwert">CHF {{ "%.2f"|format(verlauf.eintraege[-1].portfolio_wert) }}</td>
+      </tr>
+      <tr>
+        <th scope="row">Veränderung</th>
+        <td>{{ gv(verlauf.eintraege[-1].portfolio_wert - verlauf.eintraege[0].portfolio_wert, "depot-verlauf-delta") }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='vendor/lightweight-charts.standalone.production.js') }}"></script>
+<script src="{{ url_for('static', path='js/depot-verlauf.js') }}"></script>
 {% endblock %}

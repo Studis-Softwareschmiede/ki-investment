@@ -8,7 +8,7 @@ Anlageklassen sind Konfiguration, keine Code-Grenze).
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -2159,4 +2160,65 @@ class HybridEntscheid(Base):
         return (
             f"HybridEntscheid(instrument_id={self.instrument_id!r}, "
             f"richtung={self.richtung!r}, status={self.status!r})"
+        )
+
+
+class PortfolioSnapshot(Base):
+    """Portfolio-Wert-Snapshot je Zeitpunkt (data-model.md §5
+    `portfolio_snapshot`, Spec `docs/specs/frontend-cockpit.md` AC32,
+    Story S-081).
+
+    War seit S-036 als Schema für eine spätere Persistenz-/Historien-Story
+    reserviert (nie migriert, keine Domain-Berechnung nutzte diese Tabelle
+    bislang — die Portfolio-Aggregate selbst bleiben laut S-036 eine live
+    berechnete Domain-Funktion). S-081 migriert genau diese Tabelle als das
+    AC32-Read-Modell für den Depot-Verlauf-Chart (AC33): ein periodischer
+    Scheduler-Job (`app.scheduler.portfolio_snapshot_job
+    .nimm_portfolio_snapshot_auf`) berechnet `total_value_chf`/
+    `cash_quote_pct` ausschliesslich über die bestehenden Lese-Ports
+    (`PositionRepository`, `LivePriceProvider`) und schreibt eine neue
+    Zeile — **kein** Write-on-Read, die Query-/UI-Schicht (`app/api/
+    queries/**`, `app/api/ui.py`) bleibt strikt read-only (Boundary AC2
+    unverändert). `portfolio_weight` (Klassen-/Branchen-Split je Snapshot)
+    bleibt bewusst **unmigriert reserviert** — AC32 nennt diesen Split
+    ausdrücklich optional, der Depot-Verlauf-Chart (AC33) braucht nur die
+    Wert-Zeitreihe.
+
+    `snapshot_datum` (S-081-Ergänzung, nicht im ursprünglich reservierten
+    Schema): der aus `snapshot_at` abgeleitete Kalendertag (UTC) — Grundlage
+    des `UNIQUE (mode, snapshot_datum)`-Constraints (→ BR-142): ein
+    erneuter Job-Lauf am selben Tag erzeugt keine Duplikat-Zeile. Der Job
+    fängt die daraus resultierende `IntegrityError` ab (Insert-Then-Catch,
+    kein Read-then-Write-Dedupe — Lehre aus `app/db/silver.py`/`bronze.py`,
+    `.claude/lessons/coder.md`: ein reines "existiert schon?"-Read-then-
+    Write ohne Advisory-Lock/Unique-Constraint dupliziert unter
+    Nebenläufigkeit)."""
+
+    __tablename__ = "portfolio_snapshot"
+    __table_args__ = (
+        CheckConstraint("mode IN ('echt', 'simuliert')", name="ck_portfolio_snapshot_mode"),
+        UniqueConstraint(
+            "mode", "snapshot_datum", name="uq_portfolio_snapshot_mode_snapshot_datum"
+        ),
+        Index("ix_portfolio_snapshot_mode_snapshot_at", "mode", "snapshot_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+    )
+    snapshot_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+    snapshot_datum: Mapped[date] = mapped_column(Date, nullable=False)
+    total_value_chf: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    cash_quote_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    mode: Mapped[str] = mapped_column(String, nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover — Debug-Hilfe, kein Verhalten
+        return (
+            f"PortfolioSnapshot(mode={self.mode!r}, snapshot_datum={self.snapshot_datum!r}, "
+            f"total_value_chf={self.total_value_chf!r})"
         )

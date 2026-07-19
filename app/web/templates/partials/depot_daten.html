@@ -8,23 +8,17 @@
 
    Anlageklassen-Kürzel (`design.md` §2.4) — rein präsentational, hier
    lokal statt in `app/api/ui.py` (Hot-Spot-Konvention: nur die Depot-
-   Route ändern; die Kürzel-Zuordnung ist reine Anzeige, kein Domänenwert). #}
+   Route ändern; die Kürzel-Zuordnung ist reine Anzeige, kein Domänenwert).
+
+   `gv`-Macro (design.md §2.3 G/V-Kodierung) seit Story S-081 (AC33)
+   ausgelagert nach `macros/gv.html` (Wiederverwendung durch
+   `views/depot.html`s Verlauf-Delta-Zelle, siehe dortiger Kommentar) —
+   Verhalten unverändert. #}
+{% from "macros/gv.html" import gv %}
 {% set ac_kuerzel = {
   1: "AKT", 2: "ETF", 3: "CSH", 4: "OBL", 5: "FND",
   6: "IMM", 7: "CRY", 8: "ROH", 9: "INF", 10: "FX", 11: "DER"
 } %}
-
-{% macro gv(value, testid) %}
-{%- if value is none -%}
-<span class="gv gv--unbekannt" data-testid="{{ testid }}" data-gv="unbekannt">—</span>
-{%- elif value > 0 -%}
-<span class="gv gv--positiv" data-testid="{{ testid }}" data-gv="positiv">▲ +{{ "%.2f"|format(value) }}</span>
-{%- elif value < 0 -%}
-<span class="gv gv--negativ" data-testid="{{ testid }}" data-gv="negativ">▼ −{{ "%.2f"|format(-value) }}</span>
-{%- else -%}
-<span class="gv gv--neutral" data-testid="{{ testid }}" data-gv="neutral">▬ ±{{ "%.2f"|format(value) }}</span>
-{%- endif -%}
-{% endmacro %}
 
 <section class="tiles" aria-label="Depot-Kennzahlen">
   <article class="tile" data-testid="tile-portfolio-wert" aria-labelledby="tile-label-portfolio-wert">

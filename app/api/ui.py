@@ -18,7 +18,20 @@ Datentabelle über `app.api.queries.depot.hole_depot_uebersicht` (dieselbe
 Query-Funktion wie `GET /api/depot`, AC1, kein zweiter Datenzusammenbau)
 plus einen kleinen HTMX-Partial-Endpunkt (`/ui/depot/partial`) fürs
 Live-Polling (AC19). Der in AC14 ursprünglich genannte Depot-Verlauf-Chart
-ist per Spec v3 nach S-081 (AC32/AC33, Snapshot-Read-Modell) ausgelagert.
+war per Spec v3 nach S-081 (AC32/AC33, Snapshot-Read-Modell) ausgelagert.
+
+Story S-081 (AC32/AC33) ergänzt den **Depot-Verlauf-Chart**: `depot_view`
+lädt zusätzlich `app.api.queries.depot_verlauf.hole_depot_verlauf`
+(dieselbe Query-Funktion wie `GET /api/depot/verlauf`, AC1) — bewusst
+AUSSERHALB des `depot-live`-Poll-Bereichs (AC19 "kein Layout-Sprung/
+Flackern je Poll" gilt nur für die alle-12s gepollten KPI-Tiles/
+Datentabelle; der Verlauf ändert sich höchstens täglich, ein eigener
+Chart-Neuaufbau je Poll wäre kontraproduktiv). Das Chart-Rendering selbst
+(TradingView Lightweight Charts, Owner-Entscheidung 2026-07-19) läuft
+client-seitig über `app/web/static/js/depot-verlauf.js`, das denselben
+`GET /api/depot/verlauf`-Endpunkt per `fetch()` konsumiert — die
+Server-Seite liefert hier nur den Empty-State-Entscheid + die begleitende
+Werte-Zusammenfassung (A11y-Pflicht, AC33).
 
 Story S-076 (AC18) befüllt die **Konfigurations-View** (`/ui/konfiguration`):
 Anlageklassen-Toggles (§7.9, BR-018-Warn-Band) + Depotstrategie-Anzeige —
@@ -62,6 +75,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.config import get_anlageklassen_reader, get_depotstrategie_reader
 from app.api.depot import get_live_price_provider
 from app.api.depot import get_position_repository as get_depot_position_repository
+from app.api.depot_verlauf import get_portfolio_snapshot_repository
 from app.api.entscheide import get_hybrid_entscheidung_repository
 from app.api.kandidaten import get_kandidaten_repository
 from app.api.queries.config import (
@@ -69,6 +83,7 @@ from app.api.queries.config import (
     lade_depotstrategie_konfiguration,
 )
 from app.api.queries.depot import hole_depot_uebersicht
+from app.api.queries.depot_verlauf import hole_depot_verlauf
 from app.api.queries.entscheide import offene_entscheide_uebersicht
 from app.api.queries.kandidaten import kandidat_detail, liste_kandidaten
 from app.api.queries.system_status import system_status_uebersicht
@@ -85,6 +100,7 @@ from app.contracts.risikomanagement import DepotstrategieKonfiguration
 from app.domain.hybrid_entscheidung.ports import HybridEntscheidungRepository
 from app.domain.lernschleife.ports import GateErgebnisRepository
 from app.domain.portfolio.ports import LivePriceProvider, PositionRepository
+from app.domain.portfolio_verlauf.ports import PortfolioSnapshotRepository
 from app.domain.scoring.ports import KandidatenRepository
 from app.domain.warteliste.ports import WartelisteRepository
 from app.web.kandidaten.anlageklassen import anlageklasse_kuerzel
@@ -126,14 +142,22 @@ def depot_view(
     mode: Modus = "echt",
     repository: PositionRepository = Depends(get_depot_position_repository),
     live_price: LivePriceProvider = Depends(get_live_price_provider),
+    snapshot_repository: PortfolioSnapshotRepository = Depends(get_portfolio_snapshot_repository),
 ) -> object:
     """AC14: rendert die Depot-View gegen dieselbe Query-Funktion wie
     `GET /api/depot` (AC1, kein zweiter Datenzusammenbau) — die DI-Factories
     stammen bewusst aus `app.api.depot` statt hier ein eigenes
     `sqlalchemy`/`app.db.session`-Import anzulegen (Boundary AC2,
-    `tests/architecture/test_ui_boundary.py`)."""
+    `tests/architecture/test_ui_boundary.py`).
+
+    AC32/AC33 (S-081): lädt zusätzlich den Depot-Verlauf über dieselbe
+    Query-Funktion wie `GET /api/depot/verlauf` (AC1) — für den
+    Empty-State-Entscheid (< 2 Snapshots) und die begleitende
+    Werte-Zusammenfassung; die Chart-Zeichnung selbst holt sich die Daten
+    client-seitig erneut über denselben JSON-Endpunkt (Moduldocstring)."""
     depot = hole_depot_uebersicht(mode=mode, repository=repository, live_price=live_price)
-    return _render(request, active_view="depot", depot=depot, mode=mode)
+    verlauf = hole_depot_verlauf(snapshot_repository, mode=mode)
+    return _render(request, active_view="depot", depot=depot, mode=mode, verlauf=verlauf)
 
 
 @router.get("/depot/partial", name="ui_depot_partial")
