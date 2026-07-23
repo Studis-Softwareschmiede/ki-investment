@@ -9,6 +9,11 @@ on:
     # `master`. GitHub-Actions-Trigger können keine Variable lesen → beide listen, sonst
     # baut die CI auf einem master-Repo NIE (stiller Ausfall, kein ghcr-Image).
     branches: [main, master]
+    paths-ignore:
+      - 'board/**'
+      - 'docs/**'
+      - '**/*.md'
+      - '.claude/**'
 permissions:
   contents: read
   packages: write
