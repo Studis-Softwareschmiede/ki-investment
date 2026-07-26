@@ -2,7 +2,7 @@ id: F-006
 title: Analyse-Framework (Score-Engine, Schwellen, Spinnennetz)
 goal: Deterministische Score-Engine, die 5 Kategorien zu Gesamtscore, Signal und Spinnennetz-Datenbasis
   verrechnet.
-status: Backlog
+status: Done
 priority: P0
 spec: docs/specs/analyse-framework.md
 definition_of_done: null
@@ -13,6 +13,7 @@ stories:
 - S-009
 - S-010
 - S-011
-progress: 0/3 done
+progress: 3/3 done
 created_at: '2026-07-12T10:08:44Z'
-updated_at: '2026-07-12T10:12:16Z'
+updated_at: '2026-07-26T19:19:53Z'
+done_at: '2026-07-26T19:19:53Z'

@@ -1,7 +1,7 @@
 id: F-001
 title: 'Projekt-Setup: Scaffold-Restpunkte'
 goal: Vom Bootstrap offen gelassene Setup-Arbeiten (Migration-Tool-Einrichtung) abschliessen
-status: Backlog
+status: Done
 priority: P1
 spec: null
 definition_of_done: null
@@ -11,6 +11,8 @@ owner: null
 stories:
 - S-001
 - S-002
-progress: 1/2 done
+- S-063
+progress: 3/3 done
 created_at: '2026-07-12T09:13:44Z'
-updated_at: '2026-07-12T11:11:47Z'
+updated_at: '2026-07-26T19:19:51Z'
+done_at: '2026-07-26T19:19:51Z'

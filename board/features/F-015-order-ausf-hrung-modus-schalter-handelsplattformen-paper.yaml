@@ -2,7 +2,7 @@ id: F-015
 title: Order-Ausführung, Modus-Schalter & Handelsplattformen (Paper)
 goal: Führt gebilligte Käufe und Verkaufsaufträge über einen gemeinsamen echt/simuliert-Code-Pfad
   aus (MVP nur Paper) und meldet Fills/Slippage ans Depot.
-status: Backlog
+status: Done
 priority: P1
 spec: docs/specs/ausfuehrung-paper.md
 definition_of_done: null
@@ -15,6 +15,7 @@ stories:
 - S-047
 - S-048
 - S-049
-progress: 0/5 done
+progress: 5/5 done
 created_at: '2026-07-12T10:08:45Z'
-updated_at: '2026-07-12T10:12:17Z'
+updated_at: '2026-07-26T19:19:56Z'
+done_at: '2026-07-26T19:19:56Z'

@@ -5,7 +5,7 @@ goal: Fünf Kern-Views (Depot · Kandidaten/Scores · Trades/TCA · System-Statu
   Control-Plane ausliefern; Read-Modell-Gap (Kandidaten-Analysen + depotweite Trade-Historie)
   rein lesend schliessen; env-gateter Demo-Seed für gefüllte, Playwright-testbare
   Views.
-status: Backlog
+status: Done
 priority: P1
 spec: docs/specs/frontend-cockpit.md
 definition_of_done: null
@@ -34,6 +34,7 @@ stories:
 - S-079
 - S-080
 - S-081
-progress: 0/18 done
+progress: 18/18 done
 created_at: '2026-07-18T04:23:47Z'
-updated_at: '2026-07-18T06:20:00Z'
+updated_at: '2026-07-26T19:19:57Z'
+done_at: '2026-07-26T19:19:57Z'
